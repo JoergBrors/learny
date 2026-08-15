@@ -1,0 +1,81 @@
+@inherits LayoutComponentBase
+@inject IJSRuntime JS
+@inject AppConfig Config
+@inject AuthenticationStateProvider AuthState
+@inject CardRepository Repo
+
+<div class="app-shell">
+    <AuthorizeView>
+        <Authorized>
+            <header class="topbar">
+                <div class="topbar-inner">
+                    <a href="/" class="brand">
+                        <span class="brand-mark" aria-hidden="true">
+                            <svg viewBox="0 0 64 64" width="22" height="22"><rect x="6" y="10" width="52" height="44" rx="10" fill="currentColor"/><path d="M18 24h28M18 33h28M18 42h16" stroke="var(--surface)" stroke-width="4" stroke-linecap="round"/></svg>
+                        </span>
+                        <span>LearnCards</span>
+                    </a>
+                    <div class="topbar-actions">
+                        <span class="user-chip" title="@context.User.Identity?.Name">
+                            @Initials(context.User.Identity?.Name)
+                        </span>
+                        <button class="icon-btn" @onclick="ToggleTheme" title="Hell-/Dunkelmodus umschalten" aria-label="Hell-/Dunkelmodus umschalten">
+                            <span aria-hidden="true">@(_dark ? "☀️" : "🌙")</span>
+                        </button>
+                        <a class="btn btn-ghost btn-sm" href="/auth/logout">Abmelden</a>
+                    </div>
+                </div>
+            </header>
+        </Authorized>
+    </AuthorizeView>
+
+    <main id="main-content" class="main">
+        @Body
+    </main>
+</div>
+
+<div id="blazor-error-ui" data-nosnippet>
+    Ein unerwarteter Fehler ist aufgetreten.
+    <a href="." class="reload">Neu laden</a>
+    <span class="dismiss">🗙</span>
+</div>
+
+@code {
+    private bool _dark;
+    private string _userSub = "";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                var auth = await AuthState.GetAuthenticationStateAsync();
+                _userSub = auth.User.FindFirst("sub")?.Value ?? "";
+                var storedTheme = string.IsNullOrWhiteSpace(_userSub) ? "" : await Repo.GetThemeAsync(_userSub);
+                if (storedTheme is "dark" or "light")
+                    await JS.InvokeVoidAsync("lcTheme.set", storedTheme);
+                _dark = await JS.InvokeAsync<bool>("lcTheme.isDark");
+                StateHasChanged();
+            }
+            catch { /* Prerender ohne JS */ }
+        }
+    }
+
+    private async Task ToggleTheme()
+    {
+        _dark = !_dark;
+        var theme = _dark ? "dark" : "light";
+        await JS.InvokeVoidAsync("lcTheme.set", theme);
+        if (!string.IsNullOrWhiteSpace(_userSub))
+            await Repo.SaveThemeAsync(_userSub, theme);
+        StateHasChanged();
+    }
+
+    private static string Initials(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return "?";
+        var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length >= 2 ? $"{char.ToUpper(parts[0][0])}{char.ToUpper(parts[^1][0])}" : name[..Math.Min(2, name.Length)].ToUpper();
+    }
+}

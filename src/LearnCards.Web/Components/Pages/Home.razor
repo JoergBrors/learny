@@ -1,0 +1,310 @@
+@page "/"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject CardRepository Repo
+@inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthState
+
+<PageTitle>Lernmodule — LearnCards</PageTitle>
+
+<div class="container">
+    <div class="page-head">
+        <div>
+            <h1>Lernmodule</h1>
+            <p class="muted">Willkommen, @_userName</p>
+        </div>
+        <div class="page-head-actions">
+            <label class="btn btn-primary file-btn">
+                📥 JSON-Import
+                <InputFile OnChange="HandleImport" accept=".json" disabled="@_importing" />
+            </label>
+            <button class="btn btn-ghost" @onclick="() => _showCreate = !_showCreate">＋ Neues Modul</button>
+        </div>
+    </div>
+
+    @if (_showCreate)
+    {
+        <div class="card panel create-module">
+            <h2 class="panel-title">Neues Modul anlegen</h2>
+            <div class="form-row">
+                <input class="input" placeholder="Name, z. B. Azure Networking L400" @bind="_newName" />
+                <input class="input" placeholder="Beschreibung (optional)" @bind="_newDescription" />
+                <input class="input input-icon" placeholder="📚" maxlength="4" @bind="_newIcon" title="Icon (Emoji)" />
+                <input class="input input-color" type="color" @bind="_newColor" title="Modulfarbe" />
+                <button class="btn btn-primary" @onclick="CreateModule" disabled="@string.IsNullOrWhiteSpace(_newName)">Anlegen</button>
+            </div>
+        </div>
+    }
+
+    @if (_message is not null)
+    {
+        <div class="alert @(_messageOk ? "alert-ok" : "alert-error")" role="status">@_message</div>
+    }
+
+    @if (_importing)
+    {
+        <div class="card panel">
+            <h2 class="panel-title">Import läuft</h2>
+            <div class="progress-head" role="progressbar" aria-valuenow="@_importProgressPercent" aria-valuemin="0" aria-valuemax="100">
+                <div class="progress-labels">
+                    <span>@_importProgressLabel</span>
+                    <span>@_importProgressPercent%</span>
+                </div>
+                <div class="progress-track"><div class="progress-fill" style="width:@($"{_importProgressPercent}%")"></div></div>
+            </div>
+        </div>
+    }
+
+    @if (_showImportPreview && _importAnalysis is not null)
+    {
+        <div class="card panel create-module">
+            <h2 class="panel-title">Import-Analyse: @_importFileName</h2>
+            <p class="muted">
+                @_importAnalysis.TotalCards Karten, @_importAnalysis.ModuleCount Module,
+                @_importAnalysis.CategoryCount Kategorien, @_importAnalysis.ArchivedCount archiviert.
+            </p>
+            @if (_importAnalysis.ModuleNames.Count > 0)
+            {
+                <p class="muted">Module: @string.Join(", ", _importAnalysis.ModuleNames)</p>
+            }
+            @if (_importAnalysis.Errors.Count > 0)
+            {
+                <div class="alert alert-error" role="status">
+                    ❌ Analyse fehlgeschlagen:
+                    @string.Join(" | ", _importAnalysis.Errors)
+                </div>
+            }
+            else
+            {
+                <div class="alert alert-ok" role="status">
+                    ✅ JSON-Struktur ist gültig. Der Import wurde noch nicht ausgeführt.
+                </div>
+            }
+            <div class="page-head-actions">
+                <button class="btn btn-primary" @onclick="ConfirmImport" disabled="@(_importing || _importAnalysis.Errors.Count > 0)">Import bestätigen</button>
+                <button class="btn btn-ghost" @onclick="CancelImport" disabled="@_importing">Verwerfen</button>
+            </div>
+        </div>
+    }
+
+    @if (_loading)
+    {
+        <div class="spinner-wrap" aria-busy="true"><div class="spinner" role="status"></div></div>
+    }
+    else if (_modules.Count == 0)
+    {
+        <div class="empty-state">
+            <div class="empty-icon" aria-hidden="true">📚</div>
+            <p class="empty-title">Noch keine Module vorhanden.</p>
+            <p class="muted">Importiere Karten via JSON oder MCP, um loszulegen.</p>
+        </div>
+    }
+    else
+    {
+        <div class="module-grid">
+            @foreach (var mod in _modules)
+            {
+                <article class="module-card" tabindex="0" role="link"
+                         aria-label="@($"Modul {mod.Name}: {mod.ActiveCount} aktive Karten")"
+                         @onclick="() => Open(mod.Id)"
+                         @onkeydown='e => { if (e.Key == "Enter") Open(mod.Id); }'>
+                    <div class="module-stripe" style="background:@mod.Color" aria-hidden="true"></div>
+                    <div class="module-body">
+                        <div class="module-actions">
+                            @if (_pendingDeleteModuleId == mod.Id)
+                            {
+                                <button class="btn btn-danger btn-sm" @onclick:stopPropagation="true" @onclick="() => ConfirmDeleteModule(mod.Id)">Löschen</button>
+                                <button class="btn btn-ghost btn-sm" @onclick:stopPropagation="true" @onclick="CancelDeleteModule">Abbrechen</button>
+                            }
+                            else
+                            {
+                                <button class="icon-btn" title="Modul löschen" aria-label="@($"{mod.Name} löschen")"
+                                        @onclick:stopPropagation="true" @onclick="() => AskDeleteModule(mod.Id)">
+                                    🗑
+                                </button>
+                            }
+                        </div>
+                        <div class="module-top">
+                            <span class="module-icon" aria-hidden="true">@mod.Icon</span>
+                            <span class="pill">@mod.ActiveCount Karten</span>
+                        </div>
+                        <h2>@mod.Name</h2>
+                        @if (!string.IsNullOrEmpty(mod.Description))
+                        {
+                            <p class="module-desc">@mod.Description</p>
+                        }
+                        <div class="module-meta">
+                            <span>@mod.ActiveCount aktiv</span>
+                            <span class="dot">·</span>
+                            <span>@(mod.CardCount - mod.ActiveCount) archiviert</span>
+                        </div>
+                    </div>
+                </article>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private List<ModuleInfo> _modules = new();
+    private bool _loading = true;
+    private bool _importing;
+    private string? _message;
+    private bool _messageOk;
+    private string _userName = "";
+    private bool _showCreate;
+    private string _newName = "";
+    private string _newDescription = "";
+    private string _newIcon = "📚";
+    private string _newColor = "#2AA79B";
+    private List<CardJson>? _pendingImportCards;
+    private ImportAnalysis? _importAnalysis;
+    private bool _showImportPreview;
+    private string _importFileName = "";
+    private int _importProgressPercent;
+    private string _importProgressLabel = "";
+    private string? _pendingDeleteModuleId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _userName = auth.User.Identity?.Name ?? "";
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        _modules = await Repo.ListModulesAsync();
+        _loading = false;
+    }
+
+    private void Open(string id) => Nav.NavigateTo($"/module/{id}");
+
+    private async Task CreateModule()
+    {
+        if (string.IsNullOrWhiteSpace(_newName)) return;
+        await Repo.CreateModuleAsync(new ModuleCreateRequest
+        {
+            Name = _newName, Description = _newDescription, Icon = _newIcon, Color = _newColor,
+        });
+        _newName = ""; _newDescription = ""; _showCreate = false;
+        await ReloadAsync();
+    }
+
+    private async Task HandleImport(InputFileChangeEventArgs e)
+    {
+        _message = null;
+        try
+        {
+            using var stream = e.File.OpenReadStream(maxAllowedSize: 20 * 1024 * 1024);
+            using var reader = new StreamReader(stream);
+            var content = await reader.ReadToEndAsync();
+            var cards = Api.ApiEndpoints.ParseCardsJson(content);
+            _pendingImportCards = cards;
+            _importFileName = e.File.Name;
+            _importAnalysis = AnalyzeImport(cards);
+            _showImportPreview = true;
+            _message = _importAnalysis.Errors.Count == 0
+                ? $"Analyse abgeschlossen: {_importAnalysis.TotalCards} Karten in {_importAnalysis.ModuleCount} Modulen."
+                : "Analyse abgeschlossen: Import wegen Validierungsfehlern noch nicht freigegeben.";
+            _messageOk = _importAnalysis.Errors.Count == 0;
+        }
+        catch (Exception ex)
+        {
+            _message = $"❌ Fehler: {ex.Message}";
+            _messageOk = false;
+            CancelImport();
+        }
+    }
+
+    private async Task ConfirmImport()
+    {
+        if (_pendingImportCards is null || _importAnalysis is null || _importAnalysis.Errors.Count > 0) return;
+
+        _importing = true;
+        _message = null;
+        _importProgressPercent = 0;
+        _importProgressLabel = "Import wird vorbereitet";
+        try
+        {
+            var (created, updated, skipped) = await Repo.ImportAsync(_pendingImportCards, overwriteExisting: false, async progress =>
+            {
+                _importProgressPercent = Math.Clamp((int)Math.Round(progress.Processed * 100d / Math.Max(progress.Total, 1)), 0, 100);
+                _importProgressLabel = $"Karte {progress.Processed} von {progress.Total}: {progress.Module} / {progress.Term}";
+                await InvokeAsync(StateHasChanged);
+            });
+            _message = $"✅ {created} erstellt, {updated} aktualisiert, {skipped} übersprungen";
+            _messageOk = true;
+            CancelImport();
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            _message = $"❌ Fehler: {ex.Message}";
+            _messageOk = false;
+        }
+        finally { _importing = false; }
+    }
+
+    private void CancelImport()
+    {
+        _pendingImportCards = null;
+        _importAnalysis = null;
+        _showImportPreview = false;
+        _importFileName = "";
+        _importProgressPercent = 0;
+        _importProgressLabel = "";
+    }
+
+    private void AskDeleteModule(string id) => _pendingDeleteModuleId = id;
+
+    private void CancelDeleteModule() => _pendingDeleteModuleId = null;
+
+    private async Task ConfirmDeleteModule(string id)
+    {
+        var deleted = await Repo.DeleteModuleAsync(id);
+        _pendingDeleteModuleId = null;
+        _message = deleted == 0 ? "❌ Modul wurde nicht gefunden." : "✅ Modul wurde gelöscht.";
+        _messageOk = deleted > 0;
+        await ReloadAsync();
+    }
+
+    private static ImportAnalysis AnalyzeImport(List<CardJson> cards)
+    {
+        var modules = cards.Select(c => c.Module?.Trim() ?? "")
+            .Where(m => m.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(m => m)
+            .ToList();
+        var categories = cards.Select(c => $"{c.Module}::{c.Category}".Trim())
+            .Where(c => c.Length > 2)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var archivedCount = cards.Count(c => c.Archived);
+        var errors = new List<string>();
+
+        for (var i = 0; i < cards.Count; i++)
+        {
+            var (ok, error) = cards[i].Validate();
+            if (!ok) errors.Add($"Eintrag {i + 1}: {error}");
+        }
+
+        return new ImportAnalysis(
+            cards.Count,
+            modules.Count,
+            categories.Count,
+            archivedCount,
+            modules,
+            errors);
+    }
+
+    private sealed record ImportAnalysis(
+        int TotalCards,
+        int ModuleCount,
+        int CategoryCount,
+        int ArchivedCount,
+        List<string> ModuleNames,
+        List<string> Errors);
+    }
+}

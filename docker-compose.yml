@@ -1,0 +1,103 @@
+# LearnCards — Full-Stack Docker-Betrieb (eigener Linux-Rechner)
+#
+#   docker compose up --build -d          # startet db + web (+ nginx im Profil "production")
+#   docker compose --profile mcp run --rm mcp-server   # MCP-Server interaktiv (stdio)
+#
+# Für lokale Entwicklung ohne Container siehe docs/local-development.md —
+# `dotnet run` im Projekt src/LearnCards.Web genügt (SQLite, kein Docker nötig).
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: learncards-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-learncards}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-learncards}
+      POSTGRES_DB: ${POSTGRES_DB:-learncards}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-learncards}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
+  web:
+    build:
+      context: .
+      dockerfile: src/LearnCards.Web/Dockerfile
+    container_name: learncards-web
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_PROVIDER: postgres
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-learncards}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-learncards}
+      POSTGRES_DB: ${POSTGRES_DB:-learncards}
+      POSTGRES_SSLMODE: disable      # im internen Docker-Netzwerk ausreichend; für Azure s. unten "require"
+      AUTH_MODE: ${AUTH_MODE:-oidc}
+      OIDC_ISSUER: ${OIDC_ISSUER}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE}
+      OIDC_WEB_SCOPE: ${OIDC_SCOPE:-openid profile email}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      MCP_API_KEY: ${MCP_API_KEY:-change-me-mcp-key}
+      APP_DOMAIN: ${APP_DOMAIN:-localhost}
+      DEBUG: ${DEBUG:-false}
+      ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
+    volumes:
+      - web_data:/app/data
+    networks:
+      - internal
+    ports:
+      - "8080:8080"    # ohne nginx direkt erreichbar; mit nginx (Profil "production") ggf. entfernen
+
+  mcp-server:
+    build:
+      context: .
+      dockerfile: src/LearnCards.McpServer/Dockerfile
+    container_name: learncards-mcp
+    profiles: ["mcp"]              # läuft nur bewusst via `--profile mcp`, stdio passt nicht zu "up -d"
+    restart: "no"
+    stdin_open: true
+    tty: true
+    environment:
+      LEARNCARDS_API_URL: http://web:8080/api
+      LEARNCARDS_MCP_API_KEY: ${MCP_API_KEY:-change-me-mcp-key}
+    depends_on:
+      - web
+    networks:
+      - internal
+
+  nginx:
+    image: nginx:alpine
+    container_name: learncards-nginx
+    restart: unless-stopped
+    profiles: ["production"]        # TLS-Terminierung; für reinen HTTP-Test kann web:8080 direkt genutzt werden
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+    depends_on:
+      - web
+    networks:
+      - internal
+
+volumes:
+  postgres_data:
+  web_data:
+
+networks:
+  internal:
+    driver: bridge

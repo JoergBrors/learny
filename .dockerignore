@@ -1,0 +1,11 @@
+**/bin/
+**/obj/
+**/data/
+**/.vs/
+**/.vscode/
+**/*.user
+.env
+.git/
+.gitignore
+*.md
+docs/

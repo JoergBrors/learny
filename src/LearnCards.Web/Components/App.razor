@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="de">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <base href="/" />
+    <title>LearnCards</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='6' y='10' width='52' height='44' rx='10' fill='%232AA79B'/%3E%3Cpath d='M18 24h28M18 33h28M18 42h16' stroke='white' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E" />
+    <ResourcePreloader />
+    <link rel="stylesheet" href="@Assets["app.css"]" />
+    <ImportMap />
+    <HeadOutlet />
+    <script>
+        // Theme früh setzen, um Flackern zu vermeiden
+        (function () {
+            try {
+                var saved = localStorage.getItem('lc-theme');
+                var dark = saved ? saved === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+                document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+            } catch (e) { document.documentElement.dataset.theme = 'light'; }
+        })();
+    </script>
+</head>
+
+<body>
+    <Routes />
+    <ReconnectModal />
+    <script src="@Assets["app.js"]"></script>
+    <script src="_framework/blazor.web.js"></script>
+</body>
+
+</html>

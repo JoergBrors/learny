@@ -1,0 +1,165 @@
+@* Prüfungsmodus: Konfiguration → Freitext-Antworten → KI-Bewertung *@
+@inject QuizService Quiz
+@inject AuthenticationStateProvider AuthState
+
+<div class="modal-backdrop" @onclick="CloseIfIdle">
+    <div class="modal" role="dialog" aria-modal="true" aria-label="Prüfungsmodus" @onclick:stopPropagation>
+        <div class="modal-head">
+            <h2>🎓 Prüfungsmodus @(string.IsNullOrEmpty(Category) ? "" : $"— {Category}")</h2>
+            <button class="icon-btn" @onclick="() => OnClose.InvokeAsync()" aria-label="Quiz schließen">✕</button>
+        </div>
+
+        @if (_error is not null)
+        {
+            <div class="alert alert-error" role="alert">@_error</div>
+        }
+
+        @if (_phase == Phase.Config)
+        {
+            <p class="muted">Die KI generiert Verständnisfragen aus deinem Kartenpool. Antworten werden im Freitext bewertet.</p>
+            <label class="form-label" for="numq">Anzahl Fragen: <strong>@_numQuestions</strong></label>
+            <input id="numq" type="range" min="1" max="15" class="range" @bind="_numQuestions" @bind:event="oninput" />
+            <div class="modal-actions">
+                <button class="btn btn-ghost" @onclick="() => OnClose.InvokeAsync()">Abbrechen</button>
+                <button class="btn btn-primary" @onclick="StartAsync" disabled="@_loading">
+                    @(_loading ? "Fragen werden generiert…" : "Quiz starten")
+                </button>
+            </div>
+        }
+        else if (_phase == Phase.Answering)
+        {
+            <div class="quiz-progress muted">Frage @(_currentQ + 1) von @_questions.Count</div>
+            <h3 class="quiz-question">@_questions[_currentQ].Question</h3>
+            <textarea class="input quiz-answer" rows="6" placeholder="Deine Antwort im Fließtext…"
+                      @bind="_answers[_currentQ]" @bind:event="oninput" aria-label="Antwort"></textarea>
+            <div class="modal-actions">
+                <button class="btn btn-ghost" @onclick="() => _currentQ--" disabled="@(_currentQ == 0)">← Zurück</button>
+                @if (_currentQ < _questions.Count - 1)
+                {
+                    <button class="btn btn-primary" @onclick="() => _currentQ++">Weiter →</button>
+                }
+                else
+                {
+                    <button class="btn btn-primary" @onclick="SubmitAsync" disabled="@_loading">
+                        @(_loading ? "Wird bewertet…" : "Abgeben & bewerten")
+                    </button>
+                }
+            </div>
+        }
+        else if (_phase == Phase.Results && _result is not null)
+        {
+            <div class="quiz-result-head">
+                <span class="grade grade-@_result.Grade.ToLower()">@_result.Grade</span>
+                <div>
+                    <div class="quiz-score">@_result.Score / @_result.MaxScore Punkte (@_result.Percentage%)</div>
+                    <p class="muted">@_result.Feedback</p>
+                </div>
+            </div>
+            <div class="graded-list">
+                @foreach (var g in _result.GradedAnswers)
+                {
+                    <div class="graded-item">
+                        <div class="graded-q">@g.Question</div>
+                        <div class="graded-label">Markierte Antwort</div>
+                        <div class="graded-a muted">@g.UserAnswer</div>
+                        <div class="graded-f"><span class="pill">@g.Score / @g.Max</span> @g.Feedback</div>
+                        @if (!string.IsNullOrWhiteSpace(g.CompletedSolution))
+                        {
+                            <div class="graded-solution">
+                                <div class="graded-label">Ergänzte Referenzlösung</div>
+                                <div class="graded-solution-body">@g.CompletedSolution</div>
+                            </div>
+                        }
+                        @if (g.OfficialSources.Count > 0)
+                        {
+                            <div class="graded-sources">
+                                <div class="graded-label">Offizielle Quellen</div>
+                                <ul class="source-list">
+                                    @foreach (var source in g.OfficialSources)
+                                    {
+                                        <li>
+                                            <a href="@source.Url" target="_blank" rel="noreferrer">@source.Title</a>
+                                            @if (!string.IsNullOrWhiteSpace(source.Publisher))
+                                            {
+                                                <span class="muted"> · @source.Publisher</span>
+                                            }
+                                        </li>
+                                    }
+                                </ul>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-ghost" @onclick="Restart">Neues Quiz</button>
+                <button class="btn btn-primary" @onclick="() => OnClose.InvokeAsync()">Fertig</button>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string ModuleId { get; set; } = "";
+    [Parameter] public string Category { get; set; } = "";
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private enum Phase { Config, Answering, Results }
+
+    private Phase _phase = Phase.Config;
+    private int _numQuestions = 5;
+    private List<QuizQuestion> _questions = new();
+    private List<string> _answers = new();
+    private int _currentQ;
+    private QuizResultResponse? _result;
+    private bool _loading;
+    private string? _error;
+
+    private async Task StartAsync()
+    {
+        _loading = true; _error = null;
+        try
+        {
+            var auth = await AuthState.GetAuthenticationStateAsync();
+            var sub = auth.User.FindFirst("sub")?.Value ?? "unknown";
+            _questions = await Quiz.StartQuizAsync(ModuleId, Category, _numQuestions, sub);
+            _answers = Enumerable.Repeat("", _questions.Count).ToList();
+            _currentQ = 0;
+            _phase = Phase.Answering;
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private async Task SubmitAsync()
+    {
+        _loading = true; _error = null;
+        try
+        {
+            var auth = await AuthState.GetAuthenticationStateAsync();
+            var sub = auth.User.FindFirst("sub")?.Value ?? "unknown";
+            var req = new QuizSubmitRequest
+            {
+                ModuleId = ModuleId,
+                Category = Category,
+                Answers = _questions.Select((q, i) => new QuizAnswerItem { Question = q.Question, UserAnswer = _answers[i] }).ToList(),
+            };
+            _result = await Quiz.SubmitQuizAsync(req, sub);
+            _phase = Phase.Results;
+        }
+        catch (Exception ex) { _error = "Bewertung fehlgeschlagen: " + ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private void Restart()
+    {
+        _phase = Phase.Config;
+        _result = null;
+        _questions.Clear();
+    }
+
+    private async Task CloseIfIdle()
+    {
+        if (_phase == Phase.Config) await OnClose.InvokeAsync();
+    }
+}

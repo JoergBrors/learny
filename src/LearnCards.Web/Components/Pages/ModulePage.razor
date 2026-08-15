@@ -1,0 +1,204 @@
+@page "/module/{ModuleId}"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject CardRepository Repo
+@inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthState
+
+<PageTitle>@(_module?.Name ?? "Modul") — LearnCards</PageTitle>
+
+<div class="container module-page">
+    @if (_loading)
+    {
+        <div class="spinner-wrap" aria-busy="true"><div class="spinner" role="status"></div></div>
+    }
+    else if (_module is null)
+    {
+        <div class="empty-state">
+            <div class="empty-icon" aria-hidden="true">❓</div>
+            <p class="empty-title">Modul nicht gefunden.</p>
+            <a class="btn btn-primary" href="/">Zur Übersicht</a>
+        </div>
+    }
+    else
+    {
+        <section class="module-hero card">
+            <nav class="breadcrumb"><a href="/">Lernmodule</a> <span aria-hidden="true">›</span> <span>@_module.Name</span></nav>
+
+            <div class="page-head module-page-head">
+                <div class="module-head">
+                    <span class="module-icon-lg" style="background:@(_module.Color)22" aria-hidden="true">@_module.Icon</span>
+                    <div>
+                        <h1>@_module.Name</h1>
+                        <p class="muted">@(_cards.Count) aktive Karten @(string.IsNullOrEmpty(_module.Description) ? "" : "· " + _module.Description)</p>
+                    </div>
+                </div>
+                <div class="page-head-actions">
+                    <button class="btn btn-primary" @onclick="() => _quizOpen = true" disabled="@(_cards.Count == 0)">🎓 Quiz starten</button>
+                    <button class="btn btn-ghost" @onclick="ToggleArchive">@(_showArchive ? "← Aktive Karten" : $"🗂 Archiv ({_archivedCount})")</button>
+                </div>
+            </div>
+        </section>
+
+        @* Kategorien-Filter *@
+        @if (_categories.Count > 1)
+        {
+            <div class="chip-row module-chip-row" role="tablist" aria-label="Kategorie wählen">
+                <button class="chip @(_category is null ? "chip-active" : "")" @onclick="() => SelectCategory(null)">Alle</button>
+                @foreach (var cat in _categories)
+                {
+                    <button class="chip @(_category == cat ? "chip-active" : "")" @onclick="() => SelectCategory(cat)">@cat</button>
+                }
+            </div>
+        }
+
+        @if (_showArchive)
+        {
+            <h2 class="section-title">Archivierte Karten</h2>
+            @if (_archivedCards.Count == 0)
+            {
+                <p class="muted">Keine archivierten Karten.</p>
+            }
+            <div class="list">
+                @foreach (var card in _archivedCards)
+                {
+                    <div class="list-item">
+                        <div>
+                            <span class="pill pill-muted">@card.Category</span>
+                            <strong>@card.Term</strong>
+                        </div>
+                        <button class="btn btn-ghost btn-sm" @onclick="() => RestoreAsync(card.Id)">↩ Wiederherstellen</button>
+                    </div>
+                }
+            </div>
+        }
+        else if (_cards.Count == 0)
+        {
+            <div class="empty-state">
+                <div class="empty-icon" aria-hidden="true">🃏</div>
+                <p class="empty-title">Keine aktiven Karten @(_category is null ? "" : $"in „{_category}“").</p>
+                <p class="muted">Importiere Karten auf der Startseite oder per MCP.</p>
+            </div>
+        }
+        else
+        {
+            <FlashCardView Card="_cards[_index]"
+                           Index="_index"
+                           Total="_cards.Count"
+                           MarkedKnown="_checked.Contains(_cards[_index].Id)"
+                           MarkedReview="_review.Contains(_cards[_index].Id)"
+                           OnNext="Next" OnPrev="Prev"
+                           OnArchive="ArchiveAsync"
+                           OnMarkKnown="ToggleCheckedAsync" OnMarkReview="ToggleReviewAsync" />
+
+            <div class="session-stats" aria-live="polite">
+                <span class="stat stat-known">✔ @_checked.Count gecheckt</span>
+                <span class="stat stat-review">↻ @_review.Count zur Wiederholung</span>
+            </div>
+        }
+
+        @if (_quizOpen)
+        {
+            <QuizPanel ModuleId="@ModuleId" Category="@(_category ?? "")" OnClose="() => _quizOpen = false" />
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public string ModuleId { get; set; } = "";
+
+    private ModuleInfo? _module;
+    private List<Card> _cards = new();
+    private List<Card> _archivedCards = new();
+    private List<string> _categories = new();
+    private string? _category;
+    private int _index;
+    private bool _loading = true;
+    private bool _quizOpen;
+    private bool _showArchive;
+    private int _archivedCount;
+    private readonly HashSet<string> _checked = new();
+    private readonly HashSet<string> _review = new();
+    private string _userSub = "";
+
+    protected override async Task OnParametersSetAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _userSub = auth.User.FindFirst("sub")?.Value ?? "";
+        _module = await Repo.GetModuleAsync(ModuleId);
+        if (_module is not null)
+        {
+            _categories = await Repo.ListCategoriesAsync(ModuleId);
+            _cards = await Repo.ListCardsAsync(ModuleId, _category, archived: false);
+            _archivedCards = await Repo.ListCardsAsync(ModuleId, null, archived: true);
+            _archivedCount = _archivedCards.Count;
+            var states = string.IsNullOrWhiteSpace(_userSub) ? new Dictionary<string, UserCardState>() : await Repo.GetUserCardStatesAsync(_userSub, ModuleId);
+            _checked.Clear();
+            _review.Clear();
+            foreach (var state in states.Values)
+            {
+                if (state.IsChecked) _checked.Add(state.CardId);
+                if (state.MarkedReview) _review.Add(state.CardId);
+            }
+            if (_index >= _cards.Count) _index = Math.Max(0, _cards.Count - 1);
+        }
+        _loading = false;
+    }
+
+    private async Task SelectCategory(string? cat)
+    {
+        _category = cat;
+        _index = 0;
+        await ReloadAsync();
+    }
+
+    private void Next() { if (_index < _cards.Count - 1) _index++; }
+    private void Prev() { if (_index > 0) _index--; }
+
+    private async Task ToggleCheckedAsync(string id)
+    {
+        if (_checked.Contains(id)) _checked.Remove(id);
+        else _checked.Add(id);
+        await SaveStateAsync(id);
+    }
+
+    private async Task ToggleReviewAsync(string id)
+    {
+        if (_review.Contains(id)) _review.Remove(id);
+        else _review.Add(id);
+        await SaveStateAsync(id);
+    }
+
+    private async Task ArchiveAsync(string id)
+    {
+        await Repo.SetArchivedAsync(id, true);
+        await ReloadAsync();
+    }
+
+    private async Task RestoreAsync(string id)
+    {
+        await Repo.SetArchivedAsync(id, false);
+        await ReloadAsync();
+    }
+
+    private async Task ToggleArchive()
+    {
+        _showArchive = !_showArchive;
+        await ReloadAsync();
+    }
+
+    private Task SaveStateAsync(string id) =>
+        string.IsNullOrWhiteSpace(_userSub)
+            ? Task.CompletedTask
+            : Repo.SaveUserCardStateAsync(new UserCardState
+            {
+                UserSub = _userSub,
+                CardId = id,
+                IsChecked = _checked.Contains(id),
+                MarkedReview = _review.Contains(id),
+                UpdatedAt = DateTime.UtcNow,
+            });
+}

@@ -1,0 +1,143 @@
+@* Lernkarte mit 3D-Flip, Fortschrittsbalken, Aktionen und Tastatur-Navigation *@
+
+<div class="flashcard-wrap">
+    @* Fortschritt *@
+    <div class="progress-head" role="progressbar" aria-valuenow="@(Index + 1)" aria-valuemin="1" aria-valuemax="@Total"
+         aria-label="@($"Karte {Index + 1} von {Total}")">
+        <div class="progress-labels">
+            <span>Karte @(Index + 1) / @Total</span>
+            <span>@Math.Round((Index + 1) * 100.0 / Total)%</span>
+        </div>
+        <div class="progress-track"><div class="progress-fill" style="width:@(((Index + 1) * 100.0 / Total).ToString(System.Globalization.CultureInfo.InvariantCulture))%"></div></div>
+    </div>
+
+    @* Karte *@
+    <div class="flip-scene" tabindex="0" role="button" aria-pressed="@_flipped"
+         aria-label="@(_flipped ? $"Rückseite: {Card.Term}" : $"Vorderseite: {Card.Term}. Klicken zum Umdrehen")"
+         @onclick="Flip" @onkeydown="HandleKey">
+        <div class="flip-inner @(_flipped ? "flipped" : "")">
+            <div class="flip-face flip-front" aria-hidden="@_flipped">
+                <div>
+                    <span class="pill pill-brand">@Card.Category</span>
+                    <h2 class="card-term">@Card.Term</h2>
+                    <p class="card-question">@Card.Question</p>
+                </div>
+                <p class="flip-hint">Klicken oder <kbd>Space</kbd> zum Umdrehen</p>
+            </div>
+            <div class="flip-face flip-back" aria-hidden="@(!_flipped)">
+                <div class="back-head">
+                    <h3>@Card.Term</h3>
+                    <span class="pill pill-muted">@Card.Category</span>
+                </div>
+                <div class="back-sections">
+                    <section aria-label="Definition">
+                        <h4>Definition</h4>
+                        <p>@Card.Definition</p>
+                    </section>
+                    @if (!string.IsNullOrEmpty(Card.HowItWorks))
+                    {
+                        <section aria-label="Wie es funktioniert">
+                            <h4>⚙️ Wie es funktioniert</h4>
+                            <p>@Card.HowItWorks</p>
+                        </section>
+                    }
+                    @if (!string.IsNullOrEmpty(Card.Context))
+                    {
+                        <section aria-label="Kontext">
+                            <h4>🧭 Kontext</h4>
+                            <p>@Card.Context</p>
+                        </section>
+                    }
+                    @if (!string.IsNullOrEmpty(Card.KeyFact))
+                    {
+                        <div class="keyfact">🎯 <strong>Key Fact:</strong> @Card.KeyFact</div>
+                    }
+                    @if (Card.OfficialSources.Count > 0)
+                    {
+                        <section aria-label="Offizielle Quellen">
+                            <h4>📚 Offizielle Quellen</h4>
+                            <ul class="source-list">
+                                @foreach (var source in Card.OfficialSources)
+                                {
+                                    <li>
+                                        <a href="@source.Url" target="_blank" rel="noreferrer">@source.Title</a>
+                                        @if (!string.IsNullOrWhiteSpace(source.Publisher))
+                                        {
+                                            <span class="muted"> · @source.Publisher</span>
+                                        }
+                                    </li>
+                                }
+                            </ul>
+                        </section>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @* Aktionsleiste *@
+    <div class="card-actions">
+        <div class="nav-group">
+            <button class="btn btn-ghost" @onclick="OnPrevClick" disabled="@(Index == 0)" aria-label="Vorherige Karte">← Zurück</button>
+            <button class="btn btn-ghost" @onclick="OnNextClick" disabled="@(Index >= Total - 1)" aria-label="Nächste Karte">Weiter →</button>
+        </div>
+        <div class="action-group">
+            <button class="btn btn-primary btn-sm" @onclick="() => _chatOpen = !_chatOpen" aria-label="KI-Chatbot zu dieser Karte öffnen">💬 Chat</button>
+            <button class="btn btn-sm @(MarkedKnown ? "btn-known-active" : "btn-known")" @onclick="() => OnMarkKnown.InvokeAsync(Card.Id)"
+                    aria-pressed="@MarkedKnown" aria-label="Als geprüft markieren">✔ Check</button>
+            <button class="btn btn-sm @(MarkedReview ? "btn-review-active" : "btn-review")" @onclick="() => OnMarkReview.InvokeAsync(Card.Id)"
+                    aria-pressed="@MarkedReview" aria-label="Zur Wiederholung markieren">↻ Wiederholen</button>
+            <button class="btn btn-ghost btn-sm" @onclick="() => OnArchive.InvokeAsync(Card.Id)" aria-label="Karte archivieren">🗂 Archivieren</button>
+        </div>
+    </div>
+
+    <p class="kbd-hint"><kbd>←</kbd><kbd>→</kbd> navigieren · <kbd>G</kbd> Bekannt · <kbd>R</kbd> Wiederholen</p>
+
+    @if (_chatOpen)
+    {
+        <ChatPanel Card="Card" OnClose="() => _chatOpen = false" />
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Card Card { get; set; } = default!;
+    [Parameter] public int Index { get; set; }
+    [Parameter] public int Total { get; set; }
+    [Parameter] public bool MarkedKnown { get; set; }
+    [Parameter] public bool MarkedReview { get; set; }
+    [Parameter] public EventCallback OnNext { get; set; }
+    [Parameter] public EventCallback OnPrev { get; set; }
+    [Parameter] public EventCallback<string> OnArchive { get; set; }
+    [Parameter] public EventCallback<string> OnMarkKnown { get; set; }
+    [Parameter] public EventCallback<string> OnMarkReview { get; set; }
+
+    private bool _flipped;
+    private bool _chatOpen;
+    private string _lastCardId = "";
+
+    protected override void OnParametersSet()
+    {
+        if (Card.Id != _lastCardId)
+        {
+            _lastCardId = Card.Id;
+            _flipped = false;
+        }
+    }
+
+    private void Flip() => _flipped = !_flipped;
+
+    private async Task OnNextClick() => await OnNext.InvokeAsync();
+    private async Task OnPrevClick() => await OnPrev.InvokeAsync();
+
+    private async Task HandleKey(KeyboardEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case " ": case "Enter": Flip(); break;
+            case "ArrowRight": await OnNext.InvokeAsync(); break;
+            case "ArrowLeft": await OnPrev.InvokeAsync(); break;
+            case "g": case "G": await OnMarkKnown.InvokeAsync(Card.Id); break;
+            case "r": case "R": await OnMarkReview.InvokeAsync(Card.Id); break;
+        }
+    }
+}
