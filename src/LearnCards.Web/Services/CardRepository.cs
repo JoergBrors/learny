@@ -225,13 +225,13 @@ public class CardRepository
     // ─── Quiz-Ergebnisse ────────────────────────────────────────────────────
 
     public Task SaveQuizResultAsync(QuizResultRecord r) => _db.ExecuteAsync("""
-        INSERT INTO quiz_results (id, module_id, user_sub, category, score, max_score, grade, feedback, answers_json, completed_at)
-        VALUES (@id, @module_id, @user_sub, @category, @score, @max_score, @grade, @feedback, @answers_json, @completed_at)
+        INSERT INTO quiz_results (id, module_id, user_sub, category, score, max_score, grade, feedback, answers_json, stats_json, completed_at)
+        VALUES (@id, @module_id, @user_sub, @category, @score, @max_score, @grade, @feedback, @answers_json, @stats_json, @completed_at)
         """, new (string, object?)[]
     {
         ("id", r.Id), ("module_id", r.ModuleId), ("user_sub", r.UserSub), ("category", r.Category),
         ("score", r.Score), ("max_score", r.MaxScore), ("grade", r.Grade), ("feedback", r.Feedback),
-        ("answers_json", r.AnswersJson), ("completed_at", r.CompletedAt),
+        ("answers_json", r.AnswersJson), ("stats_json", r.StatsJson), ("completed_at", r.CompletedAt),
     });
 
     public async Task<List<QuizResultRecord>> QuizHistoryAsync(string userSub, string? moduleId = null, int limit = 50)
@@ -241,6 +241,17 @@ public class CardRepository
         if (!string.IsNullOrEmpty(moduleId)) { sql += " AND module_id = @m"; args.Add(("m", moduleId)); }
         sql += $" ORDER BY completed_at DESC LIMIT {Math.Clamp(limit, 1, 200)}";
         return (await _db.QueryAsync(sql, args)).Select(MapQuizResult).ToList();
+    }
+
+    public async Task<List<QuizHistoryEntry>> QuizHistoryDetailedAsync(string userSub, string? moduleId = null, int limit = 20)
+    {
+        var rows = await QuizHistoryAsync(userSub, moduleId, limit);
+        return rows.Select(r => new QuizHistoryEntry
+        {
+            Result = r,
+            Stats = ParseQuizStats(r.StatsJson),
+            Answers = ParseGradedAnswers(r.AnswersJson),
+        }).ToList();
     }
 
     // ─── Benutzerstatus / Präferenzen ─────────────────────────────────────
@@ -374,6 +385,7 @@ public class CardRepository
         Grade = r.GetValueOrDefault("grade") ?? "F",
         Feedback = r.GetValueOrDefault("feedback") ?? "",
         AnswersJson = r.GetValueOrDefault("answers_json") ?? "[]",
+        StatsJson = r.GetValueOrDefault("stats_json") ?? "{}",
         CompletedAt = DbValue.ToDateTime(r.GetValueOrDefault("completed_at")),
     };
 
@@ -412,6 +424,32 @@ public class CardRepository
         try
         {
             return JsonSerializer.Deserialize<List<OfficialSource>>(json, AppJson.Options) ?? new();
+        }
+        catch
+        {
+            return new();
+        }
+    }
+
+    private static List<GradedAnswer> ParseGradedAnswers(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return new();
+        try
+        {
+            return JsonSerializer.Deserialize<List<GradedAnswer>>(json, AppJson.Options) ?? new();
+        }
+        catch
+        {
+            return new();
+        }
+    }
+
+    private static QuizSessionStats ParseQuizStats(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return new();
+        try
+        {
+            return JsonSerializer.Deserialize<QuizSessionStats>(json, AppJson.Options) ?? new();
         }
         catch
         {

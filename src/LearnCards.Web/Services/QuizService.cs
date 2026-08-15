@@ -19,6 +19,9 @@ public class QuizService
         _openAi = openAi;
     }
 
+    public Task<List<QuizHistoryEntry>> GetHistoryAsync(string userSub, string moduleId, int limit = 10) =>
+        _repo.QuizHistoryDetailedAsync(userSub, moduleId, limit);
+
     public async Task<List<QuizQuestion>> StartQuizAsync(string moduleId, string category, int numQuestions, string userSub, CancellationToken ct = default)
     {
         numQuestions = Math.Clamp(numQuestions, 1, 20);
@@ -31,7 +34,7 @@ public class QuizService
             // Fallback: Fragen direkt aus den Karten ziehen
             var rnd = new Random();
             return cards.OrderBy(_ => rnd.Next()).Take(numQuestions)
-                .Select(c => new QuizQuestion { Question = c.Question, Topic = c.Category }).ToList();
+                .Select(c => new QuizQuestion { Question = c.Question, Topic = c.Category, SourceCardId = c.Id, SourceTerm = c.Term }).ToList();
         }
 
         var quizCards = cards.Take(40).ToList();
@@ -53,7 +56,9 @@ public class QuizService
             - Fragen sollen Verständnis prüfen, nicht nur Definitionen abfragen
             - Schwierigkeitsgrad: Level 400 (tiefes technisches Verständnis)
             - Frage nie nach Fakten, die in den Karten nicht eindeutig vorbereitet sind.
-            - Antworte NUR als JSON-Objekt: {"questions": [{"question": "...", "topic": "..."}]}
+            - Jede erzeugte Frage MUSS genau eine Quellenkarte referenzieren.
+            - Verwende bei "source_card_id" exakt die Karten-ID aus den bereitgestellten Kartendaten.
+            - Antworte NUR als JSON-Objekt: {"questions": [{"question": "...", "topic": "...", "source_card_id": "..."}]}
             """;
 
         try
@@ -66,11 +71,18 @@ public class QuizService
             var questions = new List<QuizQuestion>();
             if (arr.ValueKind == JsonValueKind.Array)
                 foreach (var el in arr.EnumerateArray())
+                {
+                    var sourceCardId = el.TryGetProperty("source_card_id", out var sid) ? sid.GetString() ?? "" : "";
+                    var sourceCard = quizCards.FirstOrDefault(c => c.Id == sourceCardId);
+                    if (sourceCard is null) continue;
                     questions.Add(new QuizQuestion
                     {
                         Question = el.TryGetProperty("question", out var qq) ? qq.GetString() ?? "" : "",
                         Topic = el.TryGetProperty("topic", out var tt) ? tt.GetString() ?? "" : category,
+                        SourceCardId = sourceCardId,
+                        SourceTerm = sourceCard.Term,
                     });
+                }
             questions = questions.Where(x => x.Question.Length > 0).Take(numQuestions).ToList();
             if (questions.Count > 0) return questions;
         }
@@ -78,17 +90,20 @@ public class QuizService
 
         var fallbackRandom = new Random();
         return cards.OrderBy(_ => fallbackRandom.Next()).Take(numQuestions)
-            .Select(c => new QuizQuestion { Question = c.Question, Topic = c.Category })
+            .Select(c => new QuizQuestion { Question = c.Question, Topic = c.Category, SourceCardId = c.Id, SourceTerm = c.Term })
             .ToList();
     }
 
     public async Task<QuizResultResponse> SubmitQuizAsync(QuizSubmitRequest req, string userSub, CancellationToken ct = default)
     {
+        var checkedCards = await _repo.ListCheckedCardsAsync(req.ModuleId, string.IsNullOrEmpty(req.Category) ? null : req.Category, userSub);
         QuizResultResponse result;
         if (_openAi.IsConfigured)
             result = await GradeWithOpenAiAsync(req, ct);
         else
             result = await GradeLocallyAsync(req);
+
+        result.Stats = BuildQuizStats(req.Answers, checkedCards);
 
         var record = new QuizResultRecord
         {
@@ -100,6 +115,7 @@ public class QuizService
             Grade = result.Grade,
             Feedback = result.Feedback,
             AnswersJson = JsonSerializer.Serialize(result.GradedAnswers, Api.AppJson.Options),
+            StatsJson = JsonSerializer.Serialize(result.Stats, Api.AppJson.Options),
         };
         await _repo.SaveQuizResultAsync(record);
         return result;
@@ -111,12 +127,12 @@ public class QuizService
         var qaPairs = string.Join("\n", req.Answers.Select((a, i) => $"Frage {i + 1}: {a.Question}\nAntwort: {a.UserAnswer}"));
         var references = string.Join("\n\n", req.Answers.Select((a, i) =>
         {
-            var card = cards.FirstOrDefault(c => c.Question == a.Question);
+            var card = FindCard(cards, a);
             var referenceAnswer = BuildReferenceAnswer(card);
             var sources = card is null || card.OfficialSources.Count == 0
                 ? "Keine offiziellen Quellen hinterlegt."
                 : string.Join("\n", card.OfficialSources.Select(s => $"- {s.Title}: {s.Url}"));
-            return $"Referenz {i + 1}:\nFrage: {a.Question}\nBegrenzung: Bewerte nur gegen diese Referenz und diese Quellen.\nMusterlösung: {referenceAnswer}\nOffizielle Quellen:\n{sources}";
+            return $"Referenz {i + 1}:\nQuellenkarte: {(card?.Term ?? "unbekannt")} ({a.SourceCardId})\nFrage: {a.Question}\nBegrenzung: Bewerte nur gegen diese Referenz und diese Quellen.\nMusterlösung: {referenceAnswer}\nOffizielle Quellen:\n{sources}";
         }));
         var maxScore = req.Answers.Count * 10;
 
@@ -168,14 +184,19 @@ public class QuizService
 
         var graded = new List<GradedAnswer>();
         if (root.TryGetProperty("graded", out var arr) && arr.ValueKind == JsonValueKind.Array)
+        {
+            var idx = 0;
             foreach (var el in arr.EnumerateArray())
             {
+                var submitted = idx < req.Answers.Count ? req.Answers[idx] : new QuizAnswerItem();
                 var question = el.TryGetProperty("question", out var q) ? q.GetString() ?? "" : "";
-                var card = cards.FirstOrDefault(c => c.Question == question);
+                var card = FindCard(cards, submitted) ?? cards.FirstOrDefault(c => c.Question == question);
                 graded.Add(new GradedAnswer
                 {
                     Question = question,
                     UserAnswer = el.TryGetProperty("user_answer", out var ua) ? ua.GetString() ?? "" : "",
+                    SourceCardId = submitted.SourceCardId,
+                    SourceTerm = card?.Term ?? "",
                     Score = el.TryGetProperty("score", out var sc) ? sc.GetDouble() : 0,
                     Max = el.TryGetProperty("max", out var mx) ? mx.GetDouble() : 10,
                     Feedback = el.TryGetProperty("feedback", out var f) ? f.GetString() ?? "" : "",
@@ -187,7 +208,9 @@ public class QuizService
                         ? os.Deserialize<List<OfficialSource>>() ?? card?.OfficialSources ?? new()
                         : card?.OfficialSources ?? new(),
                 });
+                idx++;
             }
+        }
 
         return new QuizResultResponse
         {
@@ -208,7 +231,7 @@ public class QuizService
 
         foreach (var a in req.Answers)
         {
-            var card = cards.FirstOrDefault(c => c.Question == a.Question);
+            var card = FindCard(cards, a);
             var reference = BuildReferenceAnswer(card);
             var refWords = Tokenize(reference);
             var ansWords = Tokenize(a.UserAnswer);
@@ -218,6 +241,8 @@ public class QuizService
             {
                 Question = a.Question,
                 UserAnswer = a.UserAnswer,
+                SourceCardId = a.SourceCardId,
+                SourceTerm = card?.Term ?? "",
                 Score = score,
                 Max = 10,
                 Feedback = "Offline-Bewertung (Stichwort-Heuristik) — für eine fundierte KI-Bewertung OPENAI_API_KEY setzen.",
@@ -266,6 +291,47 @@ public class QuizService
         return $"Markierte Antwort:\n{userAnswer.Trim()}\n\nErgänzte Referenzlösung:\n{reference}";
     }
 
+    private static Card? FindCard(List<Card> cards, QuizAnswerItem answer) =>
+        cards.FirstOrDefault(c => c.Id == answer.SourceCardId)
+        ?? cards.FirstOrDefault(c => c.Question == answer.Question);
+
+    private static QuizSessionStats BuildQuizStats(List<QuizAnswerItem> answers, List<Card> checkedCards)
+    {
+        var checkedById = checkedCards.ToDictionary(c => c.Id, StringComparer.OrdinalIgnoreCase);
+        var usage = answers
+            .Where(a => !string.IsNullOrWhiteSpace(a.SourceCardId))
+            .GroupBy(a => a.SourceCardId, StringComparer.OrdinalIgnoreCase)
+            .Select(g =>
+            {
+                checkedById.TryGetValue(g.Key, out var card);
+                return new QuizCardUsage
+                {
+                    CardId = g.Key,
+                    Term = card?.Term ?? "",
+                    Category = card?.Category ?? "",
+                    QuestionCount = g.Count(),
+                    RelativeWeight = answers.Count == 0 ? 0 : Math.Round((double)g.Count() / answers.Count, 3),
+                };
+            })
+            .OrderByDescending(x => x.QuestionCount)
+            .ThenBy(x => x.Term)
+            .ToList();
+
+        var usedCheckedCardCount = usage.Count;
+        var questionCount = answers.Count;
+        var checkedCardCount = checkedCards.Count;
+        return new QuizSessionStats
+        {
+            CheckedCardCount = checkedCardCount,
+            UsedCheckedCardCount = usedCheckedCardCount,
+            QuestionCount = questionCount,
+            CheckedCoverageRatio = checkedCardCount == 0 ? 0 : Math.Round((double)usedCheckedCardCount / checkedCardCount, 3),
+            DistributionWeight = questionCount == 0 ? 0 : Math.Round((double)usedCheckedCardCount / questionCount, 3),
+            QuestionsPerUsedCard = usedCheckedCardCount == 0 ? 0 : Math.Round((double)questionCount / usedCheckedCardCount, 3),
+            CardUsage = usage,
+        };
+    }
+
     private static string BuildQuizCardBrief(Card card)
     {
         var sources = card.OfficialSources.Count == 0
@@ -274,6 +340,7 @@ public class QuizService
 
         return $$"""
             Karte:
+            - Karten-ID: {{card.Id}}
             - Kategorie: {{card.Category}}
             - Begriff: {{card.Term}}
             - Prüfungsfrage der Karte: {{card.Question}}

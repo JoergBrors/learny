@@ -56,6 +56,7 @@ public class QuizResultRecord
     public string Grade { get; set; } = "F";
     public string Feedback { get; set; } = "";
     public string AnswersJson { get; set; } = "[]";
+    public string StatsJson { get; set; } = "{}";
     public DateTime CompletedAt { get; set; } = DateTime.UtcNow;
 }
 
@@ -152,12 +153,15 @@ public class QuizQuestion
 {
     public string Question { get; set; } = "";
     public string Topic { get; set; } = "";
+    public string SourceCardId { get; set; } = "";
+    public string SourceTerm { get; set; } = "";
 }
 
 public class QuizAnswerItem
 {
     public string Question { get; set; } = "";
     public string UserAnswer { get; set; } = "";
+    public string SourceCardId { get; set; } = "";
 }
 
 public class QuizSubmitRequest
@@ -171,6 +175,8 @@ public class GradedAnswer
 {
     public string Question { get; set; } = "";
     public string UserAnswer { get; set; } = "";
+    public string SourceCardId { get; set; } = "";
+    public string SourceTerm { get; set; } = "";
     public double Score { get; set; }
     public double Max { get; set; } = 10;
     public string Feedback { get; set; } = "";
@@ -186,7 +192,35 @@ public class QuizResultResponse
     public double Percentage { get; set; }
     public string Grade { get; set; } = "F";
     public string Feedback { get; set; } = "";
+    public QuizSessionStats Stats { get; set; } = new();
     public List<GradedAnswer> GradedAnswers { get; set; } = new();
+}
+
+public class QuizSessionStats
+{
+    public int CheckedCardCount { get; set; }
+    public int UsedCheckedCardCount { get; set; }
+    public int QuestionCount { get; set; }
+    public double CheckedCoverageRatio { get; set; }
+    public double DistributionWeight { get; set; }
+    public double QuestionsPerUsedCard { get; set; }
+    public List<QuizCardUsage> CardUsage { get; set; } = new();
+}
+
+public class QuizCardUsage
+{
+    public string CardId { get; set; } = "";
+    public string Term { get; set; } = "";
+    public string Category { get; set; } = "";
+    public int QuestionCount { get; set; }
+    public double RelativeWeight { get; set; }
+}
+
+public class QuizHistoryEntry
+{
+    public QuizResultRecord Result { get; set; } = new();
+    public QuizSessionStats Stats { get; set; } = new();
+    public List<GradedAnswer> Answers { get; set; } = new();
 }
 
 public class CardStateUpdateRequest
