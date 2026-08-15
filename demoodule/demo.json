@@ -1,0 +1,316 @@
+{
+  "cards": [
+    {
+      "module": "PRINCE2 Projektmanagement",
+      "category": "Grundlagen",
+      "term": "PRINCE2 Überblick",
+      "question": "Was ist PRINCE2 und wofür wird die Methode eingesetzt?",
+      "definition": "PRINCE2 ist eine strukturierte Projektmanagement-Methode, die Projekte über klar definierte Prinzipien, Praktiken und Prozesse steuerbar macht.",
+      "how_it_works": "Die Methode trennt Governance, Steuerung und Delivery, definiert Rollen, Managementprodukte und Entscheidungspunkte und wird auf den Projektkontext zugeschnitten.",
+      "context": "PRINCE2 eignet sich besonders für Umgebungen mit hoher Rechenschaftspflicht, mehreren Stakeholdern und formalen Freigaben.",
+      "key_fact": "PRINCE2 ist keine starre Checkliste, sondern muss auf Größe, Risiko und Komplexität des Projekts zugeschnitten werden.",
+      "reference_answer": "PRINCE2 ist eine weltweit etablierte Projektmanagement-Methode für die strukturierte Planung, Steuerung und Überwachung von Projekten. Sie definiert Prinzipien, Praktiken, Prozesse, Rollen und Managementprodukte, damit Projekte kontrolliert, nachvollziehbar und geschäftlich begründet durchgeführt werden können.",
+      "chat_prompt": "Du bist ein PRINCE2-Experte. Antworte sachlich, präzise und quellengebunden auf Deutsch.",
+      "official_sources": [
+        {
+          "title": "Was ist PRINCE2?",
+          "url": "https://www.prince2.com/de/what-is-prince2",
+          "publisher": "PRINCE2"
+        },
+        {
+          "title": "PRINCE2 Project Management Foundation (Version 7)",
+          "url": "https://www.peoplecert.org/browse-certifications/project-programme-and-portfolio-management/PRINCE2-2/prince2-7-foundation-3579",
+          "publisher": "PeopleCert"
+        }
+      ],
+      "archived": false,
+      "sort_order": 1
+    },
+    {
+      "module": "PRINCE2 Projektmanagement",
+      "category": "Grundlagen",
+      "term": "Tailoring",
+      "question": "Warum ist Tailoring in PRINCE2 wichtig?",
+      "definition": "Tailoring bedeutet, PRINCE2 an den Projektkontext anzupassen, statt die Methode unverändert zu übernehmen.",
+      "how_it_works": "Rollen, Managementprodukte, Berichtszyklen und Steuerungsmechanismen werden an Projektgröße, Risiko, Umfeld und Governance-Anforderungen angepasst.",
+      "context": "Ohne Tailoring wird PRINCE2 schnell als zu bürokratisch wahrgenommen, obwohl die Methode gerade die situationsgerechte Anpassung fordert.",
+      "key_fact": "Tailoring ist ein zentraler PRINCE2-Grundsatz und keine optionale Nacharbeit.",
+      "reference_answer": "Tailoring ist wichtig, weil PRINCE2 nicht identisch auf jedes Projekt angewendet werden soll. Die Methode muss an Kontext, Größe, Risiko, Governance und organisatorische Anforderungen angepasst werden, damit Steuerung wirksam bleibt, ohne unnötige Bürokratie zu erzeugen.",
+      "chat_prompt": "Du bist ein PRINCE2-Experte. Antworte sachlich, präzise und quellengebunden auf Deutsch.",
+      "official_sources": [
+        {
+          "title": "Was ist PRINCE2?",
+          "url": "https://www.prince2.com/de/what-is-prince2",
+          "publisher": "PRINCE2"
+        },
+        {
+          "title": "PRINCE2 Project Management Foundation (Version 7)",
+          "url": "https://www.peoplecert.org/browse-certifications/project-programme-and-portfolio-management/PRINCE2-2/prince2-7-foundation-3579",
+          "publisher": "PeopleCert"
+        }
+      ],
+      "archived": false,
+      "sort_order": 2
+    },
+    {
+      "module": "PRINCE2 Projektmanagement",
+      "category": "Business Case",
+      "term": "Fortlaufende geschäftliche Rechtfertigung",
+      "question": "Was bedeutet das PRINCE2-Prinzip der fortlaufenden geschäftlichen Rechtfertigung?",
+      "definition": "Ein Projekt darf nur gestartet und fortgeführt werden, wenn es einen gültigen, aktuellen und wirtschaftlich sinnvollen Business Case gibt.",
+      "how_it_works": "Der Business Case wird zu Beginn erstellt und in Phasenübergängen sowie bei wesentlichen Änderungen überprüft und aktualisiert.",
+      "context": "Wenn erwarteter Nutzen wegfällt oder Kosten und Risiken unverhältnismäßig steigen, muss das Projekt angepasst oder beendet werden.",
+      "key_fact": "PRINCE2 legitimiert Projekte nicht einmalig, sondern fortlaufend über den gesamten Lebenszyklus.",
+      "reference_answer": "Fortlaufende geschäftliche Rechtfertigung bedeutet, dass ein PRINCE2-Projekt jederzeit einen tragfähigen Business Case haben muss. Nutzen, Kosten, Risiken und strategische Begründung werden nicht nur zu Beginn betrachtet, sondern während des Projekts regelmäßig überprüft, damit nur weiterhin gerechtfertigte Projekte fortgeführt werden.",
+      "chat_prompt": "Du bist ein PRINCE2-Experte. Antworte sachlich, präzise und quellengebunden auf Deutsch.",
+      "official_sources": [
+        {
+          "title": "Was ist PRINCE2?",
+          "url": "https://www.prince2.com/de/what-is-prince2",
+          "publisher": "PRINCE2"
+        },
+        {
+          "title": "PRINCE2 Project Management Foundation (Version 7)",
+          "url": "https://www.peoplecert.org/browse-certifications/project-programme-and-portfolio-management/PRINCE2-2/prince2-7-foundation-3579",
+          "publisher": "PeopleCert"
+        }
+      ],
+      "archived": false,
+      "sort_order": 3
+    },
+    {
+      "module": "PRINCE2 Projektmanagement",
+      "category": "Organisation",
+      "term": "Projektvorstand",
+      "question": "Welche Funktion hat der Projektvorstand in PRINCE2?",
+      "definition": "Der Projektvorstand trägt die Gesamtverantwortung für Projekterfolg und Governance.",
+      "how_it_works": "Er vertritt Business, User und Supplier Interests, genehmigt Phasen, trifft wesentliche Entscheidungen und steuert per Ausnahme.",
+      "context": "Der Projektmanager führt das Tagesgeschäft, der Projektvorstand verantwortet Richtung, Legitimation und Eskalationsentscheidungen.",
+      "key_fact": "Der Projektvorstand delegiert Steuerung, aber nicht die Gesamtverantwortung für das Projekt.",
+      "reference_answer": "Der Projektvorstand ist in PRINCE2 das verantwortliche Entscheidungsgremium des Projekts. Er stellt sicher, dass das Projekt geschäftlich gerechtfertigt bleibt, entscheidet über zentrale Freigaben und Eskalationen und repräsentiert die Perspektiven von Business, Anwendern und Lieferanten.",
+      "chat_prompt": "Du bist ein PRINCE2-Experte. Antworte sachlich, präzise und quellengebunden auf Deutsch.",
+      "official_sources": [
+        {
+          "title": "Was ist PRINCE2?",
+          "url": "https://www.prince2.com/de/what-is-prince2",
+          "publisher": "PRINCE2"
+        },
+        {
+          "title": "PRINCE2 Project Management Foundation (Version 7)",
+          "url": "https://www.peoplecert.org/browse-certifications/project-programme-and-portfolio-management/PRINCE2-2/prince2-7-foundation-3579",
+          "publisher": "PeopleCert"
+        }
+      ],
+      "archived": false,
+      "sort_order": 4
+    },
+    {
+      "module": "PRINCE2 Projektmanagement",
+      "category": "Organisation",
+      "term": "Projektmanager",
+      "question": "Wie unterscheidet sich die Rolle des Projektmanagers vom Projektvorstand?",
+      "definition": "Der Projektmanager verantwortet die operative Steuerung des Projekts im Rahmen der vorgegebenen Toleranzen.",
+      "how_it_works": "Er plant, überwacht, berichtet, koordiniert Teams und eskaliert nur dann, wenn Toleranzen überschritten werden.",
+      "context": "PRINCE2 trennt bewusst strategische Verantwortung und operative Führung, um Steuerbarkeit und Rechenschaft klar zu halten.",
+      "key_fact": "Der Projektmanager managt innerhalb von Toleranzen; außerhalb davon entscheidet der Projektvorstand.",
+      "reference_answer": "Der Projektmanager steuert das Projekt operativ und sorgt für Planung, Überwachung, Berichterstattung und Koordination der Umsetzung. Im Unterschied dazu übernimmt der Projektvorstand die übergeordnete Governance und trifft strategische oder eskalierte Entscheidungen, insbesondere wenn Toleranzen überschritten werden.",
+      "chat_prompt": "Du bist ein PRINCE2-Experte. Antworte sachlich, präzise und quellengebunden auf Deutsch.",
+      "official_sources": [
+        {
+          "title": "Was ist PRINCE2?",
+          "url": "https://www.prince2.com/de/what-is-prince2",
+          "publisher": "PRINCE2"
+        },
+        {
+          "title": "PRINCE2 Project Management Foundation (Version 7)",
+          "url": "https://www.peoplecert.org/browse-certifications/project-programme-and-portfolio-management/PRINCE2-2/prince2-7-foundation-3579",
+          "publisher": "PeopleCert"
+        }
+      ],
+      "archived": false,
+      "sort_order": 5
+    },
+    {
+      "module": "PRINCE2 Projektmanagement",
+      "category": "Steuerung",
+      "term": "Management by Exception",
+      "question": "Was bedeutet Management by Exception in PRINCE2?",
+      "definition": "Management by Exception bedeutet, dass Verantwortung innerhalb definierter Toleranzen delegiert wird und nur bei Abweichungen eskaliert wird.",
+      "how_it_works": "Für Zeit, Kosten, Qualität, Umfang, Nutzen und Risiko werden Toleranzen definiert. Solange diese eingehalten werden, bleibt die Entscheidungskompetenz auf der jeweiligen Ebene.",
+      "context": "Das reduziert Mikromanagement und entlastet höhere Ebenen, ohne die Kontrolle über kritische Abweichungen zu verlieren.",
+      "key_fact": "Management by Exception funktioniert nur mit klar definierten Toleranzen und transparentem Reporting.",
+      "reference_answer": "Management by Exception ist ein PRINCE2-Prinzip, bei dem Verantwortung innerhalb definierter Toleranzen delegiert wird. Höhere Managementebenen greifen nur dann ein, wenn diese Toleranzen voraussichtlich überschritten werden. Dadurch bleibt das Projekt steuerbar, ohne unnötiges Mikromanagement zu erzeugen.",
+      "chat_prompt": "Du bist ein PRINCE2-Experte. Antworte sachlich, präzise und quellengebunden auf Deutsch.",
+      "official_sources": [
+        {
+          "title": "Was ist PRINCE2?",
+          "url": "https://www.prince2.com/de/what-is-prince2",
+          "publisher": "PRINCE2"
+        },
+        {
+          "title": "PRINCE2 Project Management Foundation (Version 7)",
+          "url": "https://www.peoplecert.org/browse-certifications/project-programme-and-portfolio-management/PRINCE2-2/prince2-7-foundation-3579",
+          "publisher": "PeopleCert"
+        }
+      ],
+      "archived": false,
+      "sort_order": 6
+    },
+    {
+      "module": "PRINCE2 Projektmanagement",
+      "category": "Prozesse",
+      "term": "Managing by Stages",
+      "question": "Warum steuert PRINCE2 Projekte in Phasen?",
+      "definition": "PRINCE2 unterteilt Projekte in steuerbare Managementphasen mit klaren Entscheidungspunkten.",
+      "how_it_works": "Am Ende jeder Phase werden Fortschritt, Risiken, Business Case und der Plan für die nächste Phase bewertet und freigegeben.",
+      "context": "Dadurch kann das Projekt schrittweise legitimiert und bei Bedarf angepasst oder gestoppt werden.",
+      "key_fact": "Phasen schaffen Governance-Punkte, an denen Kontrolle und Revalidierung formell stattfinden.",
+      "reference_answer": "PRINCE2 steuert Projekte in Phasen, um regelmäßige Entscheidungspunkte zu schaffen. Nach jeder Phase kann bewertet werden, ob Business Case, Risiken, Fortschritt und nächste Planung weiterhin tragfähig sind. So wird das Projekt kontrollierbar, anpassbar und governance-fähig.",
+      "chat_prompt": "Du bist ein PRINCE2-Experte. Antworte sachlich, präzise und quellengebunden auf Deutsch.",
+      "official_sources": [
+        {
+          "title": "Was ist PRINCE2?",
+          "url": "https://www.prince2.com/de/what-is-prince2",
+          "publisher": "PRINCE2"
+        },
+        {
+          "title": "PRINCE2 Project Management Foundation (Version 7)",
+          "url": "https://www.peoplecert.org/browse-certifications/project-programme-and-portfolio-management/PRINCE2-2/prince2-7-foundation-3579",
+          "publisher": "PeopleCert"
+        }
+      ],
+      "archived": false,
+      "sort_order": 7
+    },
+    {
+      "module": "PRINCE2 Projektmanagement",
+      "category": "Managementprodukte",
+      "term": "Business Case",
+      "question": "Welche Rolle spielt der Business Case in PRINCE2?",
+      "definition": "Der Business Case begründet, warum ein Projekt durchgeführt werden soll und welchen Nutzen es liefern muss.",
+      "how_it_works": "Er dokumentiert erwartete Vorteile, Kosten, Risiken und die wirtschaftliche Tragfähigkeit und wird im Projektverlauf aktualisiert.",
+      "context": "Er ist die zentrale Grundlage für Start-, Fortführungs- und Abbruchentscheidungen.",
+      "key_fact": "Ohne tragfähigen Business Case fehlt einem PRINCE2-Projekt die Legitimation.",
+      "reference_answer": "Der Business Case ist in PRINCE2 das zentrale Managementprodukt für die geschäftliche Begründung des Projekts. Er beschreibt Nutzen, Kosten, Risiken und die erwartete Wirtschaftlichkeit und bildet die Basis dafür, ob ein Projekt gestartet, fortgeführt oder beendet wird.",
+      "chat_prompt": "Du bist ein PRINCE2-Experte. Antworte sachlich, präzise und quellengebunden auf Deutsch.",
+      "official_sources": [
+        {
+          "title": "Was ist PRINCE2?",
+          "url": "https://www.prince2.com/de/what-is-prince2",
+          "publisher": "PRINCE2"
+        },
+        {
+          "title": "PRINCE2 Project Management Foundation (Version 7)",
+          "url": "https://www.peoplecert.org/browse-certifications/project-programme-and-portfolio-management/PRINCE2-2/prince2-7-foundation-3579",
+          "publisher": "PeopleCert"
+        }
+      ],
+      "archived": false,
+      "sort_order": 8
+    },
+    {
+      "module": "PRINCE2 Projektmanagement",
+      "category": "Managementprodukte",
+      "term": "Projektplan vs. Stage Plan",
+      "question": "Was ist der Unterschied zwischen Projektplan und Stage Plan in PRINCE2?",
+      "definition": "Der Projektplan beschreibt das Gesamtprojekt auf übergeordneter Ebene, der Stage Plan detailliert die jeweils aktuelle Managementphase.",
+      "how_it_works": "Der Projektplan dient der Gesamtsteuerung und Kommunikation; Stage Plans unterstützen die operative Führung einer konkreten Phase.",
+      "context": "So lassen sich Langfriststeuerung und kurzfristige Umsetzungsplanung getrennt, aber konsistent führen.",
+      "key_fact": "PRINCE2 plant hierarchisch: Gesamtbild oben, operative Detailplanung pro Phase unten.",
+      "reference_answer": "Der Projektplan zeigt das Gesamtprojekt auf einer übergeordneten Ebene und dient der Gesamtsteuerung. Ein Stage Plan beschreibt dagegen detailliert die Aktivitäten, Produkte und Steuerung der aktuellen Managementphase. PRINCE2 nutzt beide Ebenen, um strategische Übersicht und operative Steuerbarkeit zu kombinieren.",
+      "chat_prompt": "Du bist ein PRINCE2-Experte. Antworte sachlich, präzise und quellengebunden auf Deutsch.",
+      "official_sources": [
+        {
+          "title": "Was ist PRINCE2?",
+          "url": "https://www.prince2.com/de/what-is-prince2",
+          "publisher": "PRINCE2"
+        },
+        {
+          "title": "PRINCE2 Project Management Foundation (Version 7)",
+          "url": "https://www.peoplecert.org/browse-certifications/project-programme-and-portfolio-management/PRINCE2-2/prince2-7-foundation-3579",
+          "publisher": "PeopleCert"
+        }
+      ],
+      "archived": false,
+      "sort_order": 9
+    },
+    {
+      "module": "PRINCE2 Projektmanagement",
+      "category": "Risiken & Änderungen",
+      "term": "Risk Management",
+      "question": "Wie behandelt PRINCE2 Projektrisiken?",
+      "definition": "PRINCE2 behandelt Risiken strukturiert durch Identifikation, Bewertung, Planung von Gegenmaßnahmen und laufende Überwachung.",
+      "how_it_works": "Risiken werden dokumentiert, priorisiert und Verantwortlichen zugewiesen. Maßnahmen können Vermeidung, Reduktion, Transfer, Akzeptanz oder Eskalation umfassen.",
+      "context": "Risikomanagement ist nicht isoliert, sondern eng mit Business Case, Governance und Phasensteuerung verknüpft.",
+      "key_fact": "Risiken werden in PRINCE2 aktiv gemanagt und nicht nur gesammelt.",
+      "reference_answer": "PRINCE2 behandelt Risiken über einen strukturierten Managementansatz: Risiken werden identifiziert, bewertet, dokumentiert, Verantwortlichen zugewiesen und mit geeigneten Maßnahmen behandelt. Risikomanagement ist dabei eng an Projektsteuerung, Business Case und Eskalationslogik gekoppelt.",
+      "chat_prompt": "Du bist ein PRINCE2-Experte. Antworte sachlich, präzise und quellengebunden auf Deutsch.",
+      "official_sources": [
+        {
+          "title": "Was ist PRINCE2?",
+          "url": "https://www.prince2.com/de/what-is-prince2",
+          "publisher": "PRINCE2"
+        },
+        {
+          "title": "PRINCE2 Project Management Foundation (Version 7)",
+          "url": "https://www.peoplecert.org/browse-certifications/project-programme-and-portfolio-management/PRINCE2-2/prince2-7-foundation-3579",
+          "publisher": "PeopleCert"
+        }
+      ],
+      "archived": false,
+      "sort_order": 10
+    },
+    {
+      "module": "PRINCE2 Projektmanagement",
+      "category": "Risiken & Änderungen",
+      "term": "Issue Management",
+      "question": "Wie geht PRINCE2 mit Änderungen und Problemen um?",
+      "definition": "PRINCE2 behandelt Änderungsanträge, Abweichungen und Probleme strukturiert als Issues mit definierter Bewertung und Entscheidungslogik.",
+      "how_it_works": "Ein Issue wird erfasst, analysiert, hinsichtlich Auswirkungen bewertet und innerhalb von Toleranzen entschieden oder eskaliert.",
+      "context": "So werden Änderungen nachvollziehbar behandelt und nicht informell am Governance-Rahmen vorbei umgesetzt.",
+      "key_fact": "Nicht jede Änderung ist nur ein Task-Update; in PRINCE2 kann sie eine Governance-Entscheidung auslösen.",
+      "reference_answer": "PRINCE2 behandelt Änderungen und Probleme über ein geregeltes Issue Management. Issues werden dokumentiert, bewertet und hinsichtlich ihrer Auswirkungen auf Zeit, Kosten, Qualität, Umfang, Nutzen und Risiken geprüft. Je nach Tragweite werden sie innerhalb der Toleranzen entschieden oder an die nächsthöhere Ebene eskaliert.",
+      "chat_prompt": "Du bist ein PRINCE2-Experte. Antworte sachlich, präzise und quellengebunden auf Deutsch.",
+      "official_sources": [
+        {
+          "title": "Was ist PRINCE2?",
+          "url": "https://www.prince2.com/de/what-is-prince2",
+          "publisher": "PRINCE2"
+        },
+        {
+          "title": "PRINCE2 Project Management Foundation (Version 7)",
+          "url": "https://www.peoplecert.org/browse-certifications/project-programme-and-portfolio-management/PRINCE2-2/prince2-7-foundation-3579",
+          "publisher": "PeopleCert"
+        }
+      ],
+      "archived": false,
+      "sort_order": 11
+    },
+    {
+      "module": "PRINCE2 Projektmanagement",
+      "category": "Qualität & Abschluss",
+      "term": "Product Focus",
+      "question": "Was bedeutet Product Focus in PRINCE2?",
+      "definition": "Product Focus bedeutet, dass PRINCE2 Projekte konsequent an definierten Ergebnissen und Qualitätskriterien ausrichtet.",
+      "how_it_works": "Produkte werden mit Beschreibungen, Qualitätskriterien und Abnahmeregeln versehen, bevor die Umsetzung gesteuert wird.",
+      "context": "Dadurch wird nicht nur Aktivität gemanagt, sondern vor allem das lieferbare Ergebnis.",
+      "key_fact": "PRINCE2 steuert nicht primär Aufgaben, sondern Produkte und deren Akzeptanz.",
+      "reference_answer": "Product Focus bedeutet in PRINCE2, dass das Projektmanagement an klar definierten Produkten und deren Qualitätskriterien ausgerichtet wird. Statt nur Aktivitäten zu verfolgen, konzentriert sich die Methode auf die gewünschten Ergebnisse, deren Beschreibungen und deren Abnahme.",
+      "chat_prompt": "Du bist ein PRINCE2-Experte. Antworte sachlich, präzise und quellengebunden auf Deutsch.",
+      "official_sources": [
+        {
+          "title": "Was ist PRINCE2?",
+          "url": "https://www.prince2.com/de/what-is-prince2",
+          "publisher": "PRINCE2"
+        },
+        {
+          "title": "PRINCE2 Project Management Foundation (Version 7)",
+          "url": "https://www.peoplecert.org/browse-certifications/project-programme-and-portfolio-management/PRINCE2-2/prince2-7-foundation-3579",
+          "publisher": "PeopleCert"
+        }
+      ],
+      "archived": false,
+      "sort_order": 12
+    }
+  ]
+}

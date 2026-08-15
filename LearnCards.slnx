@@ -1,0 +1,6 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/LearnCards.McpServer/LearnCards.McpServer.csproj" />
+    <Project Path="src/LearnCards.Web/LearnCards.Web.csproj" />
+  </Folder>
+</Solution>

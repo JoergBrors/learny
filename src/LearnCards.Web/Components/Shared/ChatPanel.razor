@@ -1,0 +1,145 @@
+@* KI-Chat zur aktuellen Karte — Antworten werden live gestreamt *@
+@inject ChatService Chat
+@inject AuthenticationStateProvider AuthState
+@implements IDisposable
+
+<div class="chat-panel" role="region" aria-label="KI-Chat zur Karte @Card.Term">
+    <div class="chat-head">
+        <span>💬 Chat: <strong>@Card.Term</strong></span>
+        <button class="icon-btn" @onclick="() => OnClose.InvokeAsync()" aria-label="Chat schließen">✕</button>
+    </div>
+
+    <div class="chat-messages" id="chat-scroll">
+        @if (_messages.Count == 0)
+        {
+            <p class="chat-empty muted">Stelle eine Frage zu „@Card.Term" — der Assistent kennt den Karteninhalt.</p>
+        }
+        @foreach (var msg in _messages)
+        {
+            <div class="chat-msg @(msg.Role == "user" ? "chat-user" : "chat-assistant")">
+                @msg.Content
+            </div>
+        }
+        @if (_streaming && _current.Length > 0)
+        {
+            <div class="chat-msg chat-assistant">@_current<span class="cursor">▍</span></div>
+        }
+        else if (_streaming)
+        {
+            <div class="chat-msg chat-assistant"><span class="typing">Denkt nach…</span></div>
+        }
+    </div>
+
+    @if (_error is not null)
+    {
+        <div class="alert alert-error" role="alert">@_error</div>
+    }
+
+    @if (_history.Count > 0)
+    {
+        <details class="chat-history">
+            <summary>Verlauf anzeigen (@_history.Count)</summary>
+            <div class="graded-list">
+                @foreach (var entry in _history)
+                {
+                    <div class="graded-item">
+                        <div class="graded-label">Gespeicherte Frage</div>
+                        <div class="graded-q">@entry.NormalizedQuestion</div>
+                        @if (!string.Equals(entry.OriginalQuestion, entry.NormalizedQuestion, StringComparison.Ordinal))
+                        {
+                            <div class="graded-label">Originale Frage</div>
+                            <div class="graded-a muted">@entry.OriginalQuestion</div>
+                        }
+                        <div class="graded-label">Antwort</div>
+                        <div class="graded-solution-body">@entry.AssistantAnswer</div>
+                    </div>
+                }
+            </div>
+        </details>
+    }
+
+    <form class="chat-input-row" @onsubmit="SendAsync" @onsubmit:preventDefault>
+        <input class="input chat-input" placeholder="Frage stellen…" @bind="_input" @bind:event="oninput"
+               disabled="@_streaming" aria-label="Chat-Nachricht" />
+        <button type="submit" class="btn btn-primary" disabled="@(_streaming || string.IsNullOrWhiteSpace(_input))">Senden</button>
+    </form>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Card Card { get; set; } = default!;
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private readonly List<ChatMessage> _messages = new();
+    private string _input = "";
+    private string _current = "";
+    private bool _streaming;
+    private string? _error;
+    private CancellationTokenSource? _cts;
+    private List<ChatHistoryEntry> _history = new();
+    private string _userSub = "";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _userSub = auth.User.FindFirst("sub")?.Value ?? "";
+        await LoadHistoryAsync();
+    }
+
+    private async Task SendAsync()
+    {
+        if (_streaming || string.IsNullOrWhiteSpace(_input)) return;
+        _error = null;
+        var originalQuestion = _input.Trim();
+        _messages.Add(new ChatMessage { Role = "user", Content = originalQuestion });
+        _input = "";
+        _current = "";
+        _streaming = true;
+        _cts = new CancellationTokenSource();
+
+        try
+        {
+            await foreach (var token in Chat.StreamAsync(Card, _messages, _cts.Token))
+            {
+                _current += token;
+                StateHasChanged();
+            }
+            _messages.Add(new ChatMessage { Role = "assistant", Content = _current });
+            if (!string.IsNullOrWhiteSpace(_userSub) && !string.IsNullOrWhiteSpace(_current))
+            {
+                var normalized = await Chat.NormalizeQuestionAsync(Card, originalQuestion, _cts.Token);
+                await Chat.SaveHistoryAsync(new ChatHistoryEntry
+                {
+                    UserSub = _userSub,
+                    CardId = Card.Id,
+                    OriginalQuestion = originalQuestion,
+                    NormalizedQuestion = normalized,
+                    AssistantAnswer = _current,
+                    CreatedAt = DateTime.UtcNow,
+                });
+                await LoadHistoryAsync();
+            }
+        }
+        catch (OperationCanceledException) { /* abgebrochen */ }
+        catch (Exception ex)
+        {
+            _error = "Chat-Fehler: " + ex.Message;
+        }
+        finally
+        {
+            _current = "";
+            _streaming = false;
+        }
+    }
+
+    private async Task LoadHistoryAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_userSub))
+        {
+            _history = new();
+            return;
+        }
+        _history = await Chat.GetHistoryAsync(_userSub, Card.Id, 20);
+    }
+
+    public void Dispose() => _cts?.Cancel();
+}
