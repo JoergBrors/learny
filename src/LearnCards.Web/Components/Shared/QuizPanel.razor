@@ -19,6 +19,53 @@
             <p class="muted">Die KI generiert Verständnisfragen aus deinem Kartenpool. Antworten werden im Freitext bewertet.</p>
             <label class="form-label" for="numq">Anzahl Fragen: <strong>@_numQuestions</strong></label>
             <input id="numq" type="range" min="1" max="15" class="range" @bind="_numQuestions" @bind:event="oninput" />
+            @if (_history.Count > 0)
+            {
+                <details class="chat-history quiz-history">
+                    <summary>Quiz-Verlauf anzeigen (@_history.Count)</summary>
+                    <div class="graded-list">
+                        @foreach (var entry in _history)
+                        {
+                            <div class="graded-item">
+                                <div class="graded-q">@entry.Result.CompletedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm") · @entry.Result.Score / @entry.Result.MaxScore Punkte · Note @entry.Result.Grade</div>
+                                <div class="graded-f">
+                                    <span class="pill">@entry.Stats.QuestionCount Fragen</span>
+                                    <span class="pill">@entry.Stats.UsedCheckedCardCount / @entry.Stats.CheckedCardCount Karten genutzt</span>
+                                    <span class="pill">Gewichtung @entry.Stats.DistributionWeight</span>
+                                </div>
+                                <div class="graded-a muted">
+                                    Abdeckung gecheckter Karten: @(entry.Stats.CheckedCoverageRatio * 100)% ·
+                                    Fragen pro genutzter Karte: @entry.Stats.QuestionsPerUsedCard
+                                </div>
+                                @if (entry.Stats.CardUsage.Count > 0)
+                                {
+                                    <div class="graded-label">Kartenverteilung</div>
+                                    <ul class="source-list">
+                                        @foreach (var usage in entry.Stats.CardUsage)
+                                        {
+                                            <li>@usage.Term (@usage.Category): @usage.QuestionCount Frage(n), Gewicht @((usage.RelativeWeight * 100).ToString("0.#"))%</li>
+                                        }
+                                    </ul>
+                                }
+                                @if (entry.Answers.Count > 0)
+                                {
+                                    <div class="graded-label">Fragen, Antworten und Punkte</div>
+                                    <div class="graded-list">
+                                        @foreach (var answer in entry.Answers)
+                                        {
+                                            <div class="graded-item">
+                                                <div class="graded-q">@answer.Question</div>
+                                                <div class="graded-a muted">@answer.UserAnswer</div>
+                                                <div class="graded-f"><span class="pill">@answer.Score / @answer.Max</span> @(string.IsNullOrWhiteSpace(answer.SourceTerm) ? "" : $"Quelle: {answer.SourceTerm}")</div>
+                                            </div>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                </details>
+            }
             <div class="modal-actions">
                 <button class="btn btn-ghost" @onclick="() => OnClose.InvokeAsync()">Abbrechen</button>
                 <button class="btn btn-primary" @onclick="StartAsync" disabled="@_loading">
@@ -53,13 +100,37 @@
                 <div>
                     <div class="quiz-score">@_result.Score / @_result.MaxScore Punkte (@_result.Percentage%)</div>
                     <p class="muted">@_result.Feedback</p>
+                    <p class="muted">
+                        @_result.Stats.QuestionCount Fragen aus @_result.Stats.UsedCheckedCardCount von @_result.Stats.CheckedCardCount gecheckten Karten ·
+                        Gewichtung @_result.Stats.DistributionWeight
+                    </p>
                 </div>
             </div>
+            @if (_result.Stats.CardUsage.Count > 0)
+            {
+                <div class="graded-item">
+                    <div class="graded-label">Quiz-Statistik</div>
+                    <div class="graded-a muted">
+                        Abdeckung gecheckter Karten: @(_result.Stats.CheckedCoverageRatio * 100)% ·
+                        Fragen pro genutzter Karte: @_result.Stats.QuestionsPerUsedCard
+                    </div>
+                    <ul class="source-list">
+                        @foreach (var usage in _result.Stats.CardUsage)
+                        {
+                            <li>@usage.Term (@usage.Category): @usage.QuestionCount Frage(n), Gewicht @((usage.RelativeWeight * 100).ToString("0.#"))%</li>
+                        }
+                    </ul>
+                </div>
+            }
             <div class="graded-list">
                 @foreach (var g in _result.GradedAnswers)
                 {
                     <div class="graded-item">
                         <div class="graded-q">@g.Question</div>
+                        @if (!string.IsNullOrWhiteSpace(g.SourceTerm))
+                        {
+                            <div class="graded-a muted">Quellenkarte: @g.SourceTerm</div>
+                        }
                         <div class="graded-label">Markierte Antwort</div>
                         <div class="graded-a muted">@g.UserAnswer</div>
                         <div class="graded-f"><span class="pill">@g.Score / @g.Max</span> @g.Feedback</div>
@@ -114,15 +185,22 @@
     private QuizResultResponse? _result;
     private bool _loading;
     private string? _error;
+    private string _userSub = "";
+    private List<QuizHistoryEntry> _history = new();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _userSub = auth.User.FindFirst("sub")?.Value ?? "unknown";
+        await LoadHistoryAsync();
+    }
 
     private async Task StartAsync()
     {
         _loading = true; _error = null;
         try
         {
-            var auth = await AuthState.GetAuthenticationStateAsync();
-            var sub = auth.User.FindFirst("sub")?.Value ?? "unknown";
-            _questions = await Quiz.StartQuizAsync(ModuleId, Category, _numQuestions, sub);
+            _questions = await Quiz.StartQuizAsync(ModuleId, Category, _numQuestions, _userSub);
             _answers = Enumerable.Repeat("", _questions.Count).ToList();
             _currentQ = 0;
             _phase = Phase.Answering;
@@ -136,15 +214,14 @@
         _loading = true; _error = null;
         try
         {
-            var auth = await AuthState.GetAuthenticationStateAsync();
-            var sub = auth.User.FindFirst("sub")?.Value ?? "unknown";
             var req = new QuizSubmitRequest
             {
                 ModuleId = ModuleId,
                 Category = Category,
-                Answers = _questions.Select((q, i) => new QuizAnswerItem { Question = q.Question, UserAnswer = _answers[i] }).ToList(),
+                Answers = _questions.Select((q, i) => new QuizAnswerItem { Question = q.Question, UserAnswer = _answers[i], SourceCardId = q.SourceCardId }).ToList(),
             };
-            _result = await Quiz.SubmitQuizAsync(req, sub);
+            _result = await Quiz.SubmitQuizAsync(req, _userSub);
+            await LoadHistoryAsync();
             _phase = Phase.Results;
         }
         catch (Exception ex) { _error = "Bewertung fehlgeschlagen: " + ex.Message; }
@@ -161,5 +238,15 @@
     private async Task CloseIfIdle()
     {
         if (_phase == Phase.Config) await OnClose.InvokeAsync();
+    }
+
+    private async Task LoadHistoryAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_userSub))
+        {
+            _history = new();
+            return;
+        }
+        _history = await Quiz.GetHistoryAsync(_userSub, ModuleId, 10);
     }
 }
