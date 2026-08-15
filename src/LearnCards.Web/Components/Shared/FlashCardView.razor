@@ -14,7 +14,9 @@
     @* Karte *@
     <div class="flip-scene" tabindex="0" role="button" aria-pressed="@_flipped"
          aria-label="@(_flipped ? $"Rückseite: {Card.Term}" : $"Vorderseite: {Card.Term}. Klicken zum Umdrehen")"
-         @onclick="Flip" @onkeydown="HandleKey">
+         @onclick="HandleClick" @onkeydown="HandleKey"
+         @onpointerdown="HandlePointerDown" @onpointermove="HandlePointerMove" @onpointerup="HandlePointerUp"
+         @onpointercancel="HandlePointerCancel">
         <div class="flip-inner @(_flipped ? "flipped" : "")">
             <div class="flip-face flip-front" aria-hidden="@_flipped">
                 <div>
@@ -82,6 +84,7 @@
             <button class="btn btn-ghost" @onclick="OnNextClick" disabled="@(Index >= Total - 1)" aria-label="Nächste Karte">Weiter →</button>
         </div>
         <div class="action-group">
+            <button class="btn btn-ghost btn-sm" @onclick="() => OnQuizCard.InvokeAsync(Card.Id)" aria-label="Quiz nur zu dieser Karte starten">🎯 Karten-Quiz</button>
             <button class="btn btn-primary btn-sm" @onclick="() => _chatOpen = !_chatOpen" aria-label="KI-Chatbot zu dieser Karte öffnen">💬 Chat</button>
             <button class="btn btn-sm @(MarkedKnown ? "btn-known-active" : "btn-known")" @onclick="() => OnMarkKnown.InvokeAsync(Card.Id)"
                     aria-pressed="@MarkedKnown" aria-label="Als geprüft markieren">✔ Check</button>
@@ -108,12 +111,17 @@
     [Parameter] public EventCallback OnNext { get; set; }
     [Parameter] public EventCallback OnPrev { get; set; }
     [Parameter] public EventCallback<string> OnArchive { get; set; }
+    [Parameter] public EventCallback<string> OnQuizCard { get; set; }
     [Parameter] public EventCallback<string> OnMarkKnown { get; set; }
     [Parameter] public EventCallback<string> OnMarkReview { get; set; }
 
     private bool _flipped;
     private bool _chatOpen;
     private string _lastCardId = "";
+    private double _pointerStartX;
+    private double _pointerStartY;
+    private bool _pointerMoved;
+    private const double PointerMoveThreshold = 12;
 
     protected override void OnParametersSet()
     {
@@ -126,8 +134,34 @@
 
     private void Flip() => _flipped = !_flipped;
 
+    private void HandleClick()
+    {
+        if (_pointerMoved) return;
+        Flip();
+    }
+
     private async Task OnNextClick() => await OnNext.InvokeAsync();
     private async Task OnPrevClick() => await OnPrev.InvokeAsync();
+
+    private void HandlePointerDown(PointerEventArgs e)
+    {
+        _pointerStartX = e.ClientX;
+        _pointerStartY = e.ClientY;
+        _pointerMoved = false;
+    }
+
+    private void HandlePointerMove(PointerEventArgs e)
+    {
+        if (_pointerMoved) return;
+        var dx = Math.Abs(e.ClientX - _pointerStartX);
+        var dy = Math.Abs(e.ClientY - _pointerStartY);
+        if (dx > PointerMoveThreshold || dy > PointerMoveThreshold)
+            _pointerMoved = true;
+    }
+
+    private void HandlePointerUp(PointerEventArgs e) => HandlePointerMove(e);
+
+    private void HandlePointerCancel() => _pointerMoved = true;
 
     private async Task HandleKey(KeyboardEventArgs e)
     {

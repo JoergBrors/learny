@@ -296,7 +296,12 @@ kbd {
 .progress-track { height: 6px; background: var(--surface-2); border-radius: 999px; overflow: hidden; }
 .progress-fill { height: 100%; background: linear-gradient(90deg, var(--brand-400), var(--brand-600)); border-radius: 999px; transition: width .3s; }
 
-.flip-scene { perspective: 1200px; cursor: pointer; width: 100%; }
+.flip-scene {
+  perspective: 1200px;
+  cursor: pointer;
+  width: 100%;
+  touch-action: pan-y pinch-zoom;
+}
 .flip-inner {
   position: relative; min-height: clamp(25rem, 58vh, 40rem);
   transform-style: preserve-3d;
@@ -310,7 +315,8 @@ kbd {
   border-radius: var(--radius); box-shadow: var(--shadow-lg);
   padding: clamp(1rem, 2vw, 2rem);
   overflow: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior: auto;
+  -webkit-overflow-scrolling: touch;
   word-break: break-word;
 }
 .flip-front { display: flex; flex-direction: column; justify-content: space-between; }
@@ -399,6 +405,27 @@ kbd {
 }
 .chat-history .graded-list {
   padding: .9rem;
+}
+.quiz-history-list {
+  padding: .9rem;
+  display: flex;
+  flex-direction: column;
+  gap: .8rem;
+}
+.quiz-run-item summary {
+  list-style: none;
+}
+.quiz-run-item summary::-webkit-details-marker {
+  display: none;
+}
+.quiz-run-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: .8rem;
+}
+.quiz-answer-item {
+  background: color-mix(in srgb, var(--surface-2) 35%, var(--surface));
 }
 
 /* ─── Quiz / Modal ───────────────────────────────────────────────── */

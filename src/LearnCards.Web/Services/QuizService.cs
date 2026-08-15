@@ -19,15 +19,20 @@ public class QuizService
         _openAi = openAi;
     }
 
-    public Task<List<QuizHistoryEntry>> GetHistoryAsync(string userSub, string moduleId, int limit = 10) =>
-        _repo.QuizHistoryDetailedAsync(userSub, moduleId, limit);
+    public Task<List<QuizHistoryEntry>> GetHistoryAsync(string userSub, string moduleId, string? cardId = null, int limit = 10) =>
+        _repo.QuizHistoryDetailedAsync(userSub, moduleId, cardId, limit);
 
-    public async Task<List<QuizQuestion>> StartQuizAsync(string moduleId, string category, int numQuestions, string userSub, CancellationToken ct = default)
+    public Task<int> DeleteHistoryEntryAsync(string userSub, string quizResultId) =>
+        _repo.DeleteQuizResultAsync(userSub, quizResultId);
+
+    public async Task<List<QuizQuestion>> StartQuizAsync(string moduleId, string category, int numQuestions, string userSub, string? cardId = null, CancellationToken ct = default)
     {
         numQuestions = Math.Clamp(numQuestions, 1, 20);
-        var cards = await _repo.ListCheckedCardsAsync(moduleId, string.IsNullOrEmpty(category) ? null : category, userSub);
+        var cards = await ResolveQuizCardsAsync(moduleId, category, userSub, cardId);
         if (cards.Count == 0)
-            throw new InvalidOperationException("Keine markierten Karten für dieses Modul / diese Kategorie gefunden. Markiere zuerst Karten mit Check.");
+            throw new InvalidOperationException(string.IsNullOrWhiteSpace(cardId)
+                ? "Keine markierten Karten für dieses Modul / diese Kategorie gefunden. Markiere zuerst Karten mit Check."
+                : "Die ausgewählte Karte wurde nicht gefunden oder ist nicht aktiv.");
 
         if (!_openAi.IsConfigured)
         {
@@ -96,7 +101,7 @@ public class QuizService
 
     public async Task<QuizResultResponse> SubmitQuizAsync(QuizSubmitRequest req, string userSub, CancellationToken ct = default)
     {
-        var checkedCards = await _repo.ListCheckedCardsAsync(req.ModuleId, string.IsNullOrEmpty(req.Category) ? null : req.Category, userSub);
+        var checkedCards = await ResolveQuizCardsAsync(req.ModuleId, req.Category, userSub, req.CardId);
         QuizResultResponse result;
         if (_openAi.IsConfigured)
             result = await GradeWithOpenAiAsync(req, ct);
@@ -108,6 +113,7 @@ public class QuizService
         var record = new QuizResultRecord
         {
             ModuleId = req.ModuleId,
+            CardId = req.CardId,
             UserSub = userSub,
             Category = req.Category,
             Score = result.Score,
@@ -123,7 +129,7 @@ public class QuizService
 
     private async Task<QuizResultResponse> GradeWithOpenAiAsync(QuizSubmitRequest req, CancellationToken ct)
     {
-        var cards = await _repo.ListCardsAsync(req.ModuleId, string.IsNullOrEmpty(req.Category) ? null : req.Category, archived: false);
+        var cards = await ResolveCardsForEvaluationAsync(req.ModuleId, req.Category, req.CardId);
         var qaPairs = string.Join("\n", req.Answers.Select((a, i) => $"Frage {i + 1}: {a.Question}\nAntwort: {a.UserAnswer}"));
         var references = string.Join("\n\n", req.Answers.Select((a, i) =>
         {
@@ -226,7 +232,7 @@ public class QuizService
     /// <summary>Heuristische Offline-Bewertung: Wortüberlappung der Antwort mit der Kartendefinition.</summary>
     private async Task<QuizResultResponse> GradeLocallyAsync(QuizSubmitRequest req)
     {
-        var cards = await _repo.ListCardsAsync(req.ModuleId, string.IsNullOrEmpty(req.Category) ? null : req.Category, archived: false);
+        var cards = await ResolveCardsForEvaluationAsync(req.ModuleId, req.Category, req.CardId);
         var graded = new List<GradedAnswer>();
 
         foreach (var a in req.Answers)
@@ -349,5 +355,31 @@ public class QuizService
             - Offizielle Quellen:
             {{sources}}
             """;
+    }
+
+    private async Task<List<Card>> ResolveQuizCardsAsync(string moduleId, string category, string userSub, string? cardId)
+    {
+        if (!string.IsNullOrWhiteSpace(cardId))
+        {
+            var card = await _repo.GetCardAsync(cardId);
+            if (card is null || card.Archived || !string.Equals(card.ModuleId, moduleId, StringComparison.OrdinalIgnoreCase))
+                return new();
+            return new List<Card> { card };
+        }
+
+        return await _repo.ListCheckedCardsAsync(moduleId, string.IsNullOrEmpty(category) ? null : category, userSub);
+    }
+
+    private async Task<List<Card>> ResolveCardsForEvaluationAsync(string moduleId, string category, string? cardId)
+    {
+        if (!string.IsNullOrWhiteSpace(cardId))
+        {
+            var card = await _repo.GetCardAsync(cardId);
+            if (card is null || card.Archived || !string.Equals(card.ModuleId, moduleId, StringComparison.OrdinalIgnoreCase))
+                return new();
+            return new List<Card> { card };
+        }
+
+        return await _repo.ListCardsAsync(moduleId, string.IsNullOrEmpty(category) ? null : category, archived: false);
     }
 }

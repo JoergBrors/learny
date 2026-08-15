@@ -118,8 +118,8 @@ public static class ApiEndpoints
             try
             {
                 var sub = http.User.FindFirst("sub")?.Value ?? "mcp-client";
-                var questions = await quiz.StartQuizAsync(req.ModuleId, req.Category, req.NumQuestions, sub);
-                return Results.Ok(new { questions, module_id = req.ModuleId, category = req.Category });
+                var questions = await quiz.StartQuizAsync(req.ModuleId, req.Category, req.NumQuestions, sub, req.CardId);
+                return Results.Ok(new { questions, module_id = req.ModuleId, category = req.Category, card_id = req.CardId });
             }
             catch (InvalidOperationException e) { return Results.Json(new { detail = e.Message }, statusCode: 404); }
         });
@@ -131,10 +131,18 @@ public static class ApiEndpoints
             return Results.Ok(result);
         });
 
-        api.MapGet("/quiz/history", async (CardRepository repo, HttpContext http, string? module_id) =>
+        api.MapGet("/quiz/history", async (CardRepository repo, HttpContext http, string? module_id, string? card_id) =>
         {
             var sub = http.User.FindFirst("sub")?.Value ?? "mcp-client";
-            return Results.Ok(await repo.QuizHistoryAsync(sub, module_id));
+            return Results.Ok(await repo.QuizHistoryAsync(sub, module_id, card_id));
+        });
+
+        api.MapDelete("/quiz/history/{quizId}", async (string quizId, QuizService quiz, HttpContext http) =>
+        {
+            var sub = http.User.FindFirst("sub")?.Value ?? "mcp-client";
+            return await quiz.DeleteHistoryEntryAsync(sub, quizId) == 0
+                ? Results.Json(new { detail = "Quiz history entry not found" }, statusCode: 404)
+                : Results.NoContent();
         });
 
         // ─── User Preferences / Card State / Chat History ──────────────────

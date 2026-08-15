@@ -225,27 +225,28 @@ public class CardRepository
     // ─── Quiz-Ergebnisse ────────────────────────────────────────────────────
 
     public Task SaveQuizResultAsync(QuizResultRecord r) => _db.ExecuteAsync("""
-        INSERT INTO quiz_results (id, module_id, user_sub, category, score, max_score, grade, feedback, answers_json, stats_json, completed_at)
-        VALUES (@id, @module_id, @user_sub, @category, @score, @max_score, @grade, @feedback, @answers_json, @stats_json, @completed_at)
+        INSERT INTO quiz_results (id, module_id, card_id, user_sub, category, score, max_score, grade, feedback, answers_json, stats_json, completed_at)
+        VALUES (@id, @module_id, @card_id, @user_sub, @category, @score, @max_score, @grade, @feedback, @answers_json, @stats_json, @completed_at)
         """, new (string, object?)[]
     {
-        ("id", r.Id), ("module_id", r.ModuleId), ("user_sub", r.UserSub), ("category", r.Category),
+        ("id", r.Id), ("module_id", r.ModuleId), ("card_id", string.IsNullOrWhiteSpace(r.CardId) ? null : r.CardId), ("user_sub", r.UserSub), ("category", r.Category),
         ("score", r.Score), ("max_score", r.MaxScore), ("grade", r.Grade), ("feedback", r.Feedback),
         ("answers_json", r.AnswersJson), ("stats_json", r.StatsJson), ("completed_at", r.CompletedAt),
     });
 
-    public async Task<List<QuizResultRecord>> QuizHistoryAsync(string userSub, string? moduleId = null, int limit = 50)
+    public async Task<List<QuizResultRecord>> QuizHistoryAsync(string userSub, string? moduleId = null, string? cardId = null, int limit = 50)
     {
         var sql = "SELECT * FROM quiz_results WHERE user_sub = @u";
         var args = new List<(string, object?)> { ("u", userSub) };
         if (!string.IsNullOrEmpty(moduleId)) { sql += " AND module_id = @m"; args.Add(("m", moduleId)); }
+        if (!string.IsNullOrEmpty(cardId)) { sql += " AND card_id = @c"; args.Add(("c", cardId)); }
         sql += $" ORDER BY completed_at DESC LIMIT {Math.Clamp(limit, 1, 200)}";
         return (await _db.QueryAsync(sql, args)).Select(MapQuizResult).ToList();
     }
 
-    public async Task<List<QuizHistoryEntry>> QuizHistoryDetailedAsync(string userSub, string? moduleId = null, int limit = 20)
+    public async Task<List<QuizHistoryEntry>> QuizHistoryDetailedAsync(string userSub, string? moduleId = null, string? cardId = null, int limit = 20)
     {
-        var rows = await QuizHistoryAsync(userSub, moduleId, limit);
+        var rows = await QuizHistoryAsync(userSub, moduleId, cardId, limit);
         return rows.Select(r => new QuizHistoryEntry
         {
             Result = r,
@@ -253,6 +254,16 @@ public class CardRepository
             Answers = ParseGradedAnswers(r.AnswersJson),
         }).ToList();
     }
+
+    public Task<int> DeleteQuizResultAsync(string userSub, string quizResultId) =>
+        _db.ExecuteAsync("""
+            DELETE FROM quiz_results
+            WHERE id = @id AND user_sub = @user_sub
+            """, new (string, object?)[]
+        {
+            ("id", quizResultId),
+            ("user_sub", userSub),
+        });
 
     // ─── Benutzerstatus / Präferenzen ─────────────────────────────────────
 
@@ -378,6 +389,7 @@ public class CardRepository
     {
         Id = r.GetValueOrDefault("id") ?? "",
         ModuleId = r.GetValueOrDefault("module_id") ?? "",
+        CardId = r.GetValueOrDefault("card_id") ?? "",
         UserSub = r.GetValueOrDefault("user_sub") ?? "",
         Category = r.GetValueOrDefault("category") ?? "",
         Score = DbValue.ToDouble(r.GetValueOrDefault("score")),

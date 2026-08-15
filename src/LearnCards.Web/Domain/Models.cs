@@ -49,6 +49,7 @@ public class QuizResultRecord
 {
     public string Id { get; set; } = Guid.NewGuid().ToString();
     public string ModuleId { get; set; } = "";
+    public string CardId { get; set; } = "";
     public string UserSub { get; set; } = "";
     public string Category { get; set; } = "";
     public double Score { get; set; }
@@ -146,6 +147,7 @@ public class QuizStartRequest
 {
     public string ModuleId { get; set; } = "";
     public string Category { get; set; } = "";
+    public string CardId { get; set; } = "";
     public int NumQuestions { get; set; } = 5;
 }
 
@@ -168,6 +170,7 @@ public class QuizSubmitRequest
 {
     public string ModuleId { get; set; } = "";
     public string Category { get; set; } = "";
+    public string CardId { get; set; } = "";
     public List<QuizAnswerItem> Answers { get; set; } = new();
 }
 
