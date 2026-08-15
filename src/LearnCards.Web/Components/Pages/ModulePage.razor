@@ -88,6 +88,7 @@
                            MarkedKnown="_checked.Contains(_cards[_index].Id)"
                            MarkedReview="_review.Contains(_cards[_index].Id)"
                            OnNext="Next" OnPrev="Prev"
+                           OnQuizCard="OpenCardQuiz"
                            OnArchive="ArchiveAsync"
                            OnMarkKnown="ToggleCheckedAsync" OnMarkReview="ToggleReviewAsync" />
 
@@ -99,7 +100,7 @@
 
         @if (_quizOpen)
         {
-            <QuizPanel ModuleId="@ModuleId" Category="@(_category ?? "")" OnClose="() => _quizOpen = false" />
+            <QuizPanel ModuleId="@ModuleId" Category="@(_category ?? "")" CardId="@_quizCardId" CardTerm="@_quizCardTerm" OnClose="CloseQuiz" />
         }
     }
 </div>
@@ -115,6 +116,8 @@
     private int _index;
     private bool _loading = true;
     private bool _quizOpen;
+    private string _quizCardId = "";
+    private string _quizCardTerm = "";
     private bool _showArchive;
     private int _archivedCount;
     private readonly HashSet<string> _checked = new();
@@ -190,6 +193,22 @@
         await ReloadAsync();
     }
 
+    private Task OpenCardQuiz(string cardId)
+    {
+        _quizCardId = cardId;
+        _quizCardTerm = _cards.FirstOrDefault(c => c.Id == cardId)?.Term ?? "";
+        _quizOpen = true;
+        return Task.CompletedTask;
+    }
+
+    private Task CloseQuiz()
+    {
+        _quizOpen = false;
+        _quizCardId = "";
+        _quizCardTerm = "";
+        return Task.CompletedTask;
+    }
+
     private Task SaveStateAsync(string id) =>
         string.IsNullOrWhiteSpace(_userSub)
             ? Task.CompletedTask
@@ -201,5 +220,4 @@
                 MarkedReview = _review.Contains(id),
                 UpdatedAt = DateTime.UtcNow,
             });
-}
 }

@@ -5,7 +5,7 @@
 <div class="modal-backdrop" @onclick="CloseIfIdle">
     <div class="modal" role="dialog" aria-modal="true" aria-label="Prüfungsmodus" @onclick:stopPropagation>
         <div class="modal-head">
-            <h2>🎓 Prüfungsmodus @(string.IsNullOrEmpty(Category) ? "" : $"— {Category}")</h2>
+            <h2>🎓 Prüfungsmodus @TitleSuffix</h2>
             <button class="icon-btn" @onclick="() => OnClose.InvokeAsync()" aria-label="Quiz schließen">✕</button>
         </div>
 
@@ -23,18 +23,26 @@
             {
                 <details class="chat-history quiz-history">
                     <summary>Quiz-Verlauf anzeigen (@_history.Count)</summary>
-                    <div class="graded-list">
+                    <div class="quiz-history-list">
                         @foreach (var entry in _history)
                         {
-                            <div class="graded-item">
-                                <div class="graded-q">@entry.Result.CompletedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm") · @entry.Result.Score / @entry.Result.MaxScore Punkte · Note @entry.Result.Grade</div>
-                                <div class="graded-f">
-                                    <span class="pill">@entry.Stats.QuestionCount Fragen</span>
-                                    <span class="pill">@entry.Stats.UsedCheckedCardCount / @entry.Stats.CheckedCardCount Karten genutzt</span>
-                                    <span class="pill">Gewichtung @entry.Stats.DistributionWeight</span>
-                                </div>
+                            <details class="graded-item quiz-run-item">
+                                <summary class="quiz-run-summary">
+                                    <div class="quiz-run-head">
+                                        <div>
+                                            <div class="graded-q">Quizlauf vom @entry.Result.CompletedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</div>
+                                            <div class="graded-f">
+                                                <span class="pill">@entry.Result.Score / @entry.Result.MaxScore Punkte</span>
+                                                <span class="pill">Note @entry.Result.Grade</span>
+                                                <span class="pill">@entry.Stats.QuestionCount Fragen</span>
+                                            </div>
+                                        </div>
+                                        <button type="button" class="btn btn-sm btn-danger" @onclick="() => DeleteHistoryEntryAsync(entry.Result.Id)" @onclick:stopPropagation>Löschen</button>
+                                    </div>
+                                </summary>
                                 <div class="graded-a muted">
-                                    Abdeckung gecheckter Karten: @(entry.Stats.CheckedCoverageRatio * 100)% ·
+                                    Genutzte Karten: @entry.Stats.UsedCheckedCardCount / @entry.Stats.CheckedCardCount ·
+                                    Gewichtung: @entry.Stats.DistributionWeight ·
                                     Fragen pro genutzter Karte: @entry.Stats.QuestionsPerUsedCard
                                 </div>
                                 @if (entry.Stats.CardUsage.Count > 0)
@@ -49,19 +57,24 @@
                                 }
                                 @if (entry.Answers.Count > 0)
                                 {
-                                    <div class="graded-label">Fragen, Antworten und Punkte</div>
+                                    <div class="graded-label">Fragen dieses Quizlaufs</div>
                                     <div class="graded-list">
                                         @foreach (var answer in entry.Answers)
                                         {
-                                            <div class="graded-item">
+                                            <div class="graded-item quiz-answer-item">
                                                 <div class="graded-q">@answer.Question</div>
+                                                @if (!string.IsNullOrWhiteSpace(answer.SourceTerm))
+                                                {
+                                                    <div class="graded-a muted">Quellenkarte: @answer.SourceTerm</div>
+                                                }
+                                                <div class="graded-label">Gegebene Antwort</div>
                                                 <div class="graded-a muted">@answer.UserAnswer</div>
-                                                <div class="graded-f"><span class="pill">@answer.Score / @answer.Max</span> @(string.IsNullOrWhiteSpace(answer.SourceTerm) ? "" : $"Quelle: {answer.SourceTerm}")</div>
+                                                <div class="graded-f"><span class="pill">@answer.Score / @answer.Max</span> @answer.Feedback</div>
                                             </div>
                                         }
                                     </div>
                                 }
-                            </div>
+                            </details>
                         }
                     </div>
                 </details>
@@ -173,6 +186,8 @@
 @code {
     [Parameter, EditorRequired] public string ModuleId { get; set; } = "";
     [Parameter] public string Category { get; set; } = "";
+    [Parameter] public string CardId { get; set; } = "";
+    [Parameter] public string CardTerm { get; set; } = "";
     [Parameter] public EventCallback OnClose { get; set; }
 
     private enum Phase { Config, Answering, Results }
@@ -187,6 +202,9 @@
     private string? _error;
     private string _userSub = "";
     private List<QuizHistoryEntry> _history = new();
+    private string TitleSuffix => !string.IsNullOrWhiteSpace(CardTerm)
+        ? $"— Karte: {CardTerm}"
+        : (string.IsNullOrEmpty(Category) ? "" : $"— {Category}");
 
     protected override async Task OnParametersSetAsync()
     {
@@ -200,7 +218,7 @@
         _loading = true; _error = null;
         try
         {
-            _questions = await Quiz.StartQuizAsync(ModuleId, Category, _numQuestions, _userSub);
+            _questions = await Quiz.StartQuizAsync(ModuleId, Category, _numQuestions, _userSub, CardId);
             _answers = Enumerable.Repeat("", _questions.Count).ToList();
             _currentQ = 0;
             _phase = Phase.Answering;
@@ -218,6 +236,7 @@
             {
                 ModuleId = ModuleId,
                 Category = Category,
+                CardId = CardId,
                 Answers = _questions.Select((q, i) => new QuizAnswerItem { Question = q.Question, UserAnswer = _answers[i], SourceCardId = q.SourceCardId }).ToList(),
             };
             _result = await Quiz.SubmitQuizAsync(req, _userSub);
@@ -247,6 +266,19 @@
             _history = new();
             return;
         }
-        _history = await Quiz.GetHistoryAsync(_userSub, ModuleId, 10);
+        _history = await Quiz.GetHistoryAsync(_userSub, ModuleId, CardId, 10);
+    }
+
+    private async Task DeleteHistoryEntryAsync(string quizId)
+    {
+        try
+        {
+            await Quiz.DeleteHistoryEntryAsync(_userSub, quizId);
+            await LoadHistoryAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = "Quizverlauf konnte nicht gelöscht werden: " + ex.Message;
+        }
     }
 }
