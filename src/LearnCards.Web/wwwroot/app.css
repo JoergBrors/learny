@@ -381,6 +381,25 @@ kbd {
 .typing { color: var(--ink-faint); font-style: italic; }
 .chat-input-row { display: flex; gap: .5rem; padding: .8rem 1.1rem; border-top: 1px solid var(--border); }
 .chat-input { flex: 1; }
+.chat-history {
+  margin: 0 1.1rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface-2) 45%, var(--surface));
+}
+.chat-history summary {
+  cursor: pointer;
+  padding: .8rem 1rem;
+  font-size: .88rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.chat-history[open] summary {
+  border-bottom: 1px solid var(--border);
+}
+.chat-history .graded-list {
+  padding: .9rem;
+}
 
 /* ─── Quiz / Modal ───────────────────────────────────────────────── */
 
