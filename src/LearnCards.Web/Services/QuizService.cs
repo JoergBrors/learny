@@ -34,20 +34,25 @@ public class QuizService
                 .Select(c => new QuizQuestion { Question = c.Question, Topic = c.Category }).ToList();
         }
 
-        var cardSummaries = string.Join("\n",
-            cards.Take(40).Select(c => $"- {c.Term}: {c.Definition[..Math.Min(200, c.Definition.Length)]}"));
+        var quizCards = cards.Take(40).ToList();
+        var cardSummaries = string.Join("\n\n", quizCards.Select(BuildQuizCardBrief));
 
         var topicLabel = string.IsNullOrEmpty(category) ? "Alle Kategorien" : category;
         var prompt = $$"""
             Du bist ein Prüfer für das Thema '{{topicLabel}}'.
-            Generiere {{numQuestions}} Prüfungsfragen auf Basis dieser Lernkarten:
+            Generiere {{numQuestions}} Prüfungsfragen ausschließlich auf Basis dieser gecheckten Lernkarten:
 
             {{cardSummaries}}
 
             Regeln:
+            - Verwende ausschließlich Fakten, Begriffe und Zusammenhänge, die in den gecheckten Karten oder deren offiziellen Quellen enthalten sind.
+            - Erfinde keine zusätzlichen Produktdetails, Randbedingungen, Best Practices oder Architekturannahmen.
+            - Wenn Informationen fehlen, vereinfache nicht kreativ, sondern bleibe strikt innerhalb der Kartendaten.
+            - Wenn eine Karte offizielle Quellen hat, muss die Frage zu diesen Quellen konsistent sein.
             - Jede Frage muss im Fließtext beantwortet werden (keine Multiple Choice)
             - Fragen sollen Verständnis prüfen, nicht nur Definitionen abfragen
             - Schwierigkeitsgrad: Level 400 (tiefes technisches Verständnis)
+            - Frage nie nach Fakten, die in den Karten nicht eindeutig vorbereitet sind.
             - Antworte NUR als JSON-Objekt: {"questions": [{"question": "...", "topic": "..."}]}
             """;
 
@@ -71,7 +76,10 @@ public class QuizService
         }
         catch (InvalidOperationException) { /* Fallback unten */ }
 
-        return new List<QuizQuestion> { new() { Question = "Definiere den Begriff in eigenen Worten.", Topic = category } };
+        var fallbackRandom = new Random();
+        return cards.OrderBy(_ => fallbackRandom.Next()).Take(numQuestions)
+            .Select(c => new QuizQuestion { Question = c.Question, Topic = c.Category })
+            .ToList();
     }
 
     public async Task<QuizResultResponse> SubmitQuizAsync(QuizSubmitRequest req, string userSub, CancellationToken ct = default)
@@ -108,7 +116,7 @@ public class QuizService
             var sources = card is null || card.OfficialSources.Count == 0
                 ? "Keine offiziellen Quellen hinterlegt."
                 : string.Join("\n", card.OfficialSources.Select(s => $"- {s.Title}: {s.Url}"));
-            return $"Referenz {i + 1}:\nFrage: {a.Question}\nMusterlösung: {referenceAnswer}\nOffizielle Quellen:\n{sources}";
+            return $"Referenz {i + 1}:\nFrage: {a.Question}\nBegrenzung: Bewerte nur gegen diese Referenz und diese Quellen.\nMusterlösung: {referenceAnswer}\nOffizielle Quellen:\n{sources}";
         }));
         var maxScore = req.Answers.Count * 10;
 
@@ -120,6 +128,10 @@ public class QuizService
             Lücken mit der Musterlösung schließt und nur auf den offiziellen Quellen basiert.
             Erfinde keine technischen Details oder Quellen. Wenn die hinterlegten offiziellen Quellen etwas
             nicht abdecken, sage das explizit statt zu halluzinieren.
+            Nutze für Bewertung und Lösung ausschließlich die bereitgestellten Kartenfakten, Musterlösungen
+            und offiziellen Quellen. Triff keine Annahmen und fülle keine Lücken mit Weltwissen.
+            Wenn eine Nutzerantwort einen fachlich möglichen Punkt nennt, der aber nicht in Referenz oder Quellen
+            enthalten ist, werte ihn nicht als korrekt belegten Punkt.
             Gib Gesamtnote (A/B/C/D/F) und zusammenfassendes Feedback.
             Antworte NUR als JSON:
             {
@@ -252,5 +264,23 @@ public class QuizService
         if (string.IsNullOrWhiteSpace(userAnswer)) return reference;
         if (string.IsNullOrWhiteSpace(reference)) return userAnswer.Trim();
         return $"Markierte Antwort:\n{userAnswer.Trim()}\n\nErgänzte Referenzlösung:\n{reference}";
+    }
+
+    private static string BuildQuizCardBrief(Card card)
+    {
+        var sources = card.OfficialSources.Count == 0
+            ? "Keine offiziellen Quellen hinterlegt."
+            : string.Join("\n", card.OfficialSources.Select(s => $"- {s.Title}: {s.Url}"));
+
+        return $$"""
+            Karte:
+            - Kategorie: {{card.Category}}
+            - Begriff: {{card.Term}}
+            - Prüfungsfrage der Karte: {{card.Question}}
+            - Referenzwissen:
+            {{BuildReferenceAnswer(card)}}
+            - Offizielle Quellen:
+            {{sources}}
+            """;
     }
 }
