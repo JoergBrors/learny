@@ -649,6 +649,7 @@ jobs:
           $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
           $backupPath = Join-Path $backupRoot $timestamp
           $preservedConfig = Join-Path $stateRoot "mcpsettings.json"
+          $taskName = if ([string]::IsNullOrWhiteSpace($env:MCP_SERVICE_NAME)) { "LearnCardsMcpServer" } else { $env:MCP_SERVICE_NAME.Trim() }
 
           if (Test-Path -LiteralPath $extractPath) {
             Remove-Item -LiteralPath $extractPath -Recurse -Force
@@ -660,6 +661,17 @@ jobs:
             Remove-Item -LiteralPath $stateRoot -Recurse -Force
           }
           New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
+
+          & schtasks.exe /End /TN $taskName 2>$null | Out-Null
+          $global:LASTEXITCODE = 0
+
+          $mcpProcesses = Get-CimInstance Win32_Process -Filter "Name = 'LearnCards.McpServer.exe'" -ErrorAction SilentlyContinue
+          foreach ($process in @($mcpProcesses)) {
+            if ($process.ExecutablePath -and $process.ExecutablePath.StartsWith($env:MCP_PHYSICAL_PATH, [System.StringComparison]::OrdinalIgnoreCase)) {
+              Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+            }
+          }
+          Start-Sleep -Seconds 2
 
           New-Item -ItemType Directory -Path $backupPath -Force | Out-Null
           if (Test-Path -LiteralPath $env:MCP_PHYSICAL_PATH) {
