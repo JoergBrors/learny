@@ -35,6 +35,9 @@ public sealed class SqliteDatabase : IDatabase
             foreach (var ddl in Schema.Statements(ProviderName)) ExecRaw(ddl);
             EnsureColumn("cards", "reference_answer", "TEXT NOT NULL DEFAULT ''");
             EnsureColumn("cards", "official_sources_json", "TEXT NOT NULL DEFAULT '[]'");
+            EnsureColumn("cards", "slide_number", "INTEGER NULL");
+            EnsureColumn("cards", "target_time_sec", "INTEGER NULL");
+            EnsureColumn("cards", "quiz_json", "TEXT NOT NULL DEFAULT '[]'");
             EnsureColumn("quiz_results", "card_id", "TEXT NULL");
             EnsureColumn("quiz_results", "stats_json", "TEXT NOT NULL DEFAULT '{}'");
         }

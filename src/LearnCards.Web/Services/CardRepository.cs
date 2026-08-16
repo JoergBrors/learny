@@ -87,6 +87,26 @@ public class CardRepository
         return (await _db.QueryAsync(sql, args)).Select(MapCard).ToList();
     }
 
+    public async Task<List<Card>> ListSlideCardsAsync(string moduleId, string? category = null)
+    {
+        var sql = """
+            SELECT * FROM cards
+            WHERE module_id = @module_id
+              AND archived = 0
+              AND slide_number IS NOT NULL
+            """;
+        var args = new List<(string, object?)> { ("module_id", moduleId) };
+        if (!string.IsNullOrWhiteSpace(category))
+        {
+            sql += " AND category = @category";
+            args.Add(("category", category));
+        }
+
+        return (await _db.QueryAsync(sql + " ORDER BY slide_number, sort_order, term", args))
+            .Select(MapCard)
+            .ToList();
+    }
+
     public async Task<List<string>> ListCategoriesAsync(string moduleId)
     {
         var rows = await _db.QueryAsync(
@@ -118,6 +138,9 @@ public class CardRepository
             ReferenceAnswer = data.ReferenceAnswer,
             ChatPrompt = data.ChatPrompt,
             OfficialSources = data.OfficialSources,
+            SlideNumber = data.SlideNumber,
+            TargetTimeSec = data.TargetTimeSec,
+            Quiz = data.Quiz,
             Archived = data.Archived,
             SortOrder = data.SortOrder,
         };
@@ -128,9 +151,11 @@ public class CardRepository
     private Task InsertCardAsync(Card c) => _db.ExecuteAsync("""
         INSERT INTO cards (id, module_id, category, term, question, definition, how_it_works,
                            context, key_fact, reference_answer, chat_prompt, official_sources_json,
+                           slide_number, target_time_sec, quiz_json,
                            archived, sort_order, created_at, updated_at)
         VALUES (@id, @module_id, @category, @term, @question, @definition, @how_it_works,
                 @context, @key_fact, @reference_answer, @chat_prompt, @official_sources_json,
+                @slide_number, @target_time_sec, @quiz_json,
                 @archived, @sort_order, @created_at, @updated_at)
         """, CardArgs(c));
 
@@ -148,6 +173,9 @@ public class CardRepository
         card.ReferenceAnswer = data.ReferenceAnswer;
         card.ChatPrompt = data.ChatPrompt;
         card.OfficialSources = data.OfficialSources;
+        card.SlideNumber = data.SlideNumber;
+        card.TargetTimeSec = data.TargetTimeSec;
+        card.Quiz = data.Quiz;
         card.Archived = data.Archived;
         card.SortOrder = data.SortOrder;
         card.UpdatedAt = DateTime.UtcNow;
@@ -155,6 +183,7 @@ public class CardRepository
             UPDATE cards SET category=@category, term=@term, question=@question, definition=@definition,
                 how_it_works=@how_it_works, context=@context, key_fact=@key_fact, reference_answer=@reference_answer,
                 chat_prompt=@chat_prompt, official_sources_json=@official_sources_json,
+                slide_number=@slide_number, target_time_sec=@target_time_sec, quiz_json=@quiz_json,
                 archived=@archived, sort_order=@sort_order, updated_at=@updated_at
             WHERE id=@id
             """, CardArgs(card));
@@ -379,6 +408,9 @@ public class CardRepository
         ReferenceAnswer = r.GetValueOrDefault("reference_answer") ?? "",
         ChatPrompt = r.GetValueOrDefault("chat_prompt") ?? "",
         OfficialSources = ParseOfficialSources(r.GetValueOrDefault("official_sources_json")),
+        SlideNumber = ParseNullableInt(r.GetValueOrDefault("slide_number")),
+        TargetTimeSec = ParseNullableInt(r.GetValueOrDefault("target_time_sec")),
+        Quiz = ParseCardQuiz(r.GetValueOrDefault("quiz_json")),
         Archived = DbValue.ToBool(r.GetValueOrDefault("archived")),
         SortOrder = DbValue.ToInt(r.GetValueOrDefault("sort_order")),
         CreatedAt = DbValue.ToDateTime(r.GetValueOrDefault("created_at")),
@@ -427,6 +459,7 @@ public class CardRepository
         ("question", c.Question), ("definition", c.Definition), ("how_it_works", c.HowItWorks),
         ("context", c.Context), ("key_fact", c.KeyFact), ("reference_answer", c.ReferenceAnswer),
         ("chat_prompt", c.ChatPrompt), ("official_sources_json", JsonSerializer.Serialize(c.OfficialSources, AppJson.Options)),
+        ("slide_number", c.SlideNumber), ("target_time_sec", c.TargetTimeSec), ("quiz_json", JsonSerializer.Serialize(c.Quiz, AppJson.Options)),
         ("archived", c.Archived), ("sort_order", c.SortOrder), ("created_at", c.CreatedAt), ("updated_at", c.UpdatedAt),
     };
 
@@ -442,6 +475,22 @@ public class CardRepository
             return new();
         }
     }
+
+    private static List<CardQuizQuestion> ParseCardQuiz(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return new();
+        try
+        {
+            return JsonSerializer.Deserialize<List<CardQuizQuestion>>(json, AppJson.Options) ?? new();
+        }
+        catch
+        {
+            return new();
+        }
+    }
+
+    private static int? ParseNullableInt(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : DbValue.ToInt(value);
 
     private static List<GradedAnswer> ParseGradedAnswers(string? json)
     {

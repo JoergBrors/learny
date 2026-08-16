@@ -114,6 +114,19 @@ public static class ApiEndpoints
             return Results.Ok(new { created, updated, skipped });
         }).DisableAntiforgery();
 
+        api.MapPost("/cards/{cardId}/quiz", async (string cardId, QuizService quiz) =>
+        {
+            try
+            {
+                var questions = await quiz.GetCardQuizAsync(cardId);
+                return Results.Ok(new { card_id = cardId, questions });
+            }
+            catch (InvalidOperationException e)
+            {
+                return Results.Json(new { detail = e.Message }, statusCode: 400);
+            }
+        });
+
         // ─── Quiz ───────────────────────────────────────────────────────────
         api.MapPost("/quiz/start", async (QuizStartRequest req, QuizService quiz, HttpContext http) =>
         {
@@ -242,6 +255,7 @@ public static class ApiEndpoints
         question = c.Question, definition = c.Definition, how_it_works = c.HowItWorks,
         context = c.Context, key_fact = c.KeyFact, reference_answer = c.ReferenceAnswer,
         chat_prompt = c.ChatPrompt, official_sources = c.OfficialSources,
+        slide_number = c.SlideNumber, target_time_sec = c.TargetTimeSec, quiz = c.Quiz,
         archived = c.Archived, sort_order = c.SortOrder, created_at = c.CreatedAt, updated_at = c.UpdatedAt,
     };
 }

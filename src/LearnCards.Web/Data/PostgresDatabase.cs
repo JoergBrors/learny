@@ -103,6 +103,9 @@ public sealed class PostgresDatabase : IDatabase
     {
         await EnsureCardColumnAsync("reference_answer", "TEXT NOT NULL DEFAULT ''", ct);
         await EnsureCardColumnAsync("official_sources_json", "TEXT NOT NULL DEFAULT '[]'", ct);
+        await EnsureCardColumnAsync("slide_number", "INTEGER NULL", ct);
+        await EnsureCardColumnAsync("target_time_sec", "INTEGER NULL", ct);
+        await EnsureCardColumnAsync("quiz_json", "TEXT NOT NULL DEFAULT '[]'", ct);
     }
 
     private async Task MigrateQuizResultColumnsAsync(CancellationToken ct)

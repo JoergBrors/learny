@@ -31,6 +31,9 @@ public class Card
     public string ReferenceAnswer { get; set; } = "";
     public string ChatPrompt { get; set; } = "";
     public List<OfficialSource> OfficialSources { get; set; } = new();
+    public int? SlideNumber { get; set; }
+    public int? TargetTimeSec { get; set; }
+    public List<CardQuizQuestion> Quiz { get; set; } = new();
     public bool Archived { get; set; }
     public int SortOrder { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -106,6 +109,9 @@ public class CardJson
     public string ReferenceAnswer { get; set; } = "";
     public string ChatPrompt { get; set; } = "";
     public List<OfficialSource> OfficialSources { get; set; } = new();
+    public int? SlideNumber { get; set; }
+    public int? TargetTimeSec { get; set; }
+    public List<CardQuizQuestion> Quiz { get; set; } = new();
     public bool Archived { get; set; }
     public int SortOrder { get; set; }
 
@@ -123,8 +129,29 @@ public class CardJson
             if (!Uri.TryCreate(source.Url, UriKind.Absolute, out var uri) || uri.Scheme is not "https")
                 return (false, "Offizielle Quellen müssen absolute HTTPS-URLs sein");
         }
+        if (SlideNumber is <= 0) return (false, "'slide_number' muss größer als 0 sein");
+        if (TargetTimeSec is <= 0) return (false, "'target_time_sec' muss größer als 0 sein");
+        foreach (var quiz in Quiz)
+        {
+            if (quiz.Type != "single_choice") return (false, "Aktuell wird nur quiz.type='single_choice' unterstützt");
+            if (string.IsNullOrWhiteSpace(quiz.Question)) return (false, "Jede Quizfrage benötigt ein 'question'");
+            if (quiz.Options is null || quiz.Options.Count != 4 || quiz.Options.Any(string.IsNullOrWhiteSpace))
+                return (false, "Jede Quizfrage benötigt genau 4 nicht-leere 'options'");
+            if (quiz.CorrectIndex < 0 || quiz.CorrectIndex >= quiz.Options.Count)
+                return (false, "'correct_index' muss auf eine vorhandene Option zeigen");
+            if (string.IsNullOrWhiteSpace(quiz.Explanation)) return (false, "Jede Quizfrage benötigt eine 'explanation'");
+        }
         return (true, "");
     }
+}
+
+public class CardQuizQuestion
+{
+    public string Type { get; set; } = "single_choice";
+    public string Question { get; set; } = "";
+    public List<string> Options { get; set; } = new();
+    public int CorrectIndex { get; set; }
+    public string Explanation { get; set; } = "";
 }
 
 public class CardImportBatch

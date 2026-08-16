@@ -59,6 +59,52 @@ public static class CardImportSchema
             ["key_fact"] = Property("string", "One memorable fact or exam gotcha"),
             ["reference_answer"] = Property("string", "Source-bound reference solution for quiz grading"),
             ["chat_prompt"] = Property("string", "Optional system prompt bound to this card"),
+            ["slide_number"] = new JsonObject
+            {
+                ["type"] = "integer",
+                ["nullable"] = true,
+                ["description"] = "Optional slide position when the card belongs to a presentation deck.",
+            },
+            ["target_time_sec"] = new JsonObject
+            {
+                ["type"] = "integer",
+                ["nullable"] = true,
+                ["description"] = "Optional target speaking time in seconds for slide mode.",
+            },
+            ["quiz"] = new JsonObject
+            {
+                ["type"] = "array",
+                ["nullable"] = true,
+                ["description"] = "Optional page quiz shown directly on the card or slide.",
+                ["items"] = new JsonObject
+                {
+                    ["type"] = "object",
+                    ["required"] = new JsonArray("type", "question", "options", "correct_index", "explanation"),
+                    ["properties"] = new JsonObject
+                    {
+                        ["type"] = new JsonObject
+                        {
+                            ["type"] = "string",
+                            ["enum"] = new JsonArray("single_choice"),
+                        },
+                        ["question"] = Property("string", "Question text"),
+                        ["options"] = new JsonObject
+                        {
+                            ["type"] = "array",
+                            ["minItems"] = 4,
+                            ["maxItems"] = 4,
+                            ["items"] = new JsonObject { ["type"] = "string" },
+                        },
+                        ["correct_index"] = new JsonObject
+                        {
+                            ["type"] = "integer",
+                            ["minimum"] = 0,
+                            ["maximum"] = 3,
+                        },
+                        ["explanation"] = Property("string", "Short explanation shown after answering"),
+                    },
+                },
+            },
             ["official_sources"] = new JsonObject
             {
                 ["type"] = "array",
@@ -107,6 +153,20 @@ public static class CardImportSchema
             ["context"] = "Wichtig für CI/CD, Rollbacks und Incident Analysis.",
             ["key_fact"] = "Deployments sollten auf immutable Digests zeigen.",
             ["reference_answer"] = "In Produktion sollte kein beweglicher Tag wie :latest verwendet werden, weil sich der referenzierte Inhalt ändern kann. Stattdessen wird das Image per SHA-Digest gepinnt, damit Deployments reproduzierbar, nachvollziehbar und sicher bleiben.",
+            ["slide_number"] = 3,
+            ["target_time_sec"] = 90,
+            ["quiz"] = new JsonArray(new JsonObject
+            {
+                ["type"] = "single_choice",
+                ["question"] = "Warum ist ein SHA-Digest in CI/CD stabiler als :latest?",
+                ["options"] = new JsonArray(
+                    "Weil :latest nur lokal funktioniert",
+                    "Weil ein Digest exakt denselben Image-Inhalt referenziert",
+                    "Weil Digests automatisch gepatcht werden",
+                    "Weil Digests keine Registry benötigen"),
+                ["correct_index"] = 1,
+                ["explanation"] = "Ein Digest referenziert ein unveränderliches Artefakt und macht Deployments reproduzierbar.",
+            }),
             ["official_sources"] = new JsonArray(new JsonObject
             {
                 ["title"] = "Best practices for container image management",
