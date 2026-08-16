@@ -114,7 +114,8 @@ Schritt-für-Schritt-Anleitung inkl. App-Settings-Mapping: [docs/azure-deploymen
 
 Der JSON-Import akzeptiert weiterhin ein Array von Karten oder ein Objekt mit `cards`. Für
 Prüfungsmodus mit Musterlösung und offiziellen Quellen kann jede Karte zusätzlich
-`reference_answer` und `official_sources` enthalten:
+`reference_answer`, `official_sources` sowie optional `slide_number`, `target_time_sec` und
+ein statisches `quiz` für den Folien-/Seitenmodus enthalten:
 
 ```json
 {
@@ -129,6 +130,22 @@ Prüfungsmodus mit Musterlösung und offiziellen Quellen kann jede Karte zusätz
       "context": "Wichtig für CI/CD, Rollbacks und Incident Analysis.",
       "key_fact": "Deployments sollten auf immutable Digests zeigen.",
       "reference_answer": "In Produktion sollte kein beweglicher Tag wie :latest verwendet werden, weil sich der referenzierte Inhalt ändern kann. Stattdessen wird das Image per SHA-Digest gepinnt, damit Deployments reproduzierbar, nachvollziehbar und sicher bleiben.",
+      "slide_number": 3,
+      "target_time_sec": 90,
+      "quiz": [
+        {
+          "type": "single_choice",
+          "question": "Warum ist ein SHA-Digest in CI/CD stabiler als :latest?",
+          "options": [
+            "Weil :latest nur lokal funktioniert",
+            "Weil ein Digest exakt denselben Image-Inhalt referenziert",
+            "Weil Digests automatisch gepatcht werden",
+            "Weil Digests keine Registry benötigen"
+          ],
+          "correct_index": 1,
+          "explanation": "Ein Digest referenziert ein unveränderliches Artefakt und macht Deployments reproduzierbar."
+        }
+      ],
       "official_sources": [
         {
           "title": "Docker image digests",
@@ -151,6 +168,7 @@ Prüfungsmodus mit Musterlösung und offiziellen Quellen kann jede Karte zusätz
 Unter `demoodule/` liegen importierbare Beispiel-Workloads:
 
 - `kvno_seed_module.json` — großer Azure-L400-Datensatz mit Quellenverzeichnis pro Karte
+- `kvno_folien_lernkarten.json` — Foliendeck-Datensatz mit `slide_number`, Zeitziel und vorbereitetem Seitenquiz
 - `demo.json` — kompakter PRINCE2-Projektmanagement-Datensatz für Demo- und Testzwecke
 
 Beide Dateien lassen sich direkt über den JSON-Import in der Startseite laden.

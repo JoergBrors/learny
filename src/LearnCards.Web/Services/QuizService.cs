@@ -12,6 +12,7 @@ public class QuizService
 {
     private readonly CardRepository _repo;
     private readonly OpenAiClient _openAi;
+    private const int PageQuizCount = 3;
 
     public QuizService(CardRepository repo, OpenAiClient openAi)
     {
@@ -24,6 +25,77 @@ public class QuizService
 
     public Task<int> DeleteHistoryEntryAsync(string userSub, string quizResultId) =>
         _repo.DeleteQuizResultAsync(userSub, quizResultId);
+
+    public async Task<List<CardQuizQuestion>> GetCardQuizAsync(string cardId, CancellationToken ct = default)
+    {
+        var card = await _repo.GetCardAsync(cardId)
+            ?? throw new InvalidOperationException("Die ausgewählte Karte wurde nicht gefunden.");
+
+        if (card.Archived)
+            throw new InvalidOperationException("Für archivierte Karten ist kein Seiten-Quiz verfügbar.");
+
+        if (card.Quiz.Count > 0)
+            return card.Quiz;
+
+        if (!_openAi.IsConfigured)
+            throw new InvalidOperationException("Für Karten ohne vorbereitete Quizfragen ist aktuell kein LLM konfiguriert.");
+
+        var prompt = $$"""
+            Du erzeugst ausschließlich quellengebundene Multiple-Choice-Fragen für eine Lernkarte.
+            Verwende nur Fakten aus der Karte und ihren offiziellen Quellen. Erfinde keine Details,
+            keine Best Practices und keine Randbedingungen. Wenn die Kartendaten keine tragfähigen
+            Fragen hergeben, liefere {"questions":[]} statt zu halluzinieren.
+
+            Erzeuge genau 2 bis 3 Fragen auf Level 400 mit genau 4 Antwortoptionen, genau einer
+            korrekten Antwort und einer kurzen Erklärung.
+
+            Antworte ausschließlich als valides JSON-Objekt in diesem Format:
+            {
+              "questions": [
+                {
+                  "type": "single_choice",
+                  "question": "...",
+                  "options": ["...", "...", "...", "..."],
+                  "correct_index": 0,
+                  "explanation": "..."
+                }
+              ]
+            }
+
+            Begriff: {{card.Term}}
+            Kategorie: {{card.Category}}
+            Frage: {{card.Question}}
+            Definition: {{card.Definition}}
+            Funktionsweise: {{card.HowItWorks}}
+            Kontext: {{card.Context}}
+            Kernfakt: {{card.KeyFact}}
+            Referenzantwort: {{BuildReferenceAnswer(card)}}
+            Offizielle Quellen:
+            {{FormatOfficialSources(card)}}
+            """;
+
+        try
+        {
+            using var doc = await _openAi.CompleteJsonAsync(prompt, 1200, ct);
+            var questions = ParseCardQuizResponse(doc.RootElement)
+                .Where(IsValidCardQuizQuestion)
+                .Take(PageQuizCount)
+                .ToList();
+
+            if (questions.Count > 0)
+                return questions;
+
+            throw new InvalidOperationException("Das LLM hat kein verwertbares Quiz für diese Karte geliefert.");
+        }
+        catch (InvalidOperationException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException("Das Quiz konnte nicht generiert werden: " + ex.Message, ex);
+        }
+    }
 
     public async Task<List<QuizQuestion>> StartQuizAsync(string moduleId, string category, int numQuestions, string userSub, string? cardId = null, CancellationToken ct = default)
     {
@@ -356,6 +428,54 @@ public class QuizService
             {{sources}}
             """;
     }
+
+    private static string FormatOfficialSources(Card card) =>
+        card.OfficialSources.Count == 0
+            ? "Keine offiziellen Quellen hinterlegt."
+            : string.Join("\n", card.OfficialSources.Select(s => $"- {s.Title} ({s.Publisher}): {s.Url}"));
+
+    private static IEnumerable<CardQuizQuestion> ParseCardQuizResponse(JsonElement root)
+    {
+        JsonElement questions = root.ValueKind switch
+        {
+            JsonValueKind.Array => root,
+            JsonValueKind.Object when root.TryGetProperty("questions", out var arr) => arr,
+            _ => default,
+        };
+
+        if (questions.ValueKind != JsonValueKind.Array)
+            yield break;
+
+        foreach (var item in questions.EnumerateArray())
+        {
+            List<string> options = new();
+            if (item.TryGetProperty("options", out var rawOptions) && rawOptions.ValueKind == JsonValueKind.Array)
+            {
+                options = rawOptions.EnumerateArray()
+                    .Select(x => x.GetString() ?? "")
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .ToList();
+            }
+
+            yield return new CardQuizQuestion
+            {
+                Type = item.TryGetProperty("type", out var type) ? type.GetString() ?? "single_choice" : "single_choice",
+                Question = item.TryGetProperty("question", out var question) ? question.GetString() ?? "" : "",
+                Options = options,
+                CorrectIndex = item.TryGetProperty("correct_index", out var correctIndex) ? correctIndex.GetInt32() : -1,
+                Explanation = item.TryGetProperty("explanation", out var explanation) ? explanation.GetString() ?? "" : "",
+            };
+        }
+    }
+
+    private static bool IsValidCardQuizQuestion(CardQuizQuestion question) =>
+        question.Type == "single_choice"
+        && !string.IsNullOrWhiteSpace(question.Question)
+        && question.Options.Count == 4
+        && question.Options.All(x => !string.IsNullOrWhiteSpace(x))
+        && question.CorrectIndex >= 0
+        && question.CorrectIndex < question.Options.Count
+        && !string.IsNullOrWhiteSpace(question.Explanation);
 
     private async Task<List<Card>> ResolveQuizCardsAsync(string moduleId, string category, string userSub, string? cardId)
     {

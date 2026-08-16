@@ -1,0 +1,68 @@
+@inject QuizService Quiz
+
+<div class="modal-backdrop" @onclick="CloseIfIdle">
+    <div class="modal" role="dialog" aria-modal="true" aria-label="Seitenquiz" @onclick:stopPropagation>
+        <div class="modal-head">
+            <h2>📝 Quiz für diese Seite@TitleSuffix</h2>
+            <button class="icon-btn" @onclick="() => OnClose.InvokeAsync()" aria-label="Quiz schließen">✕</button>
+        </div>
+
+        @if (_loading)
+        {
+            <div class="spinner-wrap" aria-busy="true"><div class="spinner" role="status"></div></div>
+        }
+        else if (!string.IsNullOrWhiteSpace(_error))
+        {
+            <div class="alert alert-error" role="alert">@_error</div>
+            <div class="modal-actions">
+                <button class="btn btn-primary" @onclick="() => OnClose.InvokeAsync()">Schließen</button>
+            </div>
+        }
+        else
+        {
+            <QuizRunner Questions="_questions" OnClose="OnClose" />
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string CardId { get; set; } = "";
+    [Parameter] public string CardTerm { get; set; } = "";
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private string _loadedCardId = "";
+    private bool _loading;
+    private string? _error;
+    private List<CardQuizQuestion> _questions = new();
+    private string TitleSuffix => string.IsNullOrWhiteSpace(CardTerm) ? "" : $" — {CardTerm}";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (CardId == _loadedCardId) return;
+
+        _loadedCardId = CardId;
+        _loading = true;
+        _error = null;
+        _questions = new();
+
+        try
+        {
+            _questions = await Quiz.GetCardQuizAsync(CardId);
+            if (_questions.Count == 0)
+                _error = "Für diese Karte stehen aktuell keine Seiten-Quizfragen zur Verfügung.";
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task CloseIfIdle()
+    {
+        if (!_loading) await OnClose.InvokeAsync();
+    }
+}

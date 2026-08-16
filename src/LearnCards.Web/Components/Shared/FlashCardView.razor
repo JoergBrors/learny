@@ -2,13 +2,17 @@
 
 <div class="flashcard-wrap">
     @* Fortschritt *@
-    <div class="progress-head" role="progressbar" aria-valuenow="@(Index + 1)" aria-valuemin="1" aria-valuemax="@Total"
-         aria-label="@($"Karte {Index + 1} von {Total}")">
+    <div class="progress-head" role="progressbar" aria-valuenow="@ProgressValue" aria-valuemin="1" aria-valuemax="@ProgressTotal"
+         aria-label="@($"{ProgressLabel} {ProgressValue} von {ProgressTotal}")">
         <div class="progress-labels">
-            <span>Karte @(Index + 1) / @Total</span>
-            <span>@Math.Round((Index + 1) * 100.0 / Total)%</span>
+            <span>@ProgressLabel @ProgressValue / @ProgressTotal</span>
+            <span>@Math.Round(ProgressValue * 100.0 / Math.Max(1, ProgressTotal))%</span>
         </div>
-        <div class="progress-track"><div class="progress-fill" style="width:@(((Index + 1) * 100.0 / Total).ToString(System.Globalization.CultureInfo.InvariantCulture))%"></div></div>
+        <div class="progress-track"><div class="progress-fill" style="width:@((ProgressValue * 100.0 / Math.Max(1, ProgressTotal)).ToString(System.Globalization.CultureInfo.InvariantCulture))%"></div></div>
+        @if (TargetTimeSec is > 0)
+        {
+            <div class="progress-meta">Ziel: @FormatTargetTime(TargetTimeSec.Value)</div>
+        }
     </div>
 
     @* Karte *@
@@ -84,6 +88,7 @@
             <button class="btn btn-ghost" @onclick="OnNextClick" disabled="@(Index >= Total - 1)" aria-label="Nächste Karte">Weiter →</button>
         </div>
         <div class="action-group">
+            <button class="btn btn-ghost btn-sm" @onclick="() => OnPageQuizCard.InvokeAsync(Card.Id)" aria-label="Quiz zu dieser Seite starten">📝 Quiz für diese Seite</button>
             <button class="btn btn-ghost btn-sm" @onclick="() => OnQuizCard.InvokeAsync(Card.Id)" aria-label="Quiz nur zu dieser Karte starten">🎯 Karten-Quiz</button>
             <button class="btn btn-primary btn-sm" @onclick="() => _chatOpen = !_chatOpen" aria-label="KI-Chatbot zu dieser Karte öffnen">💬 Chat</button>
             <button class="btn btn-sm @(MarkedKnown ? "btn-known-active" : "btn-known")" @onclick="() => OnMarkKnown.InvokeAsync(Card.Id)"
@@ -112,8 +117,13 @@
     [Parameter] public EventCallback OnPrev { get; set; }
     [Parameter] public EventCallback<string> OnArchive { get; set; }
     [Parameter] public EventCallback<string> OnQuizCard { get; set; }
+    [Parameter] public EventCallback<string> OnPageQuizCard { get; set; }
     [Parameter] public EventCallback<string> OnMarkKnown { get; set; }
     [Parameter] public EventCallback<string> OnMarkReview { get; set; }
+    [Parameter] public string ProgressLabel { get; set; } = "Karte";
+    [Parameter] public int? ProgressValueOverride { get; set; }
+    [Parameter] public int? ProgressTotalOverride { get; set; }
+    [Parameter] public int? TargetTimeSec { get; set; }
 
     private bool _flipped;
     private bool _chatOpen;
@@ -122,6 +132,8 @@
     private double _pointerStartY;
     private bool _pointerMoved;
     private const double PointerMoveThreshold = 12;
+    private int ProgressValue => ProgressValueOverride ?? (Index + 1);
+    private int ProgressTotal => ProgressTotalOverride ?? Total;
 
     protected override void OnParametersSet()
     {
@@ -162,6 +174,12 @@
     private void HandlePointerUp(PointerEventArgs e) => HandlePointerMove(e);
 
     private void HandlePointerCancel() => _pointerMoved = true;
+
+    private static string FormatTargetTime(int seconds)
+    {
+        var span = TimeSpan.FromSeconds(Math.Max(0, seconds));
+        return $"{(int)span.TotalMinutes}:{span.Seconds:00} Min";
+    }
 
     private async Task HandleKey(KeyboardEventArgs e)
     {

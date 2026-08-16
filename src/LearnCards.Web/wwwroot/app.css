@@ -295,6 +295,7 @@ kbd {
 .progress-labels { display: flex; justify-content: space-between; font-size: .82rem; color: var(--ink-soft); margin-bottom: .3rem; }
 .progress-track { height: 6px; background: var(--surface-2); border-radius: 999px; overflow: hidden; }
 .progress-fill { height: 100%; background: linear-gradient(90deg, var(--brand-400), var(--brand-600)); border-radius: 999px; transition: width .3s; }
+.progress-meta { margin-top: .45rem; font-size: .8rem; color: var(--ink-soft); }
 
 .flip-scene {
   perspective: 1200px;
@@ -479,6 +480,44 @@ kbd {
 .source-list { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: .25rem; }
 .source-list a { color: var(--brand-600); text-decoration: none; }
 .source-list a:hover { text-decoration: underline; }
+.card-quiz-options { display: flex; flex-direction: column; gap: .7rem; margin-top: 1rem; }
+.quiz-option {
+  width: 100%;
+  display: flex;
+  gap: .8rem;
+  align-items: flex-start;
+  text-align: left;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: var(--radius-sm);
+  padding: .85rem 1rem;
+  font: inherit;
+  cursor: pointer;
+}
+.quiz-option:hover:not(:disabled) { background: var(--surface-2); }
+.quiz-option:disabled { cursor: default; opacity: 1; }
+.quiz-option-label {
+  width: 1.8rem;
+  height: 1.8rem;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--ink-soft);
+  display: inline-grid;
+  place-items: center;
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+.quiz-option-correct {
+  border-color: color-mix(in srgb, var(--ok) 60%, var(--border));
+  background: color-mix(in srgb, var(--ok-bg) 74%, var(--surface));
+}
+.quiz-option-wrong {
+  border-color: color-mix(in srgb, var(--danger) 60%, var(--border));
+  background: color-mix(in srgb, var(--danger-bg) 72%, var(--surface));
+}
+.card-quiz-feedback { margin-top: 1rem; }
+.card-quiz-result { margin-top: 1.25rem; }
 
 /* ─── Login ──────────────────────────────────────────────────────── */
 

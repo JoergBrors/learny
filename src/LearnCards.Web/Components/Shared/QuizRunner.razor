@@ -1,0 +1,126 @@
+<div class="card-quiz-runner">
+    @if (Questions.Count == 0)
+    {
+        <div class="alert alert-error">Keine Quizfragen verfügbar.</div>
+    }
+    else
+    {
+        var question = Questions[_current];
+        <div class="quiz-progress muted">Frage @(_current + 1) von @Questions.Count</div>
+        <h3 class="quiz-question">@question.Question</h3>
+
+        <div class="card-quiz-options">
+            @for (var i = 0; i < question.Options.Count; i++)
+            {
+                var optionIndex = i;
+                var answered = _answers[_current] >= 0;
+                var selected = _answers[_current] == optionIndex;
+                var isCorrect = question.CorrectIndex == optionIndex;
+                var css = answered
+                    ? isCorrect ? "quiz-option quiz-option-correct"
+                    : selected ? "quiz-option quiz-option-wrong"
+                    : "quiz-option"
+                    : "quiz-option";
+
+                <button type="button" class="@css" disabled="@answered" @onclick="() => SelectAnswer(optionIndex)">
+                    <span class="quiz-option-label">@((char)('A' + optionIndex))</span>
+                    <span>@question.Options[optionIndex]</span>
+                </button>
+            }
+        </div>
+
+        @if (_answers[_current] >= 0)
+        {
+            <div class="graded-item card-quiz-feedback">
+                <div class="graded-label">@(_answers[_current] == question.CorrectIndex ? "Richtig" : "Nicht korrekt")</div>
+                <div class="graded-a muted">@question.Explanation</div>
+            </div>
+        }
+
+        @if (_finished)
+        {
+            <div class="quiz-result-head card-quiz-result">
+                <span class="grade grade-@ScoreGrade.ToLowerInvariant()">@ScoreGrade</span>
+                <div>
+                    <div class="quiz-score">@_score / @Questions.Count richtig</div>
+                    <p class="muted">@ScorePercent% Trefferquote</p>
+                </div>
+            </div>
+        }
+
+        <div class="modal-actions">
+            @if (!_finished)
+            {
+                <button class="btn btn-ghost" @onclick="Prev" disabled="@(_current == 0)">← Zurück</button>
+                <button class="btn btn-primary" @onclick="Next" disabled="@(_answers[_current] < 0)">
+                    @(_current < Questions.Count - 1 ? "Weiter →" : "Ergebnis anzeigen")
+                </button>
+            }
+            else
+            {
+                <button class="btn btn-ghost" @onclick="Restart">Nochmal</button>
+                <button class="btn btn-primary" @onclick="() => OnClose.InvokeAsync()">Schließen</button>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public List<CardQuizQuestion> Questions { get; set; } = new();
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private int _current;
+    private List<int> _answers = new();
+    private bool _finished;
+    private int _score;
+
+    private double ScorePercent => Questions.Count == 0 ? 0 : Math.Round((double)_score / Questions.Count * 100, 1);
+    private string ScoreGrade => ScorePercent switch
+    {
+        >= 90 => "A",
+        >= 75 => "B",
+        >= 60 => "C",
+        >= 45 => "D",
+        _ => "F",
+    };
+
+    protected override void OnParametersSet()
+    {
+        if (_answers.Count != Questions.Count)
+            ResetState();
+    }
+
+    private void SelectAnswer(int optionIndex)
+    {
+        if (_answers[_current] >= 0) return;
+        _answers[_current] = optionIndex;
+        if (Questions[_current].CorrectIndex == optionIndex)
+            _score++;
+    }
+
+    private void Prev()
+    {
+        if (_current > 0) _current--;
+    }
+
+    private void Next()
+    {
+        if (_current < Questions.Count - 1)
+        {
+            _current++;
+            return;
+        }
+
+        _finished = true;
+    }
+
+    private void Restart() => ResetState();
+
+    private void ResetState()
+    {
+        _current = 0;
+        _finished = false;
+        _score = 0;
+        _answers = Enumerable.Repeat(-1, Questions.Count).ToList();
+    }
+}
