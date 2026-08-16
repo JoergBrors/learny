@@ -5,7 +5,6 @@
       "name": "LearnCards.Web (dotnet run)",
       "type": "coreclr",
       "request": "launch",
-      "preLaunchTask": "build-web",
       "program": "${workspaceFolder}/src/LearnCards.Web/bin/Debug/net10.0/LearnCards.Web.dll",
       "cwd": "${workspaceFolder}/src/LearnCards.Web",
       "env": { "ASPNETCORE_ENVIRONMENT": "Development" },
@@ -19,19 +18,32 @@
       "name": "LearnCards.McpServer (lokal)",
       "type": "coreclr",
       "request": "launch",
-      "preLaunchTask": "build-mcp",
       "program": "${workspaceFolder}/src/LearnCards.McpServer/bin/Debug/net10.0/LearnCards.McpServer.dll",
       "cwd": "${workspaceFolder}/src/LearnCards.McpServer",
       "env": {
         "LEARNCARDS_MCP_CONFIG": "${workspaceFolder}/.vscode/mcpsettings.debug.json"
       },
       "console": "integratedTerminal"
+    },
+    {
+      "name": "MCP Health",
+      "type": "pwa-msedge",
+      "request": "launch",
+      "url": "http://127.0.0.1:8787/health"
     }
   ],
   "compounds": [
     {
       "name": "App",
+      "preLaunchTask": "build-app",
+      "stopAll": true,
       "configurations": ["LearnCards.Web (dotnet run)", "LearnCards.McpServer (lokal)"]
+    },
+    {
+      "name": "App + MCP Health",
+      "preLaunchTask": "build-app",
+      "stopAll": true,
+      "configurations": ["LearnCards.Web (dotnet run)", "LearnCards.McpServer (lokal)", "MCP Health"]
     }
   ]
 }
