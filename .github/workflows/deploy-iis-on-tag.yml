@@ -446,13 +446,6 @@ jobs:
             Start-Service -Name W3SVC
           }
 
-          if (-not (Test-Path "IIS:\AppPools\$env:IIS_APP_POOL")) {
-            New-Item "IIS:\AppPools\$env:IIS_APP_POOL" | Out-Null
-          }
-
-          Set-ItemProperty "IIS:\AppPools\$env:IIS_APP_POOL" -Name managedRuntimeVersion -Value ""
-          Set-ItemProperty "IIS:\AppPools\$env:IIS_APP_POOL" -Name processModel.identityType -Value ApplicationPoolIdentity
-
           if (-not (Test-Path -LiteralPath $env:IIS_PHYSICAL_PATH)) {
             New-Item -ItemType Directory -Path $env:IIS_PHYSICAL_PATH -Force | Out-Null
           }
@@ -487,7 +480,27 @@ jobs:
               Write-Warning "Stop-Website vor Neuerstellung fehlgeschlagen: $($_.Exception.Message)"
             }
             Remove-Website -Name $env:IIS_SITE_NAME
+            Start-Sleep -Seconds 2
           }
+
+          if (Test-Path "IIS:\AppPools\$env:IIS_APP_POOL") {
+            try {
+              if ((Get-WebAppPoolState -Name $env:IIS_APP_POOL).Value -ne "Stopped") {
+                Stop-WebAppPool -Name $env:IIS_APP_POOL
+                Start-Sleep -Seconds 2
+              }
+            }
+            catch {
+              Write-Warning "Stop-WebAppPool vor Neuerstellung fehlgeschlagen: $($_.Exception.Message)"
+            }
+
+            Remove-WebAppPool -Name $env:IIS_APP_POOL
+            Start-Sleep -Seconds 2
+          }
+
+          New-Item "IIS:\AppPools\$env:IIS_APP_POOL" | Out-Null
+          Set-ItemProperty "IIS:\AppPools\$env:IIS_APP_POOL" -Name managedRuntimeVersion -Value ""
+          Set-ItemProperty "IIS:\AppPools\$env:IIS_APP_POOL" -Name processModel.identityType -Value ApplicationPoolIdentity
 
           New-Website -Name $env:IIS_SITE_NAME -PhysicalPath $env:IIS_PHYSICAL_PATH -ApplicationPool $env:IIS_APP_POOL -Port $port -IPAddress "*" -HostHeader $hostHeader | Out-Null
 
