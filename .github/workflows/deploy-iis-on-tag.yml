@@ -450,23 +450,22 @@ jobs:
           }
 
           $port = if ([string]::IsNullOrWhiteSpace($env:IIS_PORT)) { 80 } else { [int]$env:IIS_PORT }
-          $hostHeader = if ([string]::IsNullOrWhiteSpace($env:IIS_HOST_HEADER)) { "" } else { $env:IIS_HOST_HEADER }
-
-          if (-not (Test-Path "IIS:\Sites\$env:IIS_SITE_NAME")) {
-            New-Website -Name $env:IIS_SITE_NAME -PhysicalPath $env:IIS_PHYSICAL_PATH -ApplicationPool $env:IIS_APP_POOL -Port $port -HostHeader $hostHeader | Out-Null
+          $hostHeader = if ([string]::IsNullOrWhiteSpace($env:IIS_HOST_HEADER)) { "" } else { $env:IIS_HOST_HEADER.Trim() }
+          if ($hostHeader -in @('""', "''")) {
+            $hostHeader = ""
           }
 
-          Set-ItemProperty "IIS:\Sites\$env:IIS_SITE_NAME" -Name physicalPath -Value $env:IIS_PHYSICAL_PATH
-          Set-ItemProperty "IIS:\Sites\$env:IIS_SITE_NAME" -Name applicationPool -Value $env:IIS_APP_POOL
-
-          $existingBindings = Get-WebBinding -Name $env:IIS_SITE_NAME -ErrorAction SilentlyContinue
-          if ($existingBindings) {
-            foreach ($binding in @($existingBindings)) {
-              Remove-WebBinding -Name $env:IIS_SITE_NAME -Protocol $binding.protocol -Port $binding.bindingInformation.Split(':')[1] -HostHeader $binding.HostHeader -IPAddress $binding.bindingInformation.Split(':')[0]
+          if (Test-Path "IIS:\Sites\$env:IIS_SITE_NAME") {
+            try {
+              Stop-Website -Name $env:IIS_SITE_NAME -ErrorAction SilentlyContinue
             }
+            catch {
+              Write-Warning "Stop-Website vor Neuerstellung fehlgeschlagen: $($_.Exception.Message)"
+            }
+            Remove-Website -Name $env:IIS_SITE_NAME
           }
 
-          New-WebBinding -Name $env:IIS_SITE_NAME -Protocol "http" -Port $port -IPAddress "*" -HostHeader $hostHeader | Out-Null
+          New-Website -Name $env:IIS_SITE_NAME -PhysicalPath $env:IIS_PHYSICAL_PATH -ApplicationPool $env:IIS_APP_POOL -Port $port -IPAddress "*" -HostHeader $hostHeader | Out-Null
 
       - name: Install Web Deployment Package
         shell: powershell
