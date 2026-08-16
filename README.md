@@ -80,6 +80,12 @@ Für IIS-/Windows-Dienst-Betrieb gibt es zusätzlich eine produktionsnahe Vorlag
 - `http` ist aktiviert auf `http://127.0.0.1:8787`
 - proprietäres OAuth ist aktiviert und muss nur noch mit echten Secrets befüllt werden
 
+Für ein vollständig repo-basiertes IIS-Deployment liegen zusätzlich diese Dateien unter `deploy/iis/`:
+
+- `deployment.json` für IIS-/MCP-Zielpfade und Health-URLs
+- `web.env` für die Web-App-Konfiguration
+- `mcpsettings.json` für die MCP-HTTP-/OAuth-Konfiguration
+
 ## Docker — eigener Linux-Rechner
 
 ```bash
