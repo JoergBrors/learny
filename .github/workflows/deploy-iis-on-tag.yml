@@ -873,7 +873,13 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $healthUrl = ($env:IIS_BINDING_URL.TrimEnd('/')) + "/health"
+          $baseUri = [Uri]$env:IIS_BINDING_URL
+          $port = if ([string]::IsNullOrWhiteSpace($env:IIS_PORT)) { $baseUri.Port } else { [int]$env:IIS_PORT }
+          $builder = [System.UriBuilder]::new($baseUri)
+          $builder.Port = $port
+          $builder.Path = "/health"
+          $builder.Query = ""
+          $healthUrl = $builder.Uri.AbsoluteUri
           $response = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 30
           if ($response.StatusCode -lt 200 -or $response.StatusCode -ge 300) {
             throw "Health-Check fehlgeschlagen: $($response.StatusCode)"
