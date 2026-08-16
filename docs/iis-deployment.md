@@ -101,6 +101,8 @@ Bei einem neuen Tag:
    - `learncards-mcp.cmd` als Startskript
    - `claude-desktop.learncards.json` als Beispiel für einen MCP-Client
    - `mcpsettings.example.json` als Vorlage für einen eigenständigen HTTP-/OAuth-Betrieb
+   - `mcpsettings.json` wird erhalten, falls bereits vorhanden; auf einem frischen Ziel wird sie
+     einmalig aus `mcpsettings.example.json` erzeugt
 9. Falls `mcpsettings.json` vorhanden ist und `transports.http.enabled=true` setzt, legt die Action
    zusätzlich einen Windows-Dienst für den MCP-Server an oder aktualisiert ihn.
 10. App Pool und Website werden wieder gestartet.
@@ -164,6 +166,10 @@ Wenn der MCP-Server als eigenständiges Tool laufen soll:
 6. Optional `MCP_SERVICE_NAME` und `MCP_HTTP_HEALTH_URL` als Repository Variables setzen.
 7. Die Pipeline startet den HTTP-MCP-Server dann automatisch als Windows-Dienst, sobald
    `transports.http.enabled=true` gesetzt ist.
+
+Hinweis: Beim Deploy bleibt eine vorhandene `mcpsettings.json` bestehen. Falls noch keine existiert,
+kopiert die Pipeline automatisch `mcpsettings.example.json` nach `mcpsettings.json`. Diese initiale
+Datei sollte anschließend mit den produktiven Werten angepasst werden.
 
 Der Server stellt dann bereit:
 
