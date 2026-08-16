@@ -1,0 +1,53 @@
+{
+  "cards": [
+    {
+      "module": "Mein Foliendeck",
+      "category": "Case Study",
+      "term": "Folie 1: Zielbild",
+      "question": "Welche Kernaussage soll auf dieser Folie transportiert werden?",
+      "definition": "Die Folie erklärt das Zielbild in einer klaren, prüfbaren Kernaussage.",
+      "how_it_works": "Beschreibe hier technische oder fachliche Zusammenhänge der Folie.",
+      "context": "Ordne die Folie in die Gesamtgeschichte der Präsentation ein.",
+      "key_fact": "Ein Merksatz oder eine Prüfungsfalle für genau diese Seite.",
+      "reference_answer": "Eine gute Referenzantwort verbindet Kernaussage, Kontext und die wichtigste Begründung der Folie.",
+      "chat_prompt": "Antworte nur auf Basis der Karte und ihrer offiziellen Quellen. Wenn Informationen fehlen, frage nach.",
+      "official_sources": [
+        {
+          "title": "Offizielle Produktdokumentation",
+          "url": "https://learn.microsoft.com/",
+          "publisher": "Microsoft Learn"
+        }
+      ],
+      "slide_number": 1,
+      "target_time_sec": 90,
+      "quiz": [
+        {
+          "type": "single_choice",
+          "question": "Welche Aussage passt am besten zur Kernaussage dieser Folie?",
+          "options": [
+            "Die Kernaussage wird präzise und quellengebunden erklärt.",
+            "Die Folie ist nur ein dekorativer Trenner ohne Aussage.",
+            "Die Folie darf bewusst unvollständig bleiben.",
+            "Die Kernaussage sollte nicht im Quiz auftauchen."
+          ],
+          "correct_index": 0,
+          "explanation": "Die Seite soll eine klare, nachvollziehbare Kernaussage transportieren und im Quiz überprüfbar machen."
+        },
+        {
+          "type": "single_choice",
+          "question": "Wozu dient target_time_sec im Folienmodus?",
+          "options": [
+            "Zum Ausblenden der Karte",
+            "Zur Anzeige des Redezeitziels pro Folie",
+            "Zum automatischen Archivieren",
+            "Zum Erzwingen eines Imports"
+          ],
+          "correct_index": 1,
+          "explanation": "target_time_sec steuert die sichtbare Zeitvorgabe pro Folie im Folienmodus."
+        }
+      ],
+      "archived": false,
+      "sort_order": 1
+    }
+  ]
+}

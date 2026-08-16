@@ -1,0 +1,13 @@
+{
+  "cards": [
+    {
+      "module": "Mein Lernmodul",
+      "category": "Grundlagen",
+      "term": "Beispielbegriff",
+      "question": "Was ist der Kern dieses Begriffs?",
+      "definition": "Kurze, präzise Antwort in ein bis zwei Sätzen.",
+      "archived": false,
+      "sort_order": 1
+    }
+  ]
+}
