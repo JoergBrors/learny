@@ -841,9 +841,9 @@ jobs:
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ""
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "## MCP Windows service"
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ""
-          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- Service: \`$serviceName\`"
-          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- Config: \`$configPath\`"
-          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- Launcher: \`$serviceLauncherPath\`"
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ("- Service: {0}" -f $serviceName)
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ("- Config: {0}" -f $configPath)
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ("- Launcher: {0}" -f $serviceLauncherPath)
 
       - name: Verify Deployment
         if: ${{ env.IIS_BINDING_URL != '' }}
