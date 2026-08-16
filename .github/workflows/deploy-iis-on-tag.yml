@@ -662,7 +662,7 @@ jobs:
           }
           New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
 
-          & schtasks.exe /End /TN $taskName 2>$null | Out-Null
+          cmd.exe /c "schtasks /End /TN ""$taskName"" >nul 2>nul"
           $global:LASTEXITCODE = 0
 
           $mcpProcesses = Get-CimInstance Win32_Process -Filter "Name = 'LearnCards.McpServer.exe'" -ErrorAction SilentlyContinue
@@ -796,7 +796,8 @@ jobs:
           }
 
           if (-not $httpEnabled) {
-            & schtasks.exe /Delete /TN $taskName /F 2>$null | Out-Null
+            cmd.exe /c "schtasks /Delete /TN ""$taskName"" /F >nul 2>nul"
+            $global:LASTEXITCODE = 0
             $processes = Get-CimInstance Win32_Process -Filter "Name = 'LearnCards.McpServer.exe'" -ErrorAction SilentlyContinue
             foreach ($process in @($processes)) {
               if ($process.ExecutablePath -and $process.ExecutablePath.StartsWith($env:MCP_PHYSICAL_PATH, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -834,7 +835,7 @@ jobs:
           "@
           Set-Content -LiteralPath $bootstrapPath -Value $bootstrapScript -Encoding UTF8
 
-          & schtasks.exe /Delete /TN $taskName /F 2>$null | Out-Null
+          cmd.exe /c "schtasks /Delete /TN ""$taskName"" /F >nul 2>nul"
           $global:LASTEXITCODE = 0
           $taskCommand = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "' + $bootstrapPath + '"'
           & schtasks.exe /Create /F /SC ONSTART /RU SYSTEM /RL HIGHEST /TN $taskName /TR $taskCommand | Out-Null
