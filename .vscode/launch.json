@@ -16,19 +16,22 @@
       "console": "internalConsole"
     },
     {
-      "name": "LearnCards.McpServer (stdio)",
+      "name": "LearnCards.McpServer (lokal)",
       "type": "coreclr",
       "request": "launch",
       "preLaunchTask": "build-mcp",
       "program": "${workspaceFolder}/src/LearnCards.McpServer/bin/Debug/net10.0/LearnCards.McpServer.dll",
       "cwd": "${workspaceFolder}/src/LearnCards.McpServer",
+      "env": {
+        "LEARNCARDS_MCP_CONFIG": "${workspaceFolder}/.vscode/mcpsettings.debug.json"
+      },
       "console": "integratedTerminal"
     }
   ],
   "compounds": [
     {
-      "name": "App (lokal: Web + MCP)",
-      "configurations": ["LearnCards.Web (dotnet run)", "LearnCards.McpServer (stdio)"]
+      "name": "App",
+      "configurations": ["LearnCards.Web (dotnet run)", "LearnCards.McpServer (lokal)"]
     }
   ]
 }
