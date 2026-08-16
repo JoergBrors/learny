@@ -34,12 +34,12 @@ Die Action versucht IIS bei Bedarf selbst zu installieren und verwendet eine vor
 Konfiguration wieder. Falls das **ASP.NET Core Hosting Bundle** fehlt, kann die Action es ebenfalls
 installieren, wenn eine Download-URL hinterlegt ist.
 
-## Repository-Konfiguration
+## Repository-Vorlagen
 
-Die Pipeline liest ihre Deploy-Konfiguration direkt aus dem Repository:
+Das Repository enthält jetzt nur noch Vorlagen und Platzhalter:
 
 - `deploy/iis/deployment.json`
-  Enthält IIS-Site, App-Pool, Zielpfade, Hosting-Bundle-URL und MCP-Service-/Health-Settings.
+  Beispiel für die nicht-sensitiven Deploy-Werte.
 - `deploy/iis/web.env`
   Enthält nur Struktur, Standardwerte und Platzhalter. Wird beim Deploy mit GitHub Secrets gerendert
   und dann als `.env` in die Web-App kopiert.
@@ -47,7 +47,7 @@ Die Pipeline liest ihre Deploy-Konfiguration direkt aus dem Repository:
   Enthält nur Struktur und Platzhalter. Wird beim Deploy mit GitHub Secrets gerendert und dann als
   `mcpsettings.json` in den MCP-Zielordner kopiert.
 
-Damit ist das Repository die primäre Quelle für die IIS-/MCP-Konfiguration.
+Die tatsächlichen Laufzeitwerte kommen aus GitHub `Variables` und `Secrets`.
 
 ## Optional: App-Konfiguration auf dem IIS-Server
 
@@ -56,6 +56,51 @@ Der MCP-Server liest seine Laufzeitkonfiguration aus der deployten `mcpsettings.
 
 Die sensiblen Werte selbst liegen nicht im Repository, sondern in GitHub `Secrets`.
 Die Pipeline ersetzt die Platzhalter beim Deploy.
+
+## GitHub Variables
+
+Unter GitHub → `Settings` → `Secrets and variables` → `Actions` → `Variables` anlegen:
+
+- `IIS_SITE_NAME`
+- `IIS_APP_POOL`
+- `IIS_PHYSICAL_PATH`
+- `IIS_BINDING_URL`
+- `IIS_PORT`
+- `IIS_HOST_HEADER`
+- `ASPNETCORE_HOSTING_BUNDLE_URL`
+- `MCP_PHYSICAL_PATH`
+- `MCP_SERVICE_NAME`
+- `MCP_HTTP_HEALTH_URL`
+- `APP_DOMAIN`
+- `DEBUG`
+- `DB_PROVIDER`
+- `SQLITE_PATH`
+- `POSTGRES_HOST`
+- `POSTGRES_PORT`
+- `POSTGRES_USER`
+- `POSTGRES_DB`
+- `POSTGRES_SSLMODE`
+- `AUTH_MODE`
+- `OIDC_ISSUER`
+- `OIDC_CLIENT_ID`
+- `OIDC_AUDIENCE`
+- `OIDC_WEB_SCOPE`
+- `OPENAI_MODEL`
+- `OPENAI_BASE_URL`
+- `DEV_USER_NAME`
+- `DEV_USER_EMAIL`
+- `MCP_SERVER_NAME`
+- `MCP_SERVER_VERSION`
+- `MCP_UPSTREAM_API_BASE_URL`
+- `MCP_STDIO_ENABLED`
+- `MCP_HTTP_ENABLED`
+- `MCP_HTTP_URLS_JSON`
+- `MCP_OAUTH_ENABLED`
+- `MCP_OAUTH_ISSUER`
+- `MCP_OAUTH_AUDIENCE`
+- `MCP_OAUTH_TOKEN_LIFETIME_MINUTES`
+- `MCP_OAUTH_CLIENT_ID`
+- `MCP_OAUTH_CLIENT_SCOPES_JSON`
 
 ## GitHub Secrets
 
@@ -95,7 +140,7 @@ Bei einem neuen Tag:
    - `learncards-mcp.cmd` als Startskript
    - `claude-desktop.learncards.json` als Beispiel für einen MCP-Client
    - `mcpsettings.example.json` als Vorlage für einen eigenständigen HTTP-/OAuth-Betrieb
-9. Die Pipeline rendert zuerst die Repo-Dateien mit GitHub Secrets:
+9. Die Pipeline rendert zuerst die Repo-Dateien mit GitHub Variables und Secrets:
    - `deploy/iis/web.env` → gerenderte `.env`
    - `deploy/iis/mcpsettings.json` → gerenderte `mcpsettings.json`
 10. Die gerenderten Dateien werden auf den Zielserver gesetzt:
