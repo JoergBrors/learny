@@ -16,6 +16,12 @@
       "problemMatcher": "$msCompile"
     },
     {
+      "label": "build-app",
+      "dependsOrder": "sequence",
+      "dependsOn": ["build-web", "build-mcp"],
+      "problemMatcher": []
+    },
+    {
       "label": "docker: full stack up",
       "type": "shell",
       "command": "docker compose up --build -d",
