@@ -459,6 +459,15 @@ jobs:
           Set-ItemProperty "IIS:\Sites\$env:IIS_SITE_NAME" -Name physicalPath -Value $env:IIS_PHYSICAL_PATH
           Set-ItemProperty "IIS:\Sites\$env:IIS_SITE_NAME" -Name applicationPool -Value $env:IIS_APP_POOL
 
+          $existingBindings = Get-WebBinding -Name $env:IIS_SITE_NAME -ErrorAction SilentlyContinue
+          if ($existingBindings) {
+            foreach ($binding in @($existingBindings)) {
+              Remove-WebBinding -Name $env:IIS_SITE_NAME -Protocol $binding.protocol -Port $binding.bindingInformation.Split(':')[1] -HostHeader $binding.HostHeader -IPAddress $binding.bindingInformation.Split(':')[0]
+            }
+          }
+
+          New-WebBinding -Name $env:IIS_SITE_NAME -Protocol "http" -Port $port -IPAddress "*" -HostHeader $hostHeader | Out-Null
+
       - name: Install Web Deployment Package
         shell: powershell
         run: |
