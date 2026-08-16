@@ -85,7 +85,7 @@ jobs:
     needs: build
     environment: production
     env:
-      PACKAGE_ROOT: "${{ runner.temp }}\\learncards-deploy"
+      PACKAGE_ROOT: "${{ github.workspace }}\\_deploy"
       IIS_SITE_NAME: ${{ vars.IIS_SITE_NAME }}
       IIS_APP_POOL: ${{ vars.IIS_APP_POOL }}
       IIS_PHYSICAL_PATH: ${{ vars.IIS_PHYSICAL_PATH }}
