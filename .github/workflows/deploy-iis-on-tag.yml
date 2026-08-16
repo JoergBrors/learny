@@ -257,7 +257,7 @@ jobs:
           }
 
       - name: Ensure IIS And Deployment Prerequisites
-        shell: pwsh
+        shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
 
@@ -281,6 +281,9 @@ jobs:
           }
 
           Import-Module WebAdministration
+          if (-not (Get-PSDrive -Name IIS -ErrorAction SilentlyContinue)) {
+            throw "Das IIS PowerShell-Drive konnte nicht geladen werden. Prüfe, ob das Feature 'Web-Scripting-Tools' installiert ist."
+          }
 
           $hostingModuleCandidates = @(
             "$env:ProgramFiles\IIS\Asp.Net Core Module\V2\aspnetcorev2.dll",
@@ -351,7 +354,7 @@ jobs:
           Set-ItemProperty "IIS:\Sites\$env:IIS_SITE_NAME" -Name applicationPool -Value $env:IIS_APP_POOL
 
       - name: Install Web Deployment Package
-        shell: pwsh
+        shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
           Import-Module WebAdministration
@@ -507,7 +510,7 @@ jobs:
 
       - name: Configure MCP Windows Service
         if: ${{ env.MCP_PHYSICAL_PATH != '' }}
-        shell: pwsh
+        shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
 
