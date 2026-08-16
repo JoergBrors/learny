@@ -501,8 +501,44 @@ jobs:
             Copy-Item -LiteralPath $repoEnvFile -Destination (Join-Path $env:IIS_PHYSICAL_PATH ".env") -Force
           }
 
-          Start-WebAppPool -Name $env:IIS_APP_POOL
-          Start-Website -Name $env:IIS_SITE_NAME
+          if ((Get-Service -Name W3SVC).Status -ne "Running") {
+            Start-Service -Name W3SVC
+          }
+
+          $site = Get-Website -Name $env:IIS_SITE_NAME -ErrorAction Stop
+          $appPool = Get-Item "IIS:\AppPools\$env:IIS_APP_POOL" -ErrorAction Stop
+          Write-Host "=== IIS site diagnostic ==="
+          $site | Format-List Name, Id, State, PhysicalPath, ApplicationPool, Bindings | Out-String | Write-Host
+          Write-Host "=== IIS app pool diagnostic ==="
+          $appPool | Format-List Name, State, managedRuntimeVersion | Out-String | Write-Host
+
+          if ((Get-WebAppPoolState -Name $env:IIS_APP_POOL).Value -ne "Started") {
+            Start-WebAppPool -Name $env:IIS_APP_POOL
+          }
+
+          $siteState = (Get-Website -Name $env:IIS_SITE_NAME).State
+          if ($siteState -ne "Started") {
+            try {
+              Start-Website -Name $env:IIS_SITE_NAME
+            }
+            catch {
+              Write-Warning "Start-Website fehlgeschlagen: $($_.Exception.Message)"
+              $appcmd = Join-Path $env:WinDir "System32\inetsrv\appcmd.exe"
+              if (-not (Test-Path -LiteralPath $appcmd)) {
+                throw
+              }
+
+              & $appcmd start site /site.name:"$($env:IIS_SITE_NAME)"
+              if ($LASTEXITCODE -ne 0) {
+                throw "Start der IIS-Website '$($env:IIS_SITE_NAME)' ist fehlgeschlagen. appcmd Exit-Code: $LASTEXITCODE"
+              }
+            }
+          }
+
+          $finalSiteState = (Get-Website -Name $env:IIS_SITE_NAME).State
+          if ($finalSiteState -ne "Started") {
+            throw "IIS-Website '$($env:IIS_SITE_NAME)' konnte nicht gestartet werden. Endstatus: $finalSiteState"
+          }
 
       - name: Install MCP Deployment Package
         if: ${{ env.MCP_PHYSICAL_PATH != '' }}
