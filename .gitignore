@@ -1,6 +1,8 @@
 bin/
 obj/
 data/
+!src/LearnCards.Web/Data/
+!src/LearnCards.Web/Data/**
 *.user
 .vs/
 *.db
