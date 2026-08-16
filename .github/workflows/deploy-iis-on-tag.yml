@@ -750,7 +750,7 @@ jobs:
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ("- Claude Desktop snippet: {0}" -f $configPath)
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ("- Default API URL fallback: {0}" -f $apiBase)
 
-      - name: Configure MCP Windows Service
+      - name: Configure MCP Background Task
         if: ${{ env.MCP_PHYSICAL_PATH != '' }}
         shell: powershell
         run: |
@@ -770,10 +770,10 @@ jobs:
             $global:LASTEXITCODE = 0
           }
 
-          $serviceName = if ([string]::IsNullOrWhiteSpace($env:MCP_SERVICE_NAME)) { "LearnCardsMcpServer" } else { $env:MCP_SERVICE_NAME.Trim() }
+          $taskName = if ([string]::IsNullOrWhiteSpace($env:MCP_SERVICE_NAME)) { "LearnCardsMcpServer" } else { $env:MCP_SERVICE_NAME.Trim() }
           $configPath = Join-Path $env:MCP_PHYSICAL_PATH "mcpsettings.json"
           if (-not (Test-Path -LiteralPath $configPath)) {
-            Write-Host "mcpsettings.json fehlt. Windows-Dienst wird nicht angelegt."
+            Write-Host "mcpsettings.json fehlt. Geplante MCP-Aufgabe wird nicht angelegt."
             exit 0
           }
 
@@ -784,15 +784,14 @@ jobs:
           }
 
           if (-not $httpEnabled) {
-            $existing = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
-            if ($existing) {
-              if ($existing.Status -ne "Stopped") {
-                Stop-Service -Name $serviceName -Force
+            & schtasks.exe /Delete /TN $taskName /F 2>$null | Out-Null
+            $processes = Get-CimInstance Win32_Process -Filter "Name = 'LearnCards.McpServer.exe'" -ErrorAction SilentlyContinue
+            foreach ($process in @($processes)) {
+              if ($process.ExecutablePath -and $process.ExecutablePath.StartsWith($env:MCP_PHYSICAL_PATH, [System.StringComparison]::OrdinalIgnoreCase)) {
+                Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
               }
-              & sc.exe delete $serviceName | Out-Null
-              Start-Sleep -Seconds 2
             }
-            Write-Host "HTTP-Transport ist deaktiviert. Windows-Dienst wird nicht verwendet."
+            Write-Host "HTTP-Transport ist deaktiviert. Geplante MCP-Aufgabe wird nicht verwendet."
             exit 0
           }
 
@@ -801,49 +800,60 @@ jobs:
             throw "MCP-Service-Launcher wurde nicht gefunden: $serviceLauncherPath"
           }
 
-          $binPath = 'cmd.exe /c ""' + $serviceLauncherPath + '""'
-          $existingService = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+          $bootstrapPath = Join-Path $env:MCP_PHYSICAL_PATH "start-mcp-http.ps1"
+          $bootstrapScript = @"
+          `$ErrorActionPreference = 'Stop'
+          `$root = '$($env:MCP_PHYSICAL_PATH.Replace("'", "''"))'
+          `$launcher = Join-Path `$root 'learncards-mcp-http.cmd'
+          `$exePath = Join-Path `$root 'LearnCards.McpServer.exe'
 
-          if ($existingService) {
-            if ($existingService.Status -ne "Stopped") {
-              Stop-Service -Name $serviceName -Force
-            }
-            & sc.exe config $serviceName binPath= $binPath start= auto | Out-Null
-            if ($LASTEXITCODE -ne 0) {
-              throw "Windows-Dienst '$serviceName' konnte nicht aktualisiert werden."
+          `$processes = Get-CimInstance Win32_Process -Filter "Name = 'LearnCards.McpServer.exe'" -ErrorAction SilentlyContinue
+          foreach (`$process in @(`$processes)) {
+            if (`$process.ExecutablePath -and `$process.ExecutablePath.StartsWith(`$root, [System.StringComparison]::OrdinalIgnoreCase)) {
+              Stop-Process -Id `$process.ProcessId -Force -ErrorAction SilentlyContinue
             }
           }
-          else {
-            & sc.exe create $serviceName binPath= $binPath start= auto DisplayName= "LearnCards MCP Server" | Out-Null
-            if ($LASTEXITCODE -ne 0) {
-              throw "Windows-Dienst '$serviceName' konnte nicht angelegt werden."
-            }
-            & sc.exe description $serviceName "LearnCards MCP HTTP service" | Out-Null
+
+          if (-not (Test-Path -LiteralPath `$launcher)) {
+            throw "Launcher fehlt: `$launcher"
           }
 
-          Start-Service -Name $serviceName
+          Start-Process -FilePath `$launcher -WorkingDirectory `$root -WindowStyle Hidden
+          "@
+          Set-Content -LiteralPath $bootstrapPath -Value $bootstrapScript -Encoding UTF8
+
+          & schtasks.exe /Delete /TN $taskName /F 2>$null | Out-Null
+          $global:LASTEXITCODE = 0
+          $taskCommand = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "' + $bootstrapPath + '"'
+          & schtasks.exe /Create /F /SC ONSTART /RU SYSTEM /RL HIGHEST /TN $taskName /TR $taskCommand | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "Geplante Aufgabe '$taskName' konnte nicht angelegt werden."
+          }
+          $global:LASTEXITCODE = 0
+
+          Grant-DirectoryAccess -Path $env:MCP_PHYSICAL_PATH -Identity "NT AUTHORITY\SYSTEM" -Rights "(OI)(CI)(M)"
+
+          & schtasks.exe /Run /TN $taskName | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "Geplante MCP-Aufgabe '$taskName' konnte nicht gestartet werden."
+          }
+          $global:LASTEXITCODE = 0
+
           Start-Sleep -Seconds 3
-
-          $started = Get-Service -Name $serviceName
-          if ($started.Status -ne "Running") {
-            throw "Windows-Dienst '$serviceName' läuft nicht."
-          }
-
-          $serviceInfo = Get-CimInstance Win32_Service -Filter "Name = '$serviceName'"
-          if ($serviceInfo -and -not [string]::IsNullOrWhiteSpace($serviceInfo.StartName)) {
-            $serviceIdentity = $serviceInfo.StartName
-            if ($serviceIdentity -eq "LocalSystem") {
-              $serviceIdentity = "NT AUTHORITY\SYSTEM"
-            }
-            Grant-DirectoryAccess -Path $env:MCP_PHYSICAL_PATH -Identity $serviceIdentity -Rights "(OI)(CI)(M)"
+          $startedProcess = Get-CimInstance Win32_Process -Filter "Name = 'LearnCards.McpServer.exe'" -ErrorAction SilentlyContinue |
+            Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($env:MCP_PHYSICAL_PATH, [System.StringComparison]::OrdinalIgnoreCase) } |
+            Select-Object -First 1
+          if (-not $startedProcess) {
+            throw "MCP-Prozess wurde nicht gestartet."
           }
 
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ""
-          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "## MCP Windows service"
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "## MCP background task"
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ""
-          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ("- Service: {0}" -f $serviceName)
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ("- Task: {0}" -f $taskName)
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ("- Config: {0}" -f $configPath)
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ("- Launcher: {0}" -f $serviceLauncherPath)
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ("- Bootstrap: {0}" -f $bootstrapPath)
 
       - name: Verify Deployment
         if: ${{ env.IIS_BINDING_URL != '' }}
