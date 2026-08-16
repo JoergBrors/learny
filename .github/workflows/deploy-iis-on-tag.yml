@@ -149,6 +149,112 @@ jobs:
           name: mcp-package
           path: ${{ env.PACKAGE_ROOT }}\mcp
 
+      - name: Diagnose Runner And IIS Prerequisites
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Continue"
+
+          function Add-SummaryLine {
+            param([string]$Text)
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $Text
+          }
+
+          Add-SummaryLine "## Deployment diagnostics"
+          Add-SummaryLine ""
+          Add-SummaryLine "- Timestamp: $(Get-Date -Format s)"
+          Add-SummaryLine "- Computer: $env:COMPUTERNAME"
+          Add-SummaryLine "- User: $env:USERNAME"
+          Add-SummaryLine "- User domain: $env:USERDOMAIN"
+          Add-SummaryLine "- PowerShell edition: $($PSVersionTable.PSEdition)"
+          Add-SummaryLine "- PowerShell version: $($PSVersionTable.PSVersion)"
+
+          Write-Host "=== PowerShell ==="
+          $PSVersionTable
+
+          Write-Host "=== Runner service ==="
+          $runnerServices = Get-CimInstance Win32_Service | Where-Object { $_.Name -like 'actions.runner*' } |
+            Select-Object Name, StartName, State
+          if ($runnerServices) {
+            $runnerServices | Format-Table -AutoSize | Out-String | Write-Host
+            foreach ($service in $runnerServices) {
+              Add-SummaryLine "- Runner service: $($service.Name) / account: $($service.StartName) / state: $($service.State)"
+            }
+          }
+          else {
+            Write-Warning "Kein GitHub Runner-Dienst gefunden."
+            Add-SummaryLine "- Runner service: not found"
+          }
+
+          Write-Host "=== Windows features ==="
+          $features = Get-WindowsFeature Web-Server, Web-Mgmt-Tools, Web-Scripting-Tools |
+            Select-Object Name, InstallState
+          $features | Format-Table -AutoSize | Out-String | Write-Host
+          foreach ($feature in $features) {
+            Add-SummaryLine "- Feature $($feature.Name): $($feature.InstallState)"
+          }
+
+          Write-Host "=== Local administrators ==="
+          try {
+            $admins = Get-LocalGroupMember Administrators | Select-Object Name, PrincipalSource, ObjectClass
+            $admins | Format-Table -AutoSize | Out-String | Write-Host
+            Add-SummaryLine "- Local Administrators group listed successfully"
+          }
+          catch {
+            Write-Warning "Lokale Administratoren konnten nicht gelesen werden: $($_.Exception.Message)"
+            Add-SummaryLine "- Local Administrators group: read failed"
+          }
+
+          Write-Host "=== IIS module ==="
+          try {
+            Import-Module WebAdministration -ErrorAction Stop
+            Write-Host "WebAdministration imported."
+            Add-SummaryLine "- WebAdministration import: ok"
+          }
+          catch {
+            Write-Error "WebAdministration import failed: $($_.Exception.Message)"
+            Add-SummaryLine "- WebAdministration import: failed"
+          }
+
+          $iisDrive = Get-PSDrive -Name IIS -ErrorAction SilentlyContinue
+          if ($iisDrive) {
+            Write-Host "IIS drive available."
+            Add-SummaryLine "- IIS drive: available"
+            try {
+              $appPools = Get-ChildItem IIS:\AppPools | Select-Object -First 10 Name, State
+              $appPools | Format-Table -AutoSize | Out-String | Write-Host
+              Add-SummaryLine "- IIS AppPools query: ok"
+            }
+            catch {
+              Write-Warning "IIS AppPools konnten nicht gelesen werden: $($_.Exception.Message)"
+              Add-SummaryLine "- IIS AppPools query: failed"
+            }
+          }
+          else {
+            Write-Warning "IIS drive nicht vorhanden."
+            Add-SummaryLine "- IIS drive: missing"
+          }
+
+          Write-Host "=== Deployment env overview ==="
+          foreach ($name in @(
+            "IIS_SITE_NAME",
+            "IIS_APP_POOL",
+            "IIS_PHYSICAL_PATH",
+            "IIS_BINDING_URL",
+            "MCP_PHYSICAL_PATH",
+            "MCP_SERVICE_NAME",
+            "DEPLOY_DB_PROVIDER",
+            "DEPLOY_AUTH_MODE",
+            "DEPLOY_MCP_SERVER_NAME",
+            "DEPLOY_MCP_SERVER_VERSION",
+            "DEPLOY_MCP_STDIO_ENABLED",
+            "DEPLOY_MCP_HTTP_ENABLED"
+          )) {
+            $value = (Get-Item -Path "Env:$name" -ErrorAction SilentlyContinue).Value
+            $state = if ([string]::IsNullOrWhiteSpace($value)) { "missing" } else { "set" }
+            Write-Host ("{0}: {1}" -f $name, $state)
+            Add-SummaryLine "- $name: $state"
+          }
+
       - name: Render Runtime Config From Secrets
         shell: pwsh
         run: |
