@@ -199,10 +199,10 @@ static async Task RunHttpServerAsync(McpServerEngine engine, LearnCardsApiClient
         },
     }));
 
-    app.MapGet("/.well-known/oauth-authorization-server", (HttpRequest request, ProprietaryOAuthService auth) =>
+    app.MapGet("/.well-known/oauth-authorization-server", (HttpRequest request, ProprietaryOAuthService auth, McpSettings cfg) =>
     {
         if (!auth.IsEnabled) return Results.NotFound();
-        return Results.Json(auth.AuthorizationServerMetadata(BaseUrl(request)));
+        return Results.Json(auth.AuthorizationServerMetadata(MetadataIssuer(request, cfg)));
     });
 
     app.MapPost("/oauth/token", async (HttpRequest request, ProprietaryOAuthService auth) =>
@@ -257,7 +257,7 @@ static async Task RunHttpServerAsync(McpServerEngine engine, LearnCardsApiClient
         JsonNode? schema = null;
         try { schema = await client.GetAsync("schema/import/cards", ct); } catch { }
         var authMetadata = auth.IsEnabled
-            ? auth.AuthorizationServerMetadata(BaseUrl(request))
+            ? auth.AuthorizationServerMetadata(MetadataIssuer(request, settings))
             : new JsonObject { ["mode"] = "none" };
         return Results.Json(server.CreateServerMetadata(authMetadata, schema));
     });
@@ -311,6 +311,18 @@ static bool AuthorizeHttpRequest(HttpRequest request, HttpResponse response, Pro
 }
 
 static string BaseUrl(HttpRequest request) => $"{request.Scheme}://{request.Host}";
+
+static string MetadataIssuer(HttpRequest request, McpSettings settings)
+{
+    if (Uri.TryCreate(settings.OAuth.Issuer, UriKind.Absolute, out var issuer)
+        && (issuer.Scheme.Equals("http", StringComparison.OrdinalIgnoreCase)
+            || issuer.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase)))
+    {
+        return issuer.ToString().TrimEnd('/');
+    }
+
+    return BaseUrl(request);
+}
 
 static string CardUpsertSchema() =>
     """

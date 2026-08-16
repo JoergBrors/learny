@@ -78,6 +78,17 @@ public sealed class McpSettings
             .Select(u => u.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+        var httpsListener = Transports.Http.Urls.FirstOrDefault(u =>
+            Uri.TryCreate(u, UriKind.Absolute, out var uri)
+            && uri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase));
+        if (httpsListener is not null)
+        {
+            throw new InvalidOperationException(
+                $"HTTPS listener URLs are not supported directly by LearnCards MCP ('{httpsListener}'). " +
+                "Bind the MCP server to a local HTTP address such as 'http://127.0.0.1:8787' and terminate TLS in IIS or another reverse proxy. " +
+                "Use oauth.issuer for the public HTTPS base URL.");
+        }
     }
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
