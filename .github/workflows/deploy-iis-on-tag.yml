@@ -85,19 +85,33 @@ jobs:
     needs: build
     environment: production
     env:
-      IIS_SITE_NAME: ${{ vars.IIS_SITE_NAME }}
-      IIS_APP_POOL: ${{ vars.IIS_APP_POOL }}
-      IIS_PHYSICAL_PATH: ${{ vars.IIS_PHYSICAL_PATH }}
-      IIS_BINDING_URL: ${{ vars.IIS_BINDING_URL }}
-      IIS_PORT: ${{ vars.IIS_PORT }}
-      IIS_HOST_HEADER: ${{ vars.IIS_HOST_HEADER }}
-      ASPNETCORE_HOSTING_BUNDLE_URL: ${{ vars.ASPNETCORE_HOSTING_BUNDLE_URL }}
-      MCP_PHYSICAL_PATH: ${{ vars.MCP_PHYSICAL_PATH }}
-      MCP_SERVICE_NAME: ${{ vars.MCP_SERVICE_NAME }}
-      MCP_HTTP_HEALTH_URL: ${{ vars.MCP_HTTP_HEALTH_URL }}
       PACKAGE_ROOT: "${{ runner.temp }}\\learncards-deploy"
 
     steps:
+      - name: Load Repository Deployment Config
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $configPath = Join-Path $env:GITHUB_WORKSPACE "deploy\iis\deployment.json"
+          if (-not (Test-Path -LiteralPath $configPath)) {
+            throw "deploy/iis/deployment.json fehlt."
+          }
+
+          $cfg = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+
+          @(
+            "IIS_SITE_NAME=$($cfg.iisSiteName)"
+            "IIS_APP_POOL=$($cfg.iisAppPool)"
+            "IIS_PHYSICAL_PATH=$($cfg.iisPhysicalPath)"
+            "IIS_BINDING_URL=$($cfg.iisBindingUrl)"
+            "IIS_PORT=$($cfg.iisPort)"
+            "IIS_HOST_HEADER=$($cfg.iisHostHeader)"
+            "ASPNETCORE_HOSTING_BUNDLE_URL=$($cfg.aspNetCoreHostingBundleUrl)"
+            "MCP_PHYSICAL_PATH=$($cfg.mcpPhysicalPath)"
+            "MCP_SERVICE_NAME=$($cfg.mcpServiceName)"
+            "MCP_HTTP_HEALTH_URL=$($cfg.mcpHttpHealthUrl)"
+          ) | Add-Content -LiteralPath $env:GITHUB_ENV
+
       - name: Download Web Deployment Package
         uses: actions/download-artifact@v4
         with:
@@ -241,6 +255,11 @@ jobs:
             throw "Robocopy fehlgeschlagen mit Exit-Code $robocopyExit."
           }
 
+          $repoEnvFile = Join-Path $env:GITHUB_WORKSPACE "deploy\iis\web.env"
+          if (Test-Path -LiteralPath $repoEnvFile) {
+            Copy-Item -LiteralPath $repoEnvFile -Destination (Join-Path $env:IIS_PHYSICAL_PATH ".env") -Force
+          }
+
           Start-WebAppPool -Name $env:IIS_APP_POOL
           Start-Website -Name $env:IIS_SITE_NAME
 
@@ -288,8 +307,12 @@ jobs:
             throw "MCP-Robocopy fehlgeschlagen mit Exit-Code $robocopyExit."
           }
 
+          $repoMcpConfig = Join-Path $env:GITHUB_WORKSPACE "deploy\iis\mcpsettings.json"
           $targetConfig = Join-Path $env:MCP_PHYSICAL_PATH "mcpsettings.json"
-          if (Test-Path -LiteralPath $preservedConfig) {
+          if (Test-Path -LiteralPath $repoMcpConfig) {
+            Copy-Item -LiteralPath $repoMcpConfig -Destination $targetConfig -Force
+          }
+          elseif (Test-Path -LiteralPath $preservedConfig) {
             Copy-Item -LiteralPath $preservedConfig -Destination $targetConfig -Force
           }
           elseif (-not (Test-Path -LiteralPath $targetConfig)) {
