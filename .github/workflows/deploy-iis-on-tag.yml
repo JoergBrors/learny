@@ -83,7 +83,7 @@ jobs:
       - Windows
       - X64
     needs: build
-    environment: production
+    environment: Lerny
     env:
       PACKAGE_ROOT: "${{ github.workspace }}\\_deploy"
       IIS_SITE_NAME: ${{ vars.IIS_SITE_NAME }}
@@ -134,6 +134,9 @@ jobs:
       DEPLOY_MCP_OAUTH_CLIENT_SECRET: ${{ secrets.MCP_OAUTH_CLIENT_SECRET }}
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Download Web Deployment Package
         uses: actions/download-artifact@v4
         with:
@@ -150,6 +153,20 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+
+          foreach ($required in @(
+            "DEPLOY_DB_PROVIDER",
+            "DEPLOY_AUTH_MODE",
+            "DEPLOY_MCP_SERVER_NAME",
+            "DEPLOY_MCP_SERVER_VERSION",
+            "DEPLOY_MCP_UPSTREAM_API_BASE_URL",
+            "DEPLOY_MCP_STDIO_ENABLED",
+            "DEPLOY_MCP_HTTP_ENABLED"
+          )) {
+            if ([string]::IsNullOrWhiteSpace((Get-Item -Path "Env:$required" -ErrorAction SilentlyContinue).Value)) {
+              throw "Pflichtwert '$required' fehlt. Bitte GitHub Variables konfigurieren."
+            }
+          }
 
           $renderRoot = Join-Path $env:PACKAGE_ROOT "rendered-config"
           if (Test-Path -LiteralPath $renderRoot) {
@@ -174,6 +191,9 @@ jobs:
 
           $webTemplate = Join-Path $env:GITHUB_WORKSPACE "deploy\iis\web.env"
           $webTarget = Join-Path $renderRoot "web.env"
+          if (-not (Test-Path -LiteralPath $webTemplate)) {
+            throw "Template-Datei fehlt: $webTemplate. Stelle sicher, dass im Deploy-Job 'actions/checkout' ausgeführt wurde."
+          }
           Render-File -SourcePath $webTemplate -TargetPath $webTarget -Tokens @{
             "__APP_DOMAIN__" = $env:DEPLOY_APP_DOMAIN
             "__DEBUG__" = $env:DEPLOY_DEBUG
@@ -201,6 +221,9 @@ jobs:
 
           $mcpTemplate = Join-Path $env:GITHUB_WORKSPACE "deploy\iis\mcpsettings.json"
           $mcpTarget = Join-Path $renderRoot "mcpsettings.json"
+          if (-not (Test-Path -LiteralPath $mcpTemplate)) {
+            throw "Template-Datei fehlt: $mcpTemplate. Stelle sicher, dass im Deploy-Job 'actions/checkout' ausgeführt wurde."
+          }
           Render-File -SourcePath $mcpTemplate -TargetPath $mcpTarget -Tokens @{
             "__MCP_SERVER_NAME__" = $env:DEPLOY_MCP_SERVER_NAME
             "__MCP_SERVER_VERSION__" = $env:DEPLOY_MCP_SERVER_VERSION
