@@ -1,34 +1,30 @@
 {
-  "serverName": "learncards",
-  "serverVersion": "2.1.0",
+  "serverName": "__MCP_SERVER_NAME__",
+  "serverVersion": "__MCP_SERVER_VERSION__",
   "upstreamApi": {
-    "baseUrl": "http://localhost/api",
+    "baseUrl": "__MCP_UPSTREAM_API_BASE_URL__",
     "apiKey": "__MCP_API_KEY__"
   },
   "transports": {
     "stdio": {
-      "enabled": false
+      "enabled": __MCP_STDIO_ENABLED__
     },
     "http": {
-      "enabled": true,
-      "urls": [
-        "http://127.0.0.1:8787"
-      ]
+      "enabled": __MCP_HTTP_ENABLED__,
+      "urls": __MCP_HTTP_URLS_JSON__
     }
   },
   "oauth": {
-    "enabled": true,
-    "issuer": "http://127.0.0.1:8787",
-    "audience": "learncards-mcp",
+    "enabled": __MCP_OAUTH_ENABLED__,
+    "issuer": "__MCP_OAUTH_ISSUER__",
+    "audience": "__MCP_OAUTH_AUDIENCE__",
     "signingKey": "__MCP_OAUTH_SIGNING_KEY__",
-    "tokenLifetimeMinutes": 60,
+    "tokenLifetimeMinutes": __MCP_OAUTH_TOKEN_LIFETIME_MINUTES__,
     "clients": [
       {
-        "clientId": "learncards-local-llm",
+        "clientId": "__MCP_OAUTH_CLIENT_ID__",
         "clientSecret": "__MCP_OAUTH_CLIENT_SECRET__",
-        "scopes": [
-          "mcp"
-        ]
+        "scopes": __MCP_OAUTH_CLIENT_SCOPES_JSON__
       }
     ]
   }

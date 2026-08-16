@@ -82,9 +82,11 @@ Für IIS-/Windows-Dienst-Betrieb gibt es zusätzlich eine produktionsnahe Vorlag
 
 Für ein vollständig repo-basiertes IIS-Deployment liegen zusätzlich diese Dateien unter `deploy/iis/`:
 
-- `deployment.json` für IIS-/MCP-Zielpfade und Health-URLs
-- `web.env` für die Web-App-Konfiguration
-- `mcpsettings.json` für die MCP-HTTP-/OAuth-Konfiguration
+- `deployment.json` als Beispiel für nicht-sensitive Werte
+- `web.env` als Template für die Web-App-Konfiguration
+- `mcpsettings.json` als Template für die MCP-HTTP-/OAuth-Konfiguration
+
+Die echten Werte kommen beim Deploy aus GitHub `Variables` und `Secrets`.
 
 ## Docker — eigener Linux-Rechner
 

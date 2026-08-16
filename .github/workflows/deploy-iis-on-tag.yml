@@ -86,6 +86,46 @@ jobs:
     environment: production
     env:
       PACKAGE_ROOT: "${{ runner.temp }}\\learncards-deploy"
+      IIS_SITE_NAME: ${{ vars.IIS_SITE_NAME }}
+      IIS_APP_POOL: ${{ vars.IIS_APP_POOL }}
+      IIS_PHYSICAL_PATH: ${{ vars.IIS_PHYSICAL_PATH }}
+      IIS_BINDING_URL: ${{ vars.IIS_BINDING_URL }}
+      IIS_PORT: ${{ vars.IIS_PORT }}
+      IIS_HOST_HEADER: ${{ vars.IIS_HOST_HEADER }}
+      ASPNETCORE_HOSTING_BUNDLE_URL: ${{ vars.ASPNETCORE_HOSTING_BUNDLE_URL }}
+      MCP_PHYSICAL_PATH: ${{ vars.MCP_PHYSICAL_PATH }}
+      MCP_SERVICE_NAME: ${{ vars.MCP_SERVICE_NAME }}
+      MCP_HTTP_HEALTH_URL: ${{ vars.MCP_HTTP_HEALTH_URL }}
+      DEPLOY_APP_DOMAIN: ${{ vars.APP_DOMAIN }}
+      DEPLOY_DEBUG: ${{ vars.DEBUG }}
+      DEPLOY_DB_PROVIDER: ${{ vars.DB_PROVIDER }}
+      DEPLOY_SQLITE_PATH: ${{ vars.SQLITE_PATH }}
+      DEPLOY_POSTGRES_HOST: ${{ vars.POSTGRES_HOST }}
+      DEPLOY_POSTGRES_PORT: ${{ vars.POSTGRES_PORT }}
+      DEPLOY_POSTGRES_USER: ${{ vars.POSTGRES_USER }}
+      DEPLOY_POSTGRES_DB: ${{ vars.POSTGRES_DB }}
+      DEPLOY_POSTGRES_SSLMODE: ${{ vars.POSTGRES_SSLMODE }}
+      DEPLOY_AUTH_MODE: ${{ vars.AUTH_MODE }}
+      DEPLOY_OIDC_ISSUER: ${{ vars.OIDC_ISSUER }}
+      DEPLOY_OIDC_CLIENT_ID: ${{ vars.OIDC_CLIENT_ID }}
+      DEPLOY_OIDC_AUDIENCE: ${{ vars.OIDC_AUDIENCE }}
+      DEPLOY_OIDC_WEB_SCOPE: ${{ vars.OIDC_WEB_SCOPE }}
+      DEPLOY_OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+      DEPLOY_OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL }}
+      DEPLOY_DEV_USER_NAME: ${{ vars.DEV_USER_NAME }}
+      DEPLOY_DEV_USER_EMAIL: ${{ vars.DEV_USER_EMAIL }}
+      DEPLOY_MCP_SERVER_NAME: ${{ vars.MCP_SERVER_NAME }}
+      DEPLOY_MCP_SERVER_VERSION: ${{ vars.MCP_SERVER_VERSION }}
+      DEPLOY_MCP_UPSTREAM_API_BASE_URL: ${{ vars.MCP_UPSTREAM_API_BASE_URL }}
+      DEPLOY_MCP_STDIO_ENABLED: ${{ vars.MCP_STDIO_ENABLED }}
+      DEPLOY_MCP_HTTP_ENABLED: ${{ vars.MCP_HTTP_ENABLED }}
+      DEPLOY_MCP_HTTP_URLS_JSON: ${{ vars.MCP_HTTP_URLS_JSON }}
+      DEPLOY_MCP_OAUTH_ENABLED: ${{ vars.MCP_OAUTH_ENABLED }}
+      DEPLOY_MCP_OAUTH_ISSUER: ${{ vars.MCP_OAUTH_ISSUER }}
+      DEPLOY_MCP_OAUTH_AUDIENCE: ${{ vars.MCP_OAUTH_AUDIENCE }}
+      DEPLOY_MCP_OAUTH_TOKEN_LIFETIME_MINUTES: ${{ vars.MCP_OAUTH_TOKEN_LIFETIME_MINUTES }}
+      DEPLOY_MCP_OAUTH_CLIENT_ID: ${{ vars.MCP_OAUTH_CLIENT_ID }}
+      DEPLOY_MCP_OAUTH_CLIENT_SCOPES_JSON: ${{ vars.MCP_OAUTH_CLIENT_SCOPES_JSON }}
       DEPLOY_POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
       DEPLOY_OIDC_CLIENT_SECRET: ${{ secrets.OIDC_CLIENT_SECRET }}
       DEPLOY_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -94,30 +134,6 @@ jobs:
       DEPLOY_MCP_OAUTH_CLIENT_SECRET: ${{ secrets.MCP_OAUTH_CLIENT_SECRET }}
 
     steps:
-      - name: Load Repository Deployment Config
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $configPath = Join-Path $env:GITHUB_WORKSPACE "deploy\iis\deployment.json"
-          if (-not (Test-Path -LiteralPath $configPath)) {
-            throw "deploy/iis/deployment.json fehlt."
-          }
-
-          $cfg = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
-
-          @(
-            "IIS_SITE_NAME=$($cfg.iisSiteName)"
-            "IIS_APP_POOL=$($cfg.iisAppPool)"
-            "IIS_PHYSICAL_PATH=$($cfg.iisPhysicalPath)"
-            "IIS_BINDING_URL=$($cfg.iisBindingUrl)"
-            "IIS_PORT=$($cfg.iisPort)"
-            "IIS_HOST_HEADER=$($cfg.iisHostHeader)"
-            "ASPNETCORE_HOSTING_BUNDLE_URL=$($cfg.aspNetCoreHostingBundleUrl)"
-            "MCP_PHYSICAL_PATH=$($cfg.mcpPhysicalPath)"
-            "MCP_SERVICE_NAME=$($cfg.mcpServiceName)"
-            "MCP_HTTP_HEALTH_URL=$($cfg.mcpHttpHealthUrl)"
-          ) | Add-Content -LiteralPath $env:GITHUB_ENV
-
       - name: Download Web Deployment Package
         uses: actions/download-artifact@v4
         with:
@@ -159,6 +175,24 @@ jobs:
           $webTemplate = Join-Path $env:GITHUB_WORKSPACE "deploy\iis\web.env"
           $webTarget = Join-Path $renderRoot "web.env"
           Render-File -SourcePath $webTemplate -TargetPath $webTarget -Tokens @{
+            "__APP_DOMAIN__" = $env:DEPLOY_APP_DOMAIN
+            "__DEBUG__" = $env:DEPLOY_DEBUG
+            "__DB_PROVIDER__" = $env:DEPLOY_DB_PROVIDER
+            "__SQLITE_PATH__" = $env:DEPLOY_SQLITE_PATH
+            "__POSTGRES_HOST__" = $env:DEPLOY_POSTGRES_HOST
+            "__POSTGRES_PORT__" = $env:DEPLOY_POSTGRES_PORT
+            "__POSTGRES_USER__" = $env:DEPLOY_POSTGRES_USER
+            "__POSTGRES_DB__" = $env:DEPLOY_POSTGRES_DB
+            "__POSTGRES_SSLMODE__" = $env:DEPLOY_POSTGRES_SSLMODE
+            "__AUTH_MODE__" = $env:DEPLOY_AUTH_MODE
+            "__OIDC_ISSUER__" = $env:DEPLOY_OIDC_ISSUER
+            "__OIDC_CLIENT_ID__" = $env:DEPLOY_OIDC_CLIENT_ID
+            "__OIDC_AUDIENCE__" = $env:DEPLOY_OIDC_AUDIENCE
+            "__OIDC_WEB_SCOPE__" = $env:DEPLOY_OIDC_WEB_SCOPE
+            "__OPENAI_MODEL__" = $env:DEPLOY_OPENAI_MODEL
+            "__OPENAI_BASE_URL__" = $env:DEPLOY_OPENAI_BASE_URL
+            "__DEV_USER_NAME__" = $env:DEPLOY_DEV_USER_NAME
+            "__DEV_USER_EMAIL__" = $env:DEPLOY_DEV_USER_EMAIL
             "__POSTGRES_PASSWORD__" = $env:DEPLOY_POSTGRES_PASSWORD
             "__OIDC_CLIENT_SECRET__" = $env:DEPLOY_OIDC_CLIENT_SECRET
             "__OPENAI_API_KEY__" = $env:DEPLOY_OPENAI_API_KEY
@@ -168,6 +202,18 @@ jobs:
           $mcpTemplate = Join-Path $env:GITHUB_WORKSPACE "deploy\iis\mcpsettings.json"
           $mcpTarget = Join-Path $renderRoot "mcpsettings.json"
           Render-File -SourcePath $mcpTemplate -TargetPath $mcpTarget -Tokens @{
+            "__MCP_SERVER_NAME__" = $env:DEPLOY_MCP_SERVER_NAME
+            "__MCP_SERVER_VERSION__" = $env:DEPLOY_MCP_SERVER_VERSION
+            "__MCP_UPSTREAM_API_BASE_URL__" = $env:DEPLOY_MCP_UPSTREAM_API_BASE_URL
+            "__MCP_STDIO_ENABLED__" = $env:DEPLOY_MCP_STDIO_ENABLED
+            "__MCP_HTTP_ENABLED__" = $env:DEPLOY_MCP_HTTP_ENABLED
+            "__MCP_HTTP_URLS_JSON__" = $env:DEPLOY_MCP_HTTP_URLS_JSON
+            "__MCP_OAUTH_ENABLED__" = $env:DEPLOY_MCP_OAUTH_ENABLED
+            "__MCP_OAUTH_ISSUER__" = $env:DEPLOY_MCP_OAUTH_ISSUER
+            "__MCP_OAUTH_AUDIENCE__" = $env:DEPLOY_MCP_OAUTH_AUDIENCE
+            "__MCP_OAUTH_TOKEN_LIFETIME_MINUTES__" = $env:DEPLOY_MCP_OAUTH_TOKEN_LIFETIME_MINUTES
+            "__MCP_OAUTH_CLIENT_ID__" = $env:DEPLOY_MCP_OAUTH_CLIENT_ID
+            "__MCP_OAUTH_CLIENT_SCOPES_JSON__" = $env:DEPLOY_MCP_OAUTH_CLIENT_SCOPES_JSON
             "__MCP_API_KEY__" = $env:DEPLOY_MCP_API_KEY
             "__MCP_OAUTH_SIGNING_KEY__" = $env:DEPLOY_MCP_OAUTH_SIGNING_KEY
             "__MCP_OAUTH_CLIENT_SECRET__" = $env:DEPLOY_MCP_OAUTH_CLIENT_SECRET
