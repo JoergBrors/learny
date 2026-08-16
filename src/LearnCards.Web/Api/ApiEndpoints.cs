@@ -85,6 +85,8 @@ public static class ApiEndpoints
                 : Results.NoContent());
 
         // ─── Import ─────────────────────────────────────────────────────────
+        api.MapGet("/schema/import/cards", () => Results.Ok(CardImportSchema.Document()));
+
         api.MapPost("/import/cards", async (CardImportBatch batch, CardRepository repo) =>
         {
             var (created, updated, skipped) = await repo.ImportAsync(batch.Cards, batch.OverwriteExisting);

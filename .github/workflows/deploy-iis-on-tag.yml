@@ -1,0 +1,329 @@
+name: Deploy To IIS On Tag
+
+on:
+  push:
+    tags:
+      - "*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_VERSION: "10.0.x"
+  WEB_PROJECT: "src/LearnCards.Web/LearnCards.Web.csproj"
+  WEB_PUBLISH_DIR: "${{ github.workspace }}\\publish-web"
+  WEB_PACKAGE_NAME: "learncards-web-${{ github.ref_name }}.zip"
+  MCP_PROJECT: "src/LearnCards.McpServer/LearnCards.McpServer.csproj"
+  MCP_PUBLISH_DIR: "${{ github.workspace }}\\publish-mcp"
+  MCP_PACKAGE_NAME: "learncards-mcp-${{ github.ref_name }}.zip"
+
+jobs:
+  build:
+    name: Build Publish Package
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Publish Web App
+        shell: pwsh
+        run: |
+          dotnet publish "${{ env.WEB_PROJECT }}" `
+            -c Release `
+            -o "${{ env.WEB_PUBLISH_DIR }}"
+
+      - name: Publish MCP Server
+        shell: pwsh
+        run: |
+          dotnet publish "${{ env.MCP_PROJECT }}" `
+            -c Release `
+            -o "${{ env.MCP_PUBLISH_DIR }}"
+
+      - name: Create Web Deployment Package
+        shell: pwsh
+        run: |
+          if (Test-Path "${{ env.WEB_PACKAGE_NAME }}") {
+            Remove-Item -LiteralPath "${{ env.WEB_PACKAGE_NAME }}" -Force
+          }
+          Compress-Archive -Path "${{ env.WEB_PUBLISH_DIR }}\\*" -DestinationPath "${{ env.WEB_PACKAGE_NAME }}"
+
+      - name: Create MCP Deployment Package
+        shell: pwsh
+        run: |
+          if (Test-Path "${{ env.MCP_PACKAGE_NAME }}") {
+            Remove-Item -LiteralPath "${{ env.MCP_PACKAGE_NAME }}" -Force
+          }
+          Compress-Archive -Path "${{ env.MCP_PUBLISH_DIR }}\\*" -DestinationPath "${{ env.MCP_PACKAGE_NAME }}"
+
+      - name: Upload Web Deployment Package
+        uses: actions/upload-artifact@v4
+        with:
+          name: iis-package
+          path: ${{ env.WEB_PACKAGE_NAME }}
+          if-no-files-found: error
+
+      - name: Upload MCP Deployment Package
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-package
+          path: ${{ env.MCP_PACKAGE_NAME }}
+          if-no-files-found: error
+
+  deploy:
+    name: Deploy On IIS
+    runs-on:
+      - self-hosted
+      - Windows
+      - X64
+    needs: build
+    environment: production
+    env:
+      IIS_SITE_NAME: ${{ vars.IIS_SITE_NAME }}
+      IIS_APP_POOL: ${{ vars.IIS_APP_POOL }}
+      IIS_PHYSICAL_PATH: ${{ vars.IIS_PHYSICAL_PATH }}
+      IIS_BINDING_URL: ${{ vars.IIS_BINDING_URL }}
+      IIS_PORT: ${{ vars.IIS_PORT }}
+      IIS_HOST_HEADER: ${{ vars.IIS_HOST_HEADER }}
+      ASPNETCORE_HOSTING_BUNDLE_URL: ${{ vars.ASPNETCORE_HOSTING_BUNDLE_URL }}
+      MCP_PHYSICAL_PATH: ${{ vars.MCP_PHYSICAL_PATH }}
+      PACKAGE_ROOT: "${{ runner.temp }}\\learncards-deploy"
+
+    steps:
+      - name: Download Web Deployment Package
+        uses: actions/download-artifact@v4
+        with:
+          name: iis-package
+          path: ${{ env.PACKAGE_ROOT }}\web
+
+      - name: Download MCP Deployment Package
+        uses: actions/download-artifact@v4
+        with:
+          name: mcp-package
+          path: ${{ env.PACKAGE_ROOT }}\mcp
+
+      - name: Ensure IIS And Deployment Prerequisites
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          foreach ($required in @("IIS_SITE_NAME", "IIS_APP_POOL", "IIS_PHYSICAL_PATH")) {
+            if ([string]::IsNullOrWhiteSpace((Get-Item -Path "Env:$required").Value)) {
+              throw "Pflichtvariable '$required' fehlt. Bitte Repository Variables konfigurieren."
+            }
+          }
+
+          $iisService = Get-Service -Name W3SVC -ErrorAction SilentlyContinue
+          if (-not $iisService) {
+            if (-not (Get-Command Install-WindowsFeature -ErrorAction SilentlyContinue)) {
+              throw "IIS fehlt und 'Install-WindowsFeature' ist auf diesem Runner nicht verfügbar. Entweder IIS vorinstallieren oder einen Windows-Server-Runner mit Admin-Rechten verwenden."
+            }
+
+            Install-WindowsFeature Web-Server, Web-Mgmt-Tools, Web-Scripting-Tools | Out-Null
+            $iisService = Get-Service -Name W3SVC -ErrorAction SilentlyContinue
+            if (-not $iisService) {
+              throw "IIS konnte nicht installiert werden."
+            }
+          }
+
+          Import-Module WebAdministration
+
+          $hostingModuleCandidates = @(
+            "$env:ProgramFiles\IIS\Asp.Net Core Module\V2\aspnetcorev2.dll",
+            "$env:ProgramFiles\IIS\Asp.Net Core Module\V2\OutOfProcessRequestHandler.dll"
+          )
+          $hostingModule = $hostingModuleCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $hostingModule) {
+            if ([string]::IsNullOrWhiteSpace($env:ASPNETCORE_HOSTING_BUNDLE_URL)) {
+              throw "ASP.NET Core Hosting Bundle / AspNetCoreModuleV2 fehlt. Setze 'ASPNETCORE_HOSTING_BUNDLE_URL' als Repository Variable oder installiere das Hosting Bundle vorab."
+            }
+
+            $bundlePath = Join-Path $env:PACKAGE_ROOT "dotnet-hosting-bundle.exe"
+            Invoke-WebRequest -Uri $env:ASPNETCORE_HOSTING_BUNDLE_URL -OutFile $bundlePath -UseBasicParsing
+            Start-Process -FilePath $bundlePath -ArgumentList "/quiet", "/norestart" -Wait
+
+            $hostingModule = $hostingModuleCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+            if (-not $hostingModule) {
+              throw "ASP.NET Core Hosting Bundle konnte nicht erfolgreich installiert werden."
+            }
+          }
+
+          $runtimes = & dotnet --list-runtimes
+          if (-not ($runtimes | Select-String -Pattern "^Microsoft\.AspNetCore\.App 10\.")) {
+            if ([string]::IsNullOrWhiteSpace($env:ASPNETCORE_HOSTING_BUNDLE_URL)) {
+              throw ".NET 10 ASP.NET Core Runtime fehlt auf dem IIS-Server."
+            }
+
+            $bundlePath = Join-Path $env:PACKAGE_ROOT "dotnet-hosting-bundle.exe"
+            if (-not (Test-Path $bundlePath)) {
+              Invoke-WebRequest -Uri $env:ASPNETCORE_HOSTING_BUNDLE_URL -OutFile $bundlePath -UseBasicParsing
+            }
+            Start-Process -FilePath $bundlePath -ArgumentList "/quiet", "/norestart" -Wait
+            $runtimes = & dotnet --list-runtimes
+            if (-not ($runtimes | Select-String -Pattern "^Microsoft\.AspNetCore\.App 10\.")) {
+              throw ".NET 10 ASP.NET Core Runtime konnte nicht installiert werden."
+            }
+          }
+
+          if ((Get-Service -Name W3SVC).Status -ne "Running") {
+            Start-Service -Name W3SVC
+          }
+
+          if (-not (Test-Path "IIS:\AppPools\$env:IIS_APP_POOL")) {
+            New-Item "IIS:\AppPools\$env:IIS_APP_POOL" | Out-Null
+          }
+
+          Set-ItemProperty "IIS:\AppPools\$env:IIS_APP_POOL" -Name managedRuntimeVersion -Value ""
+          Set-ItemProperty "IIS:\AppPools\$env:IIS_APP_POOL" -Name processModel.identityType -Value ApplicationPoolIdentity
+
+          if (-not (Test-Path -LiteralPath $env:IIS_PHYSICAL_PATH)) {
+            New-Item -ItemType Directory -Path $env:IIS_PHYSICAL_PATH -Force | Out-Null
+          }
+
+          if (-not [string]::IsNullOrWhiteSpace($env:MCP_PHYSICAL_PATH)) {
+            if (-not (Test-Path -LiteralPath $env:MCP_PHYSICAL_PATH)) {
+              New-Item -ItemType Directory -Path $env:MCP_PHYSICAL_PATH -Force | Out-Null
+            }
+          }
+
+          $port = if ([string]::IsNullOrWhiteSpace($env:IIS_PORT)) { 80 } else { [int]$env:IIS_PORT }
+          $hostHeader = if ([string]::IsNullOrWhiteSpace($env:IIS_HOST_HEADER)) { "" } else { $env:IIS_HOST_HEADER }
+
+          if (-not (Test-Path "IIS:\Sites\$env:IIS_SITE_NAME")) {
+            New-Website -Name $env:IIS_SITE_NAME -PhysicalPath $env:IIS_PHYSICAL_PATH -ApplicationPool $env:IIS_APP_POOL -Port $port -HostHeader $hostHeader | Out-Null
+          }
+
+          Set-ItemProperty "IIS:\Sites\$env:IIS_SITE_NAME" -Name physicalPath -Value $env:IIS_PHYSICAL_PATH
+          Set-ItemProperty "IIS:\Sites\$env:IIS_SITE_NAME" -Name applicationPool -Value $env:IIS_APP_POOL
+
+      - name: Install Web Deployment Package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Import-Module WebAdministration
+
+          $package = Get-ChildItem -Path "$env:PACKAGE_ROOT\web" -Filter *.zip | Select-Object -First 1
+          if (-not $package) {
+            throw "Web-Deployment-Paket wurde nicht gefunden."
+          }
+
+          $extractPath = Join-Path $env:PACKAGE_ROOT "expanded"
+          $backupRoot = Join-Path $env:PACKAGE_ROOT "backup"
+          $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+          $backupPath = Join-Path $backupRoot $timestamp
+
+          if (Test-Path -LiteralPath $extractPath) {
+            Remove-Item -LiteralPath $extractPath -Recurse -Force
+          }
+          New-Item -ItemType Directory -Path $extractPath -Force | Out-Null
+          Expand-Archive -LiteralPath $package.FullName -DestinationPath $extractPath -Force
+
+          if ((Get-WebAppPoolState -Name $env:IIS_APP_POOL).Value -ne "Stopped") {
+            Stop-WebAppPool -Name $env:IIS_APP_POOL
+          }
+
+          New-Item -ItemType Directory -Path $backupPath -Force | Out-Null
+          if (Test-Path -LiteralPath $env:IIS_PHYSICAL_PATH) {
+            robocopy $env:IIS_PHYSICAL_PATH $backupPath /E /NFL /NDL /NJH /NJS /NP | Out-Null
+          }
+
+          robocopy $extractPath $env:IIS_PHYSICAL_PATH /MIR /R:2 /W:2 /NFL /NDL /NJH /NJS /NP
+          $robocopyExit = $LASTEXITCODE
+          if ($robocopyExit -gt 7) {
+            throw "Robocopy fehlgeschlagen mit Exit-Code $robocopyExit."
+          }
+
+          Start-WebAppPool -Name $env:IIS_APP_POOL
+          Start-Website -Name $env:IIS_SITE_NAME
+
+      - name: Install MCP Deployment Package
+        if: ${{ env.MCP_PHYSICAL_PATH != '' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $package = Get-ChildItem -Path "$env:PACKAGE_ROOT\mcp" -Filter *.zip | Select-Object -First 1
+          if (-not $package) {
+            throw "MCP-Deployment-Paket wurde nicht gefunden."
+          }
+
+          $extractPath = Join-Path $env:PACKAGE_ROOT "expanded-mcp"
+          $backupRoot = Join-Path $env:PACKAGE_ROOT "backup-mcp"
+          $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+          $backupPath = Join-Path $backupRoot $timestamp
+
+          if (Test-Path -LiteralPath $extractPath) {
+            Remove-Item -LiteralPath $extractPath -Recurse -Force
+          }
+          New-Item -ItemType Directory -Path $extractPath -Force | Out-Null
+          Expand-Archive -LiteralPath $package.FullName -DestinationPath $extractPath -Force
+
+          New-Item -ItemType Directory -Path $backupPath -Force | Out-Null
+          if (Test-Path -LiteralPath $env:MCP_PHYSICAL_PATH) {
+            robocopy $env:MCP_PHYSICAL_PATH $backupPath /E /NFL /NDL /NJH /NJS /NP | Out-Null
+          }
+
+          robocopy $extractPath $env:MCP_PHYSICAL_PATH /MIR /R:2 /W:2 /NFL /NDL /NJH /NJS /NP
+          $robocopyExit = $LASTEXITCODE
+          if ($robocopyExit -gt 7) {
+            throw "MCP-Robocopy fehlgeschlagen mit Exit-Code $robocopyExit."
+          }
+
+      - name: Create MCP Client Launcher
+        if: ${{ env.MCP_PHYSICAL_PATH != '' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $apiBase = if ([string]::IsNullOrWhiteSpace($env:IIS_BINDING_URL)) {
+            "http://localhost/api"
+          }
+          else {
+            ($env:IIS_BINDING_URL.TrimEnd('/')) + "/api"
+          }
+
+          $launcherPath = Join-Path $env:MCP_PHYSICAL_PATH "learncards-mcp.cmd"
+          $launcherContent = @"
+          @echo off
+          setlocal
+          if "%%LEARNCARDS_API_URL%%"=="" set "LEARNCARDS_API_URL=$apiBase"
+          if "%%LEARNCARDS_MCP_API_KEY%%"=="" if not "%%MCP_API_KEY%%"=="" set "LEARNCARDS_MCP_API_KEY=%%MCP_API_KEY%%"
+          "%~dp0LearnCards.McpServer.exe"
+          "@
+          Set-Content -LiteralPath $launcherPath -Value $launcherContent -Encoding ASCII
+
+          $escapedCommand = ($launcherPath -replace '\\', '\\')
+          $configPath = Join-Path $env:MCP_PHYSICAL_PATH "claude-desktop.learncards.json"
+          $config = @"
+          {
+            "mcpServers": {
+              "learncards": {
+                "command": "$escapedCommand"
+              }
+            }
+          }
+          "@
+          Set-Content -LiteralPath $configPath -Value $config -Encoding UTF8
+
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "## MCP client launcher"
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ""
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- Launcher: \`$launcherPath\`"
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- Claude Desktop snippet: \`$configPath\`"
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- Default API URL fallback: \`$apiBase\`"
+
+      - name: Verify Deployment
+        if: ${{ env.IIS_BINDING_URL != '' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $healthUrl = ($env:IIS_BINDING_URL.TrimEnd('/')) + "/health"
+          $response = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 30
+          if ($response.StatusCode -lt 200 -or $response.StatusCode -ge 300) {
+            throw "Health-Check fehlgeschlagen: $($response.StatusCode)"
+          }

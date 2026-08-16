@@ -16,7 +16,10 @@
                  SQLite-Datei                    PostgreSQL (Wire-Protokoll)
               (lokal, kein Docker)          (Docker-Compose / Azure Database for PostgreSQL)
 
-  Claude Desktop u.a. ──▶ LearnCards.McpServer (stdio) ──▶ /api (X-MCP-Key)
+  Claude Desktop u.a. ──▶ LearnCards.McpServer (stdio oder HTTP MCP)
+                           │            │
+                           │            └── optional proprietäres OAuth (Bearer Token)
+                           └──────────────────────────────▶ /api (X-MCP-Key)
 ```
 
 Eine einzige deploybare Web-Einheit vereint UI, API und Auth — dadurch entfällt der separate
@@ -49,7 +52,7 @@ API-Endpunkten oder der UI möglich ist.
 | Projekt | Zweck |
 |---|---|
 | `LearnCards.Web` | Blazor-UI, REST-API, Auth, Datenzugriff, KI-Integration |
-| `LearnCards.McpServer` | stdio-MCP-Server für Claude Desktop / andere MCP-Clients |
+| `LearnCards.McpServer` | MCP-Server für Claude Desktop / andere MCP-Clients, wahlweise per `stdio` oder HTTP |
 
 ### LearnCards.Web — Ordnerstruktur
 
@@ -75,14 +78,18 @@ Zwei Modi, automatisch anhand der Konfiguration gewählt (`AUTH_MODE=auto`, sieh
   Einstieg in die lokale Entwicklung. **Nicht für Produktion.**
 
 Die REST-API unter `/api` akzeptiert zusätzlich `X-MCP-Key` als Alternative zur Cookie-Session —
-das ist der Zugriffsweg für den MCP-Server und andere Automatisierungs-Clients.
+das ist der Zugriffsweg für den MCP-Server und andere Automatisierungs-Clients. Der MCP-Server
+selbst kann gegenüber seinen eigenen HTTP-Clients optional ein proprietäres, dateibasiert
+konfiguriertes OAuth mit `client_credentials` und Bearer-Token bereitstellen.
 
 ## Datenmodell
 
 Identisch zur Python-Ursprungslösung: `modules`, `cards`, `quiz_results` — inklusive des
 kanonischen Karten-JSON-Formats (`module`, `category`, `term`, `question`, `definition`,
-`how_it_works`, `context`, `key_fact`, `chat_prompt`, `archived`, `sort_order`), das API, Import
-und MCP-Server gemeinsam nutzen.
+`how_it_works`, `context`, `key_fact`, `reference_answer`, `chat_prompt`, `official_sources`,
+`archived`, `sort_order`), das API, Import und MCP-Server gemeinsam nutzen. Die API stellt dieses
+Format zusätzlich live unter `/api/schema/import/cards` bereit; der MCP-Server reicht es per Tool
+`get_import_schema` und per HTTP-Endpunkt `/schema/import/cards` weiter.
 
 ## KI-Integration
 

@@ -11,8 +11,9 @@ OpenAI-Client laufen über den eingebauten `HttpClient`).
 
 - `src/LearnCards.Web/` — Blazor Web App (.NET 10, interaktive Server-Komponenten) + REST-API
   unter `/api` + OIDC-Login unter `/auth/*`. Eine einzige deploybare Einheit.
-- `src/LearnCards.McpServer/` — eigenständiger MCP-Server (stdio-Transport), spricht mit der
-  Web-API über `X-MCP-Key`.
+- `src/LearnCards.McpServer/` — eigenständiger MCP-Server mit `stdio`- und HTTP-Transport,
+  spricht mit der Web-API über `X-MCP-Key` und kann optional ein dateibasiertes proprietäres OAuth
+  für HTTP-Clients bereitstellen.
 - `nginx/` — optionaler Reverse Proxy für TLS-Terminierung im Docker-Betrieb.
 - `docker-compose.yml` — Postgres + Web (+ MCP-Server-Profil, + nginx-Profil).
 
@@ -56,6 +57,20 @@ MCP-Server separat starten (z. B. für Claude Desktop):
 cd src/LearnCards.McpServer
 dotnet run
 ```
+
+Im produktiven IIS-Deployment wird der MCP-Server nicht als Windows-Dienst betrieben, sondern
+vom MCP-Client automatisch gestartet. Die GitHub-Action erzeugt dafür im MCP-Zielordner
+`learncards-mcp.cmd` und eine passende `claude-desktop.learncards.json`.
+
+Für einen eigenständigen HTTP-Betrieb liegt unter
+`src/LearnCards.McpServer/mcpsettings.example.json` eine Beispielkonfiguration. Als
+`mcpsettings.json` neben der veröffentlichten EXE abgelegt, kann der Server:
+
+- `stdio` für klassische MCP-Desktop-Clients bedienen
+- zusätzlich oder alternativ HTTP unter `/mcp` bereitstellen
+- unter `/.well-known/oauth-authorization-server` und `/oauth/token` ein einfaches proprietäres
+  OAuth für Bearer-Token anbieten
+- unter `/metadata` und per MCP-Tool `get_import_schema` das aktuelle Import-Schema des Learn-Servers liefern
 
 ## Docker — eigener Linux-Rechner
 
@@ -129,6 +144,7 @@ Beide Dateien lassen sich direkt über den JSON-Import in der Startseite laden.
 - [Architektur](docs/architecture.md)
 - [Lokale Entwicklung](docs/local-development.md)
 - [Azure-Deployment](docs/azure-deployment.md)
+- [IIS-Deployment per GitHub Actions](docs/iis-deployment.md)
 - [Migration von der Python-Version](docs/migration-notes.md)
 
 ## Design
