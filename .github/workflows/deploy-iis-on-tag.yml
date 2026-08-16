@@ -711,10 +711,10 @@ jobs:
 
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "## MCP client launcher"
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ""
-          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- Launcher: \`$launcherPath\`"
-          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- Service launcher: \`$serviceLauncherPath\`"
-          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- Claude Desktop snippet: \`$configPath\`"
-          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- Default API URL fallback: \`$apiBase\`"
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ("- Launcher: `{0}`" -f $launcherPath)
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ("- Service launcher: `{0}`" -f $serviceLauncherPath)
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ("- Claude Desktop snippet: `{0}`" -f $configPath)
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ("- Default API URL fallback: `{0}`" -f $apiBase)
 
       - name: Configure MCP Windows Service
         if: ${{ env.MCP_PHYSICAL_PATH != '' }}
