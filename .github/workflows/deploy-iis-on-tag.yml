@@ -522,7 +522,48 @@ jobs:
           $appPool | Format-List Name, State, managedRuntimeVersion | Out-String | Write-Host
 
           if ((Get-WebAppPoolState -Name $env:IIS_APP_POOL).Value -ne "Started") {
-            Start-WebAppPool -Name $env:IIS_APP_POOL
+            try {
+              Start-WebAppPool -Name $env:IIS_APP_POOL
+            }
+            catch {
+              Write-Warning "Start-WebAppPool fehlgeschlagen: $($_.Exception.Message)"
+            }
+          }
+
+          Start-Sleep -Seconds 3
+          $finalAppPoolState = (Get-WebAppPoolState -Name $env:IIS_APP_POOL).Value
+          Write-Host "=== IIS app pool state after start attempt ==="
+          Write-Host $finalAppPoolState
+
+          if ($finalAppPoolState -ne "Started") {
+            Write-Host "=== Recent Application log entries ==="
+            Get-WinEvent -LogName Application -MaxEvents 80 |
+              Where-Object {
+                $_.ProviderName -in @(
+                  "IIS-W3SVC-WP",
+                  "IIS-W3SVC",
+                  "Microsoft-Windows-WAS",
+                  "IIS AspNetCore Module V2",
+                  "Application Error",
+                  ".NET Runtime"
+                )
+              } |
+              Select-Object TimeCreated, ProviderName, Id, LevelDisplayName, Message |
+              Format-List | Out-String | Write-Host
+
+            $stdoutLogRoot = Join-Path $env:IIS_PHYSICAL_PATH "logs"
+            if (Test-Path -LiteralPath $stdoutLogRoot) {
+              Write-Host "=== Application stdout logs ==="
+              Get-ChildItem -LiteralPath $stdoutLogRoot -File -Recurse -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTime -Descending |
+                Select-Object -First 5 |
+                ForEach-Object {
+                  Write-Host "--- $($_.FullName) ---"
+                  Get-Content -LiteralPath $_.FullName -Tail 200 -ErrorAction SilentlyContinue
+                }
+            }
+
+            throw "Application Pool '$($env:IIS_APP_POOL)' konnte nicht gestartet werden oder ist direkt wieder gestoppt."
           }
 
           $siteState = (Get-Website -Name $env:IIS_SITE_NAME).State
