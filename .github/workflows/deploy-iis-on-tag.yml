@@ -252,7 +252,7 @@ jobs:
             $value = (Get-Item -Path "Env:$name" -ErrorAction SilentlyContinue).Value
             $state = if ([string]::IsNullOrWhiteSpace($value)) { "missing" } else { "set" }
             Write-Host ("{0}: {1}" -f $name, $state)
-            Add-SummaryLine "- $name: $state"
+            Add-SummaryLine ("- {0}: {1}" -f $name, $state)
           }
 
       - name: Render Runtime Config From Secrets
