@@ -136,5 +136,9 @@ public sealed class OAuthClientSettings
 {
     public string ClientId { get; set; } = "";
     public string ClientSecret { get; set; } = "";
+    public string ClientName { get; set; } = "";
+    public string TokenEndpointAuthMethod { get; set; } = "client_secret_post";
+    public string ApplicationType { get; set; } = "web";
+    public List<string> RedirectUris { get; set; } = new();
     public List<string> Scopes { get; set; } = new() { "mcp" };
 }
