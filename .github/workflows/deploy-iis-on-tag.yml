@@ -367,6 +367,20 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
+          function Grant-DirectoryAccess {
+            param(
+              [string]$Path,
+              [string]$Identity,
+              [string]$Rights
+            )
+
+            & icacls.exe $Path /grant "${Identity}:${Rights}" /T /C | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+              throw "Berechtigungen für '$Identity' auf '$Path' konnten nicht gesetzt werden."
+            }
+            $global:LASTEXITCODE = 0
+          }
+
           foreach ($required in @("IIS_SITE_NAME", "IIS_APP_POOL", "IIS_PHYSICAL_PATH")) {
             if ([string]::IsNullOrWhiteSpace((Get-Item -Path "Env:$required").Value)) {
               throw "Pflichtvariable '$required' fehlt. Bitte Repository Variables konfigurieren."
@@ -443,6 +457,16 @@ jobs:
             New-Item -ItemType Directory -Path $env:IIS_PHYSICAL_PATH -Force | Out-Null
           }
 
+          $keysPath = Join-Path $env:IIS_PHYSICAL_PATH "data\keys"
+          if (-not (Test-Path -LiteralPath $keysPath)) {
+            New-Item -ItemType Directory -Path $keysPath -Force | Out-Null
+          }
+
+          $logsPath = Join-Path $env:IIS_PHYSICAL_PATH "logs"
+          if (-not (Test-Path -LiteralPath $logsPath)) {
+            New-Item -ItemType Directory -Path $logsPath -Force | Out-Null
+          }
+
           if (-not [string]::IsNullOrWhiteSpace($env:MCP_PHYSICAL_PATH)) {
             if (-not (Test-Path -LiteralPath $env:MCP_PHYSICAL_PATH)) {
               New-Item -ItemType Directory -Path $env:MCP_PHYSICAL_PATH -Force | Out-Null
@@ -466,6 +490,16 @@ jobs:
           }
 
           New-Website -Name $env:IIS_SITE_NAME -PhysicalPath $env:IIS_PHYSICAL_PATH -ApplicationPool $env:IIS_APP_POOL -Port $port -IPAddress "*" -HostHeader $hostHeader | Out-Null
+
+          $appPoolIdentity = "IIS AppPool\$($env:IIS_APP_POOL)"
+          Grant-DirectoryAccess -Path $env:IIS_PHYSICAL_PATH -Identity "NT AUTHORITY\\SYSTEM" -Rights "(OI)(CI)(F)"
+          Grant-DirectoryAccess -Path $env:IIS_PHYSICAL_PATH -Identity "BUILTIN\\Administrators" -Rights "(OI)(CI)(F)"
+          Grant-DirectoryAccess -Path $env:IIS_PHYSICAL_PATH -Identity $appPoolIdentity -Rights "(OI)(CI)(M)"
+
+          if (-not [string]::IsNullOrWhiteSpace($env:MCP_PHYSICAL_PATH)) {
+            Grant-DirectoryAccess -Path $env:MCP_PHYSICAL_PATH -Identity "NT AUTHORITY\\SYSTEM" -Rights "(OI)(CI)(F)"
+            Grant-DirectoryAccess -Path $env:MCP_PHYSICAL_PATH -Identity "BUILTIN\\Administrators" -Rights "(OI)(CI)(F)"
+          }
 
       - name: Install Web Deployment Package
         shell: powershell
@@ -711,16 +745,30 @@ jobs:
 
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "## MCP client launcher"
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ""
-          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ("- Launcher: `{0}`" -f $launcherPath)
-          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ("- Service launcher: `{0}`" -f $serviceLauncherPath)
-          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ("- Claude Desktop snippet: `{0}`" -f $configPath)
-          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ("- Default API URL fallback: `{0}`" -f $apiBase)
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ("- Launcher: {0}" -f $launcherPath)
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ("- Service launcher: {0}" -f $serviceLauncherPath)
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ("- Claude Desktop snippet: {0}" -f $configPath)
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ("- Default API URL fallback: {0}" -f $apiBase)
 
       - name: Configure MCP Windows Service
         if: ${{ env.MCP_PHYSICAL_PATH != '' }}
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
+
+          function Grant-DirectoryAccess {
+            param(
+              [string]$Path,
+              [string]$Identity,
+              [string]$Rights
+            )
+
+            & icacls.exe $Path /grant "${Identity}:${Rights}" /T /C | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+              throw "Berechtigungen für '$Identity' auf '$Path' konnten nicht gesetzt werden."
+            }
+            $global:LASTEXITCODE = 0
+          }
 
           $serviceName = if ([string]::IsNullOrWhiteSpace($env:MCP_SERVICE_NAME)) { "LearnCardsMcpServer" } else { $env:MCP_SERVICE_NAME.Trim() }
           $configPath = Join-Path $env:MCP_PHYSICAL_PATH "mcpsettings.json"
@@ -779,6 +827,15 @@ jobs:
           $started = Get-Service -Name $serviceName
           if ($started.Status -ne "Running") {
             throw "Windows-Dienst '$serviceName' läuft nicht."
+          }
+
+          $serviceInfo = Get-CimInstance Win32_Service -Filter "Name = '$serviceName'"
+          if ($serviceInfo -and -not [string]::IsNullOrWhiteSpace($serviceInfo.StartName)) {
+            $serviceIdentity = $serviceInfo.StartName
+            if ($serviceIdentity -eq "LocalSystem") {
+              $serviceIdentity = "NT AUTHORITY\\SYSTEM"
+            }
+            Grant-DirectoryAccess -Path $env:MCP_PHYSICAL_PATH -Identity $serviceIdentity -Rights "(OI)(CI)(M)"
           }
 
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ""
