@@ -34,51 +34,27 @@ Die Action versucht IIS bei Bedarf selbst zu installieren und verwendet eine vor
 Konfiguration wieder. Falls das **ASP.NET Core Hosting Bundle** fehlt, kann die Action es ebenfalls
 installieren, wenn eine Download-URL hinterlegt ist.
 
-## Repository Variables
+## Repository-Konfiguration
 
-Unter GitHub → `Settings` → `Secrets and variables` → `Actions` → `Variables` anlegen:
+Die Pipeline liest ihre Deploy-Konfiguration direkt aus dem Repository:
 
-- `IIS_SITE_NAME`
-  Beispiel: `LearnCards`
-- `IIS_APP_POOL`
-  Beispiel: `LearnCardsAppPool`
-- `IIS_PHYSICAL_PATH`
-  Beispiel: `C:\inetpub\LearnCards`
-- `IIS_BINDING_URL`
-  Optional für Health-Check, z. B. `https://learncards.contoso.local`
-- `IIS_PORT`
-  Optional, Standard `80`
-- `IIS_HOST_HEADER`
-  Optional, z. B. `learncards.contoso.local`
-- `ASPNETCORE_HOSTING_BUNDLE_URL`
-  Optional, aber empfohlen. Offizielle Download-URL für das .NET 10 Hosting Bundle von Microsoft.
-- `MCP_PHYSICAL_PATH`
-  Optional, aber empfohlen. Zielordner für den veröffentlichten MCP-Server, z. B. `C:\tools\LearnCards.McpServer`
-- `MCP_SERVICE_NAME`
-  Optional. Name des Windows-Dienstes für den MCP-HTTP-Server. Standard: `LearnCardsMcpServer`
-- `MCP_HTTP_HEALTH_URL`
-  Optional, aber empfohlen wenn der MCP-HTTP-Modus aktiv ist. Beispiel: `http://127.0.0.1:8787/health`
+- `deploy/iis/deployment.json`
+  Enthält IIS-Site, App-Pool, Zielpfade, Hosting-Bundle-URL und MCP-Service-/Health-Settings.
+- `deploy/iis/web.env`
+  Wird nach dem Deploy als `.env` in die Web-App kopiert.
+- `deploy/iis/mcpsettings.json`
+  Wird nach dem Deploy als `mcpsettings.json` in den MCP-Zielordner kopiert.
+
+Damit ist das Repository die primäre Quelle für die IIS-/MCP-Konfiguration.
 
 ## Optional: App-Konfiguration auf dem IIS-Server
 
-Die GitHub Action deployt nur die Anwendung. Umgebungsvariablen wie:
+Die Web-App liest diese Werte künftig aus der deployten `.env` im IIS-Zielordner.
+Der MCP-Server liest seine Laufzeitkonfiguration aus der deployten `mcpsettings.json`.
 
-- `DB_PROVIDER`
-- `POSTGRES_HOST`
-- `POSTGRES_USER`
-- `POSTGRES_PASSWORD`
-- `POSTGRES_DB`
-- `POSTGRES_SSLMODE`
-- `AUTH_MODE`
-- `OIDC_*`
-- `OPENAI_API_KEY`
-- `MCP_API_KEY`
-
-sollten auf dem Server separat konfiguriert werden, z. B.:
-
-- als System-Umgebungsvariablen
-- per IIS-App-Pool-/Site-Konfiguration
-- oder per `web.config`, falls ihr das bewusst so betreiben wollt
+Wichtig: Wenn das Repository vertrauliche Werte enthält, sollte es privat und entsprechend
+geschützt sein. Die Pipeline setzt jetzt bewusst repo-basierte Konfigurationsdateien auf dem
+Zielserver durch.
 
 ## Ablauf des Deployments
 
@@ -101,8 +77,11 @@ Bei einem neuen Tag:
    - `learncards-mcp.cmd` als Startskript
    - `claude-desktop.learncards.json` als Beispiel für einen MCP-Client
    - `mcpsettings.example.json` als Vorlage für einen eigenständigen HTTP-/OAuth-Betrieb
-   - `mcpsettings.json` wird erhalten, falls bereits vorhanden; auf einem frischen Ziel wird sie
-     einmalig aus `mcpsettings.example.json` erzeugt
+9. Die Repo-Dateien werden auf den Zielserver gesetzt:
+   - `deploy/iis/web.env` → `<IIS_PHYSICAL_PATH>\.env`
+   - `deploy/iis/mcpsettings.json` → `<MCP_PHYSICAL_PATH>\mcpsettings.json`
+   Falls die MCP-Datei im Repository fehlt, greift die Pipeline auf die bestehende Datei oder
+   notfalls auf `mcpsettings.example.json` zurück.
 9. Falls `mcpsettings.json` vorhanden ist und `transports.http.enabled=true` setzt, legt die Action
    zusätzlich einen Windows-Dienst für den MCP-Server an oder aktualisiert ihn.
 10. App Pool und Website werden wieder gestartet.
@@ -167,9 +146,8 @@ Wenn der MCP-Server als eigenständiges Tool laufen soll:
 7. Die Pipeline startet den HTTP-MCP-Server dann automatisch als Windows-Dienst, sobald
    `transports.http.enabled=true` gesetzt ist.
 
-Hinweis: Beim Deploy bleibt eine vorhandene `mcpsettings.json` bestehen. Falls noch keine existiert,
-kopiert die Pipeline automatisch `mcpsettings.example.json` nach `mcpsettings.json`. Diese initiale
-Datei sollte anschließend mit den produktiven Werten angepasst werden.
+Hinweis: Solange `deploy/iis/mcpsettings.json` im Repository liegt, überschreibt diese Datei die
+Serverkonfiguration bei jedem Deploy bewusst.
 
 Für Windows Server/IIS ist `src/LearnCards.McpServer/mcpsettings.iis.example.json` die bessere
 Ausgangsbasis. Empfohlene Werte daraus:
