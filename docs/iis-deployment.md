@@ -171,6 +171,22 @@ Hinweis: Beim Deploy bleibt eine vorhandene `mcpsettings.json` bestehen. Falls n
 kopiert die Pipeline automatisch `mcpsettings.example.json` nach `mcpsettings.json`. Diese initiale
 Datei sollte anschließend mit den produktiven Werten angepasst werden.
 
+Für Windows Server/IIS ist `src/LearnCards.McpServer/mcpsettings.iis.example.json` die bessere
+Ausgangsbasis. Empfohlene Werte daraus:
+
+- `upstreamApi.baseUrl`: `http://localhost/api`
+- `transports.stdio.enabled`: `false`
+- `transports.http.enabled`: `true`
+- `transports.http.urls`: `["http://127.0.0.1:8787"]`
+- `oauth.enabled`: `true`
+
+Danach in `mcpsettings.json` nur noch diese produktiven Werte setzen:
+
+- `upstreamApi.apiKey`
+- `oauth.signingKey`
+- `oauth.clients[0].clientSecret`
+- optional weitere OAuth-Clients
+
 Der Server stellt dann bereit:
 
 - `POST /mcp`
