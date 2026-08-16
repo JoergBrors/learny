@@ -226,6 +226,12 @@ static async Task RunHttpServerAsync(McpServerEngine engine, LearnCardsApiClient
         return Results.Json(auth.AuthorizationServerMetadata(MetadataIssuer(request, cfg)));
     });
 
+    app.MapGet("/.well-known/openid-configuration", (HttpRequest request, ProprietaryOAuthService auth, McpSettings cfg) =>
+    {
+        if (!auth.IsEnabled) return Results.NotFound();
+        return Results.Json(auth.AuthorizationServerMetadata(MetadataIssuer(request, cfg)));
+    });
+
     app.MapGet("/oauth/authorize", (HttpRequest request, ProprietaryOAuthService auth, McpSettings cfg) =>
     {
         if (!auth.IsEnabled)
@@ -334,8 +340,134 @@ static async Task RunHttpServerAsync(McpServerEngine engine, LearnCardsApiClient
             return Results.Json(new
             {
                 client_id = client.ClientId,
-                client_secret = string.IsNullOrWhiteSpace(client.ClientSecret) ? null : client.ClientSecret,
-                client_secret_expires_at = string.IsNullOrWhiteSpace(client.ClientSecret) ? 0 : 0,
+                client_secret = client.ClientSecret ?? "",
+                client_secret_expires_at = 0,
+                client_id_issued_at = client.IssuedAt.ToUnixTimeSeconds(),
+                redirect_uris = client.RedirectUris,
+                token_endpoint_auth_method = client.TokenEndpointAuthMethod,
+                grant_types = new[] { "authorization_code" },
+                response_types = new[] { "code" },
+                scope = string.Join(' ', client.Scopes),
+                application_type = client.ApplicationType,
+                client_name = client.ClientName,
+            }, statusCode: 201);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.Json(new { error = ex.Message }, statusCode: 400);
+        }
+    }).AllowAnonymous();
+
+    app.MapGet("/authorize", (HttpRequest request, ProprietaryOAuthService auth, McpSettings cfg) =>
+    {
+        if (!auth.IsEnabled)
+            return Results.NotFound();
+
+        var query = request.Query;
+        var responseType = query["response_type"].FirstOrDefault();
+        if (!string.Equals(responseType, "code", StringComparison.Ordinal))
+            return Results.BadRequest("unsupported_response_type");
+
+        OAuthAuthorizeRequest authorizeRequest;
+        try
+        {
+            authorizeRequest = auth.ValidateAuthorizationRequest(
+                query["client_id"].FirstOrDefault() ?? "",
+                query["redirect_uri"].FirstOrDefault() ?? "",
+                query["scope"].FirstOrDefault(),
+                query["state"].FirstOrDefault(),
+                query["code_challenge"].FirstOrDefault(),
+                query["code_challenge_method"].FirstOrDefault(),
+                query["resource"].FirstOrDefault(),
+                MetadataIssuer(request, cfg));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.BadRequest(ex.Message);
+        }
+
+        return Results.Content(RenderConsentPage(authorizeRequest), "text/html; charset=utf-8");
+    }).AllowAnonymous();
+
+    app.MapPost("/authorize", async (HttpRequest request, ProprietaryOAuthService auth, McpSettings cfg) =>
+    {
+        if (!auth.IsEnabled)
+            return Results.NotFound();
+
+        IFormCollection form;
+        if (request.HasFormContentType)
+            form = await request.ReadFormAsync();
+        else
+            return Results.BadRequest("invalid_request");
+
+        var action = form["action"].FirstOrDefault();
+        var clientId = form["client_id"].FirstOrDefault() ?? "";
+        var redirectUri = form["redirect_uri"].FirstOrDefault() ?? "";
+        var state = form["state"].FirstOrDefault();
+        if (!string.Equals(action, "approve", StringComparison.Ordinal))
+            return Results.Redirect(AppendAuthorizeResult(redirectUri, null, state, "access_denied"));
+
+        OAuthAuthorizeRequest authorizeRequest;
+        try
+        {
+            authorizeRequest = auth.ValidateAuthorizationRequest(
+                clientId,
+                redirectUri,
+                form["scope"].FirstOrDefault(),
+                state,
+                form["code_challenge"].FirstOrDefault(),
+                form["code_challenge_method"].FirstOrDefault(),
+                form["resource"].FirstOrDefault(),
+                MetadataIssuer(request, cfg));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.Redirect(AppendAuthorizeResult(redirectUri, null, state, ex.Message));
+        }
+
+        var code = auth.IssueAuthorizationCode(authorizeRequest);
+        return Results.Redirect(AppendAuthorizeResult(redirectUri, code, authorizeRequest.State, null));
+    }).AllowAnonymous();
+
+    app.MapPost("/register", async (HttpRequest request, ProprietaryOAuthService auth) =>
+    {
+        if (!auth.IsEnabled)
+            return Results.NotFound();
+
+        JsonObject? body;
+        try
+        {
+            body = await JsonNode.ParseAsync(request.Body) as JsonObject;
+        }
+        catch
+        {
+            return Results.Json(new { error = "invalid_client_metadata" }, statusCode: 400);
+        }
+
+        if (body is null)
+            return Results.Json(new { error = "invalid_client_metadata" }, statusCode: 400);
+
+        var redirectUris = body["redirect_uris"]?.AsArray()
+            .Select(n => n?.GetValue<string>() ?? "")
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .ToArray() ?? Array.Empty<string>();
+
+        var scopes = body["scope"]?.GetValue<string>()?
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            ?? Array.Empty<string>();
+
+        var tokenEndpointAuthMethod = body["token_endpoint_auth_method"]?.GetValue<string>() ?? "client_secret_post";
+        var applicationType = body["application_type"]?.GetValue<string>() ?? "web";
+        var clientName = body["client_name"]?.GetValue<string>();
+
+        try
+        {
+            var client = auth.RegisterClient(clientName, redirectUris, tokenEndpointAuthMethod, scopes, applicationType);
+            return Results.Json(new
+            {
+                client_id = client.ClientId,
+                client_secret = client.ClientSecret ?? "",
+                client_secret_expires_at = 0,
                 client_id_issued_at = client.IssuedAt.ToUnixTimeSeconds(),
                 redirect_uris = client.RedirectUris,
                 token_endpoint_auth_method = client.TokenEndpointAuthMethod,
@@ -419,6 +551,74 @@ static async Task RunHttpServerAsync(McpServerEngine engine, LearnCardsApiClient
             return Results.Json(new { error = ex.Message }, statusCode: 401);
         }
     });
+
+    app.MapPost("/token", async (HttpRequest request, ProprietaryOAuthService auth) =>
+    {
+        if (!auth.IsEnabled)
+            return Results.NotFound();
+
+        string? clientId;
+        string? clientSecret;
+        string? scope;
+        string? grantType;
+        string? code;
+        string? redirectUri;
+        string? codeVerifier;
+        string? resource;
+
+        if (request.HasFormContentType)
+        {
+            var form = await request.ReadFormAsync();
+            clientId = form["client_id"].FirstOrDefault();
+            clientSecret = form["client_secret"].FirstOrDefault();
+            scope = form["scope"].FirstOrDefault();
+            grantType = form["grant_type"].FirstOrDefault();
+            code = form["code"].FirstOrDefault();
+            redirectUri = form["redirect_uri"].FirstOrDefault();
+            codeVerifier = form["code_verifier"].FirstOrDefault();
+            resource = form["resource"].FirstOrDefault();
+        }
+        else
+        {
+            var body = await JsonNode.ParseAsync(request.Body);
+            clientId = body?["client_id"]?.GetValue<string>();
+            clientSecret = body?["client_secret"]?.GetValue<string>();
+            scope = body?["scope"]?.GetValue<string>();
+            grantType = body?["grant_type"]?.GetValue<string>();
+            code = body?["code"]?.GetValue<string>();
+            redirectUri = body?["redirect_uri"]?.GetValue<string>();
+            codeVerifier = body?["code_verifier"]?.GetValue<string>();
+            resource = body?["resource"]?.GetValue<string>();
+        }
+
+        try
+        {
+            OAuthTokenResult token = grantType switch
+            {
+                "client_credentials" => auth.IssueClientCredentialsToken(clientId ?? "", clientSecret ?? "", scope),
+                "authorization_code" => auth.ExchangeAuthorizationCode(
+                    clientId ?? "",
+                    clientSecret,
+                    code ?? "",
+                    redirectUri ?? "",
+                    codeVerifier,
+                    resource,
+                    MetadataIssuer(request, settings)),
+                _ => throw new InvalidOperationException("unsupported_grant_type"),
+            };
+            return Results.Json(new
+            {
+                access_token = token.AccessToken,
+                token_type = token.TokenType,
+                expires_in = token.ExpiresIn,
+                scope = token.Scope,
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.Json(new { error = ex.Message }, statusCode: ex.Message == "invalid_client" ? 401 : 400);
+        }
+    }).AllowAnonymous();
 
     app.MapGet("/metadata", async (HttpRequest request, McpServerEngine server, ProprietaryOAuthService auth, LearnCardsApiClient client, CancellationToken ct) =>
     {

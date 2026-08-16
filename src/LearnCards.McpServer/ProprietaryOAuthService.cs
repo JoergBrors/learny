@@ -227,6 +227,7 @@ public sealed class ProprietaryOAuthService
         ["registration_endpoint"] = issuerBaseUrl.TrimEnd('/') + "/oauth/register",
         ["grant_types_supported"] = new JsonArray("authorization_code", "client_credentials"),
         ["response_types_supported"] = new JsonArray("code"),
+        ["response_modes_supported"] = new JsonArray("query"),
         ["code_challenge_methods_supported"] = new JsonArray("S256", "plain"),
         ["token_endpoint_auth_methods_supported"] = new JsonArray("client_secret_post", "none"),
         ["scopes_supported"] = new JsonArray(AllScopes().Select(s => (JsonNode)s).ToArray()),
