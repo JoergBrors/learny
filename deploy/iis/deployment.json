@@ -1,0 +1,12 @@
+{
+  "iisSiteName": "LearnCards",
+  "iisAppPool": "LearnCardsAppPool",
+  "iisPhysicalPath": "C:\\inetpub\\LearnCards",
+  "iisBindingUrl": "http://JOERGS-SRV",
+  "iisPort": 80,
+  "iisHostHeader": "",
+  "aspNetCoreHostingBundleUrl": "https://builds.dotnet.microsoft.com/dotnet/aspnetcore/Runtime/10.0.11/dotnet-hosting-10.0.11-win.exe",
+  "mcpPhysicalPath": "C:\\tools\\LearnCards.McpServer",
+  "mcpServiceName": "LearnCardsMcpServer",
+  "mcpHttpHealthUrl": "http://127.0.0.1:8787/health"
+}
