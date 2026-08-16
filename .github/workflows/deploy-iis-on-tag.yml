@@ -93,6 +93,8 @@ jobs:
       IIS_HOST_HEADER: ${{ vars.IIS_HOST_HEADER }}
       ASPNETCORE_HOSTING_BUNDLE_URL: ${{ vars.ASPNETCORE_HOSTING_BUNDLE_URL }}
       MCP_PHYSICAL_PATH: ${{ vars.MCP_PHYSICAL_PATH }}
+      MCP_SERVICE_NAME: ${{ vars.MCP_SERVICE_NAME }}
+      MCP_HTTP_HEALTH_URL: ${{ vars.MCP_HTTP_HEALTH_URL }}
       PACKAGE_ROOT: "${{ runner.temp }}\\learncards-deploy"
 
     steps:
@@ -298,6 +300,17 @@ jobs:
           "@
           Set-Content -LiteralPath $launcherPath -Value $launcherContent -Encoding ASCII
 
+          $serviceLauncherPath = Join-Path $env:MCP_PHYSICAL_PATH "learncards-mcp-http.cmd"
+          $serviceLauncherContent = @"
+          @echo off
+          setlocal
+          if "%%LEARNCARDS_API_URL%%"=="" set "LEARNCARDS_API_URL=$apiBase"
+          if "%%LEARNCARDS_MCP_API_KEY%%"=="" if not "%%MCP_API_KEY%%"=="" set "LEARNCARDS_MCP_API_KEY=%%MCP_API_KEY%%"
+          set "LEARNCARDS_MCP_CONFIG=%~dp0mcpsettings.json"
+          "%~dp0LearnCards.McpServer.exe"
+          "@
+          Set-Content -LiteralPath $serviceLauncherPath -Value $serviceLauncherContent -Encoding ASCII
+
           $escapedCommand = ($launcherPath -replace '\\', '\\')
           $configPath = Join-Path $env:MCP_PHYSICAL_PATH "claude-desktop.learncards.json"
           $config = @"
@@ -314,8 +327,81 @@ jobs:
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "## MCP client launcher"
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ""
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- Launcher: \`$launcherPath\`"
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- Service launcher: \`$serviceLauncherPath\`"
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- Claude Desktop snippet: \`$configPath\`"
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- Default API URL fallback: \`$apiBase\`"
+
+      - name: Configure MCP Windows Service
+        if: ${{ env.MCP_PHYSICAL_PATH != '' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $serviceName = if ([string]::IsNullOrWhiteSpace($env:MCP_SERVICE_NAME)) { "LearnCardsMcpServer" } else { $env:MCP_SERVICE_NAME.Trim() }
+          $configPath = Join-Path $env:MCP_PHYSICAL_PATH "mcpsettings.json"
+          if (-not (Test-Path -LiteralPath $configPath)) {
+            Write-Host "mcpsettings.json fehlt. Windows-Dienst wird nicht angelegt."
+            exit 0
+          }
+
+          $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+          $httpEnabled = $false
+          if ($null -ne $config.transports -and $null -ne $config.transports.http -and $config.transports.http.enabled -eq $true) {
+            $httpEnabled = $true
+          }
+
+          if (-not $httpEnabled) {
+            $existing = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+            if ($existing) {
+              if ($existing.Status -ne "Stopped") {
+                Stop-Service -Name $serviceName -Force
+              }
+              & sc.exe delete $serviceName | Out-Null
+              Start-Sleep -Seconds 2
+            }
+            Write-Host "HTTP-Transport ist deaktiviert. Windows-Dienst wird nicht verwendet."
+            exit 0
+          }
+
+          $serviceLauncherPath = Join-Path $env:MCP_PHYSICAL_PATH "learncards-mcp-http.cmd"
+          if (-not (Test-Path -LiteralPath $serviceLauncherPath)) {
+            throw "MCP-Service-Launcher wurde nicht gefunden: $serviceLauncherPath"
+          }
+
+          $binPath = 'cmd.exe /c ""' + $serviceLauncherPath + '""'
+          $existingService = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+
+          if ($existingService) {
+            if ($existingService.Status -ne "Stopped") {
+              Stop-Service -Name $serviceName -Force
+            }
+            & sc.exe config $serviceName binPath= $binPath start= auto | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+              throw "Windows-Dienst '$serviceName' konnte nicht aktualisiert werden."
+            }
+          }
+          else {
+            & sc.exe create $serviceName binPath= $binPath start= auto DisplayName= "LearnCards MCP Server" | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+              throw "Windows-Dienst '$serviceName' konnte nicht angelegt werden."
+            }
+            & sc.exe description $serviceName "LearnCards MCP HTTP service" | Out-Null
+          }
+
+          Start-Service -Name $serviceName
+          Start-Sleep -Seconds 3
+
+          $started = Get-Service -Name $serviceName
+          if ($started.Status -ne "Running") {
+            throw "Windows-Dienst '$serviceName' läuft nicht."
+          }
+
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ""
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "## MCP Windows service"
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ""
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- Service: \`$serviceName\`"
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- Config: \`$configPath\`"
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- Launcher: \`$serviceLauncherPath\`"
 
       - name: Verify Deployment
         if: ${{ env.IIS_BINDING_URL != '' }}
@@ -326,4 +412,14 @@ jobs:
           $response = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 30
           if ($response.StatusCode -lt 200 -or $response.StatusCode -ge 300) {
             throw "Health-Check fehlgeschlagen: $($response.StatusCode)"
+          }
+
+      - name: Verify MCP HTTP Service
+        if: ${{ env.MCP_PHYSICAL_PATH != '' && env.MCP_HTTP_HEALTH_URL != '' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $response = Invoke-WebRequest -Uri $env:MCP_HTTP_HEALTH_URL -UseBasicParsing -TimeoutSec 30
+          if ($response.StatusCode -lt 200 -or $response.StatusCode -ge 300) {
+            throw "MCP-Health-Check fehlgeschlagen: $($response.StatusCode)"
           }

@@ -54,6 +54,10 @@ Unter GitHub → `Settings` → `Secrets and variables` → `Actions` → `Varia
   Optional, aber empfohlen. Offizielle Download-URL für das .NET 10 Hosting Bundle von Microsoft.
 - `MCP_PHYSICAL_PATH`
   Optional, aber empfohlen. Zielordner für den veröffentlichten MCP-Server, z. B. `C:\tools\LearnCards.McpServer`
+- `MCP_SERVICE_NAME`
+  Optional. Name des Windows-Dienstes für den MCP-HTTP-Server. Standard: `LearnCardsMcpServer`
+- `MCP_HTTP_HEALTH_URL`
+  Optional, aber empfohlen wenn der MCP-HTTP-Modus aktiv ist. Beispiel: `http://127.0.0.1:8787/health`
 
 ## Optional: App-Konfiguration auf dem IIS-Server
 
@@ -97,8 +101,11 @@ Bei einem neuen Tag:
    - `learncards-mcp.cmd` als Startskript
    - `claude-desktop.learncards.json` als Beispiel für einen MCP-Client
    - `mcpsettings.example.json` als Vorlage für einen eigenständigen HTTP-/OAuth-Betrieb
-9. App Pool und Website werden wieder gestartet.
-10. Optional wird `/health` geprüft, wenn `IIS_BINDING_URL` gesetzt ist.
+9. Falls `mcpsettings.json` vorhanden ist und `transports.http.enabled=true` setzt, legt die Action
+   zusätzlich einen Windows-Dienst für den MCP-Server an oder aktualisiert ihn.
+10. App Pool und Website werden wieder gestartet.
+11. Optional wird `/health` geprüft, wenn `IIS_BINDING_URL` gesetzt ist.
+12. Optional wird der MCP-HTTP-Endpunkt geprüft, wenn `MCP_HTTP_HEALTH_URL` gesetzt ist.
 
 ## Tag-basiertes Auslösen
 
@@ -120,10 +127,11 @@ Danach startet der Workflow automatisch.
 - Die Web-App wird als framework-dependent Deployment veröffentlicht; deshalb muss die
   passende Runtime auf dem IIS-Server vorhanden sein oder durch das Hosting Bundle installiert werden.
 - Der MCP-Server wird ebenfalls framework-dependent veröffentlicht.
-- Der MCP-Server wird bewusst **nicht als Windows-Dienst** gestartet, weil er technisch ein
-  `stdio`-MCP-Server ist und erst mit einem verbundenen MCP-Client sinnvoll arbeitet.
-- Die Pipeline erzeugt stattdessen ein fertiges Launcher-Skript. Ein Client wie Claude Desktop kann dieses
-  Skript automatisch starten, sodass kein manueller Konsolenstart nötig ist.
+- Im reinen `stdio`-Modus bleibt der MCP-Server clientgesteuert und wird nicht als Dienst verwendet.
+- Sobald `mcpsettings.json` den HTTP-Transport aktiviert, erzeugt und startet die Pipeline zusätzlich
+  einen Windows-Dienst für den MCP-HTTP-Server.
+- Unabhängig davon erzeugt die Pipeline ein fertiges Launcher-Skript. Ein Client wie Claude Desktop kann dieses
+  Skript automatisch starten, sodass auch im `stdio`-Modus kein manueller Konsolenstart nötig ist.
 
 ## MCP ohne manuellen Start
 
@@ -152,7 +160,10 @@ Wenn der MCP-Server als eigenständiges Tool laufen soll:
 2. `transports.http.enabled` aktivieren.
 3. Für einen reinen Serverbetrieb `transports.stdio.enabled` deaktivieren.
 4. Optional `oauth.enabled` aktivieren und `signingKey` sowie `clients` setzen.
-5. Den Server dann direkt über `LearnCards.McpServer.exe` oder einen Windows-Dienst/Task Scheduler starten.
+5. Die Datei im `MCP_PHYSICAL_PATH` ablegen.
+6. Optional `MCP_SERVICE_NAME` und `MCP_HTTP_HEALTH_URL` als Repository Variables setzen.
+7. Die Pipeline startet den HTTP-MCP-Server dann automatisch als Windows-Dienst, sobald
+   `transports.http.enabled=true` gesetzt ist.
 
 Der Server stellt dann bereit:
 
@@ -164,3 +175,6 @@ Der Server stellt dann bereit:
 
 Damit ist der MCP-Server nicht mehr nur ein per Client gestarteter `stdio`-Prozess, sondern kann
 auch als eigenständiger HTTP-Endpoint für MCP-fähige LLM-Clients betrieben werden.
+
+Wenn `transports.http.enabled=false` ist, entfernt die Pipeline einen eventuell vorhandenen
+Windows-Dienst wieder und belässt den MCP-Teil im reinen `stdio`-/Client-Start-Modus.

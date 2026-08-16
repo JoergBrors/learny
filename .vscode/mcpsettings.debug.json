@@ -1,0 +1,27 @@
+{
+  "serverName": "learncards",
+  "serverVersion": "2.1.0-debug",
+  "upstreamApi": {
+    "baseUrl": "http://localhost:5000/api",
+    "apiKey": "change-me-mcp-key"
+  },
+  "transports": {
+    "stdio": {
+      "enabled": true
+    },
+    "http": {
+      "enabled": true,
+      "urls": [
+        "http://127.0.0.1:8787"
+      ]
+    }
+  },
+  "oauth": {
+    "enabled": false,
+    "issuer": "learncards-mcp-debug",
+    "audience": "learncards-mcp-debug",
+    "signingKey": "replace-me-for-debug-if-oauth-is-enabled",
+    "tokenLifetimeMinutes": 60,
+    "clients": []
+  }
+}
