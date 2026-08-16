@@ -1,0 +1,35 @@
+{
+  "serverName": "learncards",
+  "serverVersion": "2.1.0",
+  "upstreamApi": {
+    "baseUrl": "http://localhost/api",
+    "apiKey": "replace-with-your-mcp-api-key"
+  },
+  "transports": {
+    "stdio": {
+      "enabled": false
+    },
+    "http": {
+      "enabled": true,
+      "urls": [
+        "http://127.0.0.1:8787"
+      ]
+    }
+  },
+  "oauth": {
+    "enabled": true,
+    "issuer": "http://127.0.0.1:8787",
+    "audience": "learncards-mcp",
+    "signingKey": "replace-with-a-long-random-secret-at-least-32-characters",
+    "tokenLifetimeMinutes": 60,
+    "clients": [
+      {
+        "clientId": "learncards-local-llm",
+        "clientSecret": "replace-with-a-long-random-client-secret",
+        "scopes": [
+          "mcp"
+        ]
+      }
+    ]
+  }
+}

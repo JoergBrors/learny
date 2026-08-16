@@ -72,6 +72,14 @@ Für einen eigenständigen HTTP-Betrieb liegt unter
   OAuth für Bearer-Token anbieten
 - unter `/metadata` und per MCP-Tool `get_import_schema` das aktuelle Import-Schema des Learn-Servers liefern
 
+Für IIS-/Windows-Dienst-Betrieb gibt es zusätzlich eine produktionsnahe Vorlage unter
+`src/LearnCards.McpServer/mcpsettings.iis.example.json`:
+
+- `upstreamApi.baseUrl` zeigt auf `http://localhost/api`
+- `stdio` ist deaktiviert
+- `http` ist aktiviert auf `http://127.0.0.1:8787`
+- proprietäres OAuth ist aktiviert und muss nur noch mit echten Secrets befüllt werden
+
 ## Docker — eigener Linux-Rechner
 
 ```bash
