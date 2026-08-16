@@ -86,6 +86,12 @@ jobs:
     environment: production
     env:
       PACKAGE_ROOT: "${{ runner.temp }}\\learncards-deploy"
+      DEPLOY_POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+      DEPLOY_OIDC_CLIENT_SECRET: ${{ secrets.OIDC_CLIENT_SECRET }}
+      DEPLOY_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      DEPLOY_MCP_API_KEY: ${{ secrets.MCP_API_KEY }}
+      DEPLOY_MCP_OAUTH_SIGNING_KEY: ${{ secrets.MCP_OAUTH_SIGNING_KEY }}
+      DEPLOY_MCP_OAUTH_CLIENT_SECRET: ${{ secrets.MCP_OAUTH_CLIENT_SECRET }}
 
     steps:
       - name: Load Repository Deployment Config
@@ -123,6 +129,63 @@ jobs:
         with:
           name: mcp-package
           path: ${{ env.PACKAGE_ROOT }}\mcp
+
+      - name: Render Runtime Config From Secrets
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $renderRoot = Join-Path $env:PACKAGE_ROOT "rendered-config"
+          if (Test-Path -LiteralPath $renderRoot) {
+            Remove-Item -LiteralPath $renderRoot -Recurse -Force
+          }
+          New-Item -ItemType Directory -Path $renderRoot -Force | Out-Null
+
+          function Render-File {
+            param(
+              [string]$SourcePath,
+              [string]$TargetPath,
+              [hashtable]$Tokens
+            )
+
+            $content = Get-Content -LiteralPath $SourcePath -Raw
+            foreach ($entry in $Tokens.GetEnumerator()) {
+              $replacement = if ($null -eq $entry.Value) { "" } else { [string]$entry.Value }
+              $content = $content.Replace($entry.Key, $replacement)
+            }
+            Set-Content -LiteralPath $TargetPath -Value $content -Encoding UTF8
+          }
+
+          $webTemplate = Join-Path $env:GITHUB_WORKSPACE "deploy\iis\web.env"
+          $webTarget = Join-Path $renderRoot "web.env"
+          Render-File -SourcePath $webTemplate -TargetPath $webTarget -Tokens @{
+            "__POSTGRES_PASSWORD__" = $env:DEPLOY_POSTGRES_PASSWORD
+            "__OIDC_CLIENT_SECRET__" = $env:DEPLOY_OIDC_CLIENT_SECRET
+            "__OPENAI_API_KEY__" = $env:DEPLOY_OPENAI_API_KEY
+            "__MCP_API_KEY__" = $env:DEPLOY_MCP_API_KEY
+          }
+
+          $mcpTemplate = Join-Path $env:GITHUB_WORKSPACE "deploy\iis\mcpsettings.json"
+          $mcpTarget = Join-Path $renderRoot "mcpsettings.json"
+          Render-File -SourcePath $mcpTemplate -TargetPath $mcpTarget -Tokens @{
+            "__MCP_API_KEY__" = $env:DEPLOY_MCP_API_KEY
+            "__MCP_OAUTH_SIGNING_KEY__" = $env:DEPLOY_MCP_OAUTH_SIGNING_KEY
+            "__MCP_OAUTH_CLIENT_SECRET__" = $env:DEPLOY_MCP_OAUTH_CLIENT_SECRET
+          }
+
+          if ([string]::IsNullOrWhiteSpace($env:DEPLOY_MCP_API_KEY)) {
+            throw "GitHub Secret 'MCP_API_KEY' fehlt."
+          }
+
+          $mcpConfig = Get-Content -LiteralPath $mcpTarget -Raw | ConvertFrom-Json
+          if ($mcpConfig.oauth.enabled -eq $true) {
+            if ([string]::IsNullOrWhiteSpace($env:DEPLOY_MCP_OAUTH_SIGNING_KEY)) {
+              throw "GitHub Secret 'MCP_OAUTH_SIGNING_KEY' fehlt, obwohl OAuth im MCP-Config aktiviert ist."
+            }
+            if ($mcpConfig.oauth.clients.Count -gt 0 -and [string]::IsNullOrWhiteSpace($env:DEPLOY_MCP_OAUTH_CLIENT_SECRET)) {
+              throw "GitHub Secret 'MCP_OAUTH_CLIENT_SECRET' fehlt, obwohl ein OAuth-Client konfiguriert ist."
+            }
+          }
 
       - name: Ensure IIS And Deployment Prerequisites
         shell: pwsh
@@ -255,7 +318,7 @@ jobs:
             throw "Robocopy fehlgeschlagen mit Exit-Code $robocopyExit."
           }
 
-          $repoEnvFile = Join-Path $env:GITHUB_WORKSPACE "deploy\iis\web.env"
+          $repoEnvFile = Join-Path $env:PACKAGE_ROOT "rendered-config\web.env"
           if (Test-Path -LiteralPath $repoEnvFile) {
             Copy-Item -LiteralPath $repoEnvFile -Destination (Join-Path $env:IIS_PHYSICAL_PATH ".env") -Force
           }
@@ -307,7 +370,7 @@ jobs:
             throw "MCP-Robocopy fehlgeschlagen mit Exit-Code $robocopyExit."
           }
 
-          $repoMcpConfig = Join-Path $env:GITHUB_WORKSPACE "deploy\iis\mcpsettings.json"
+          $repoMcpConfig = Join-Path $env:PACKAGE_ROOT "rendered-config\mcpsettings.json"
           $targetConfig = Join-Path $env:MCP_PHYSICAL_PATH "mcpsettings.json"
           if (Test-Path -LiteralPath $repoMcpConfig) {
             Copy-Item -LiteralPath $repoMcpConfig -Destination $targetConfig -Force

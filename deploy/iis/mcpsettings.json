@@ -3,7 +3,7 @@
   "serverVersion": "2.1.0",
   "upstreamApi": {
     "baseUrl": "http://localhost/api",
-    "apiKey": "replace-with-your-mcp-api-key"
+    "apiKey": "__MCP_API_KEY__"
   },
   "transports": {
     "stdio": {
@@ -20,12 +20,12 @@
     "enabled": true,
     "issuer": "http://127.0.0.1:8787",
     "audience": "learncards-mcp",
-    "signingKey": "replace-with-a-long-random-secret-at-least-32-characters",
+    "signingKey": "__MCP_OAUTH_SIGNING_KEY__",
     "tokenLifetimeMinutes": 60,
     "clients": [
       {
         "clientId": "learncards-local-llm",
-        "clientSecret": "replace-with-a-long-random-client-secret",
+        "clientSecret": "__MCP_OAUTH_CLIENT_SECRET__",
         "scopes": [
           "mcp"
         ]
