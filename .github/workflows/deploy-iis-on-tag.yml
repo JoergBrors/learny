@@ -492,13 +492,13 @@ jobs:
           New-Website -Name $env:IIS_SITE_NAME -PhysicalPath $env:IIS_PHYSICAL_PATH -ApplicationPool $env:IIS_APP_POOL -Port $port -IPAddress "*" -HostHeader $hostHeader | Out-Null
 
           $appPoolIdentity = "IIS AppPool\$($env:IIS_APP_POOL)"
-          Grant-DirectoryAccess -Path $env:IIS_PHYSICAL_PATH -Identity "NT AUTHORITY\\SYSTEM" -Rights "(OI)(CI)(F)"
-          Grant-DirectoryAccess -Path $env:IIS_PHYSICAL_PATH -Identity "BUILTIN\\Administrators" -Rights "(OI)(CI)(F)"
+          Grant-DirectoryAccess -Path $env:IIS_PHYSICAL_PATH -Identity "NT AUTHORITY\SYSTEM" -Rights "(OI)(CI)(F)"
+          Grant-DirectoryAccess -Path $env:IIS_PHYSICAL_PATH -Identity "BUILTIN\Administrators" -Rights "(OI)(CI)(F)"
           Grant-DirectoryAccess -Path $env:IIS_PHYSICAL_PATH -Identity $appPoolIdentity -Rights "(OI)(CI)(M)"
 
           if (-not [string]::IsNullOrWhiteSpace($env:MCP_PHYSICAL_PATH)) {
-            Grant-DirectoryAccess -Path $env:MCP_PHYSICAL_PATH -Identity "NT AUTHORITY\\SYSTEM" -Rights "(OI)(CI)(F)"
-            Grant-DirectoryAccess -Path $env:MCP_PHYSICAL_PATH -Identity "BUILTIN\\Administrators" -Rights "(OI)(CI)(F)"
+            Grant-DirectoryAccess -Path $env:MCP_PHYSICAL_PATH -Identity "NT AUTHORITY\SYSTEM" -Rights "(OI)(CI)(F)"
+            Grant-DirectoryAccess -Path $env:MCP_PHYSICAL_PATH -Identity "BUILTIN\Administrators" -Rights "(OI)(CI)(F)"
           }
 
       - name: Install Web Deployment Package
@@ -833,7 +833,7 @@ jobs:
           if ($serviceInfo -and -not [string]::IsNullOrWhiteSpace($serviceInfo.StartName)) {
             $serviceIdentity = $serviceInfo.StartName
             if ($serviceIdentity -eq "LocalSystem") {
-              $serviceIdentity = "NT AUTHORITY\\SYSTEM"
+              $serviceIdentity = "NT AUTHORITY\SYSTEM"
             }
             Grant-DirectoryAccess -Path $env:MCP_PHYSICAL_PATH -Identity $serviceIdentity -Rights "(OI)(CI)(M)"
           }
