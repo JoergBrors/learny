@@ -1,0 +1,25 @@
+{
+  "cards": [
+    {
+      "module": "Azure Beispielmodul",
+      "category": "Identität",
+      "term": "Managed Identity",
+      "question": "Warum ist Managed Identity sicherer als ein Client Secret im Code?",
+      "definition": "Managed Identity liefert kurzlebige Tokens, ohne dass Secrets gespeichert oder verteilt werden müssen.",
+      "how_it_works": "Die Azure-Ressource erhält eine verwaltete Identität und bezieht Tokens zur Laufzeit über den Plattform-Endpunkt.",
+      "context": "Das reduziert Secret-Handling in Deployments, Containern und Automationsjobs.",
+      "key_fact": "Keine dauerhaft hinterlegten Zugangsdaten im Anwendungscode.",
+      "reference_answer": "Managed Identity ist sicherer, weil keine langfristigen Zugangsdaten in Konfigurationen, Repositories oder Pipelines gespeichert werden müssen. Die Plattform stellt stattdessen kurzlebige Tokens zur Laufzeit bereit.",
+      "chat_prompt": "Antworte präzise, technisch und nur auf Basis der Karte und offizieller Quellen.",
+      "official_sources": [
+        {
+          "title": "What are managed identities for Azure resources?",
+          "url": "https://learn.microsoft.com/azure/active-directory/managed-identities-azure-resources/overview",
+          "publisher": "Microsoft Learn"
+        }
+      ],
+      "archived": false,
+      "sort_order": 1
+    }
+  ]
+}

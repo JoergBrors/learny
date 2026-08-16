@@ -1,0 +1,125 @@
+@page "/help"
+@attribute [Authorize]
+
+<PageTitle>Hilfe & Templates — LearnCards</PageTitle>
+
+<div class="container help-page">
+    <section class="card panel">
+        <nav class="breadcrumb"><a href="/">Lernmodule</a> <span aria-hidden="true">›</span> <span>Hilfe & Templates</span></nav>
+        <h1>Hilfe & Templates</h1>
+        <p class="muted">
+            Diese Seite zeigt das Importformat, direkte Download-Vorlagen und einen einfachen Workflow,
+            wie du mit einer normalen KI aus Folien oder Sprechtexten importierbare LearnCards-JSONs erzeugst.
+        </p>
+    </section>
+
+    <section class="card panel">
+        <h2 class="panel-title">Download-Vorlagen</h2>
+        <p class="muted">Alle Dateien können direkt geladen, angepasst und anschließend über den JSON-Import importiert werden.</p>
+
+        <div class="template-grid">
+            <article class="template-card">
+                <h3>Minimal-Template</h3>
+                <p class="muted">Kompaktes Startformat für einfache Karten ohne Quellen, Folien oder Quiz.</p>
+                <div class="page-head-actions">
+                    <a class="btn btn-primary btn-sm" href="/templates/minimal-card-template.json" download>JSON laden</a>
+                </div>
+            </article>
+
+            <article class="template-card">
+                <h3>Vollständiges Karten-Template</h3>
+                <p class="muted">Zeigt Referenzantwort, Chat-Prompt und offizielles Quellenverzeichnis.</p>
+                <div class="page-head-actions">
+                    <a class="btn btn-primary btn-sm" href="/templates/full-card-template.json" download>JSON laden</a>
+                </div>
+            </article>
+
+            <article class="template-card">
+                <h3>Folien-/Seiten-Template</h3>
+                <p class="muted">Mit <code>slide_number</code>, <code>target_time_sec</code> und vorbereitetem Seitenquiz.</p>
+                <div class="page-head-actions">
+                    <a class="btn btn-primary btn-sm" href="/templates/slide-deck-template.json" download>JSON laden</a>
+                </div>
+            </article>
+        </div>
+    </section>
+
+    <section class="card panel">
+        <h2 class="panel-title">Was das Importformat kann</h2>
+        <div class="help-grid">
+            <div class="help-block">
+                <h3>Pflichtfelder</h3>
+                <ul class="help-list">
+                    <li><code>module</code> gruppiert Karten zu einem Lernmodul.</li>
+                    <li><code>category</code> bildet Filter und Lernspuren.</li>
+                    <li><code>term</code>, <code>question</code> und <code>definition</code> sind die Basis jeder Karte.</li>
+                </ul>
+            </div>
+            <div class="help-block">
+                <h3>Erweiterte Lernfelder</h3>
+                <ul class="help-list">
+                    <li><code>how_it_works</code>, <code>context</code> und <code>key_fact</code> vertiefen die Karte.</li>
+                    <li><code>reference_answer</code> verbessert Freitext-Quizbewertung.</li>
+                    <li><code>official_sources</code> erzwingt quellengebundenes Lernen.</li>
+                </ul>
+            </div>
+            <div class="help-block">
+                <h3>Folienmodus</h3>
+                <ul class="help-list">
+                    <li><code>slide_number</code> aktiviert die Reihenfolge im Folienmodus.</li>
+                    <li><code>target_time_sec</code> zeigt das Redezeitziel pro Folie.</li>
+                    <li><code>quiz</code> hinterlegt statische Seitenfragen direkt auf der Karte.</li>
+                </ul>
+            </div>
+        </div>
+    </section>
+
+    <section class="card panel">
+        <h2 class="panel-title">So erstellst du Slides mit KI ohne MCP</h2>
+        <ol class="help-steps">
+            <li>Erstelle zuerst deine fachlichen Stichpunkte oder deinen Sprechtext pro Folie.</li>
+            <li>Gib diese Inhalte einer KI mit der klaren Anweisung, nur daraus ein JSON im LearnCards-Format zu erzeugen.</li>
+            <li>Prüfe jede Karte fachlich gegen deine Originalquellen, bevor du importierst.</li>
+            <li>Importiere die JSON über die Startseite und nutze danach Kartenmodus oder Folienmodus.</li>
+        </ol>
+
+        <div class="help-callout">
+            <strong>Wichtig:</strong> Wenn du ohne MCP arbeitest, sollte die KI keine Fakten ergänzen, die nicht in deinen
+            Folien, Notizen oder offiziellen Quellen stehen. Offizielle Quellen sollten immer als HTTPS-Links im Feld
+            <code>official_sources</code> mitgegeben werden.
+        </div>
+
+        <h3>Beispiel-Prompt für eine normale KI</h3>
+        <pre class="help-code"><code>Erzeuge aus meinen Foliennotizen ein valides JSON-Objekt im folgenden Format:
+{"cards":[{"module":"","category":"","term":"","question":"","definition":"","how_it_works":"","context":"","key_fact":"","reference_answer":"","chat_prompt":"","official_sources":[{"title":"","url":"","publisher":""}],"slide_number":1,"target_time_sec":90,"quiz":[{"type":"single_choice","question":"","options":["","","",""],"correct_index":0,"explanation":""}],"archived":false,"sort_order":1}]}
+
+Regeln:
+- Antworte ausschließlich mit JSON.
+- Verwende nur Fakten aus meinem Input.
+- Erfinde keine Technologien, Quellen oder Randbedingungen.
+- Wenn etwas unklar ist, lasse das Feld leer statt zu raten.
+- Offizielle Quellen nur als absolute HTTPS-URLs.
+- Für jede Folie genau eine Karte.
+
+Hier sind meine Folien / Notizen:
+[DEIN INHALT HIER]</code></pre>
+    </section>
+
+    <section class="card panel">
+        <h2 class="panel-title">Empfohlener Ablauf</h2>
+        <div class="help-grid">
+            <div class="help-block">
+                <h3>1. Template wählen</h3>
+                <p class="muted">Nimm die kleinste passende Vorlage. Für Präsentationen fast immer das Folien-Template.</p>
+            </div>
+            <div class="help-block">
+                <h3>2. Inhalte erzeugen</h3>
+                <p class="muted">Mit eigener Recherche oder KI auf Basis deines Materials. Quellen sauber mitführen.</p>
+            </div>
+            <div class="help-block">
+                <h3>3. Vor Import prüfen</h3>
+                <p class="muted">JSON validieren, Reihenfolge kontrollieren, Quizfragen und Quellen manuell gegenlesen.</p>
+            </div>
+        </div>
+    </section>
+</div>

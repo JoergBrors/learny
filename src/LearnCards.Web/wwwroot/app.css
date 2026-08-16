@@ -562,6 +562,53 @@ kbd {
 
 .create-module { margin-bottom: 1.4rem; }
 
+/* ─── Hilfe / Templates ─────────────────────────────────────────── */
+
+.help-page { display: flex; flex-direction: column; gap: 1.1rem; }
+.template-grid,
+.help-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+}
+.template-card,
+.help-block {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface-2) 38%, var(--surface));
+  padding: 1rem 1.05rem;
+}
+.template-card h3,
+.help-block h3 { margin: 0 0 .45rem; font-size: .98rem; }
+.help-list,
+.help-steps {
+  margin: .7rem 0 0;
+  padding-left: 1.1rem;
+  color: var(--ink-soft);
+}
+.help-list li,
+.help-steps li { margin-bottom: .45rem; line-height: 1.55; }
+.help-callout {
+  margin-top: 1rem;
+  padding: .9rem 1rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--accent-text);
+  line-height: 1.55;
+}
+.help-code {
+  margin-top: .8rem;
+  padding: 1rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  line-height: 1.5;
+  font-size: .85rem;
+}
+
 @media (max-width: 720px) {
   .container { padding: 1.4rem .9rem 3rem; }
   .topbar-inner { padding: 0 .9rem; }
