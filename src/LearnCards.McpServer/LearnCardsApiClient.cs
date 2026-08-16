@@ -13,7 +13,8 @@ public sealed class LearnCardsApiClient : IDisposable
     public LearnCardsApiClient(string baseUrl, string apiKey)
     {
         _http = new HttpClient { BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/"), Timeout = TimeSpan.FromSeconds(30) };
-        _http.DefaultRequestHeaders.Add("X-MCP-Key", apiKey);
+        if (!string.IsNullOrWhiteSpace(apiKey))
+            _http.DefaultRequestHeaders.Add("X-MCP-Key", apiKey);
         _http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
     }
 
