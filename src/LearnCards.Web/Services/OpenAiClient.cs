@@ -28,22 +28,53 @@ public class OpenAiClient
     /// <summary>Eine Completion mit erzwungenem JSON-Objekt als Antwort.</summary>
     public async Task<JsonDocument> CompleteJsonAsync(string userPrompt, int maxTokens, CancellationToken ct = default)
     {
-        var payload = new
-        {
-            model = _cfg.OpenAiModel,
-            messages = new[] { new { role = "user", content = userPrompt } },
-            response_format = new { type = "json_object" },
-            max_tokens = maxTokens,
-        };
-        using var res = await _http.PostAsync("chat/completions",
-            new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"), ct);
-        var body = await res.Content.ReadAsStringAsync(ct);
-        if (!res.IsSuccessStatusCode)
-            throw new InvalidOperationException($"OpenAI-Fehler {(int)res.StatusCode}: {Truncate(body, 400)}");
+        var requestedMaxTokens = Math.Max(maxTokens, 1);
+        Exception? lastJsonError = null;
 
-        using var doc = JsonDocument.Parse(body);
-        var content = doc.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() ?? "{}";
-        return JsonDocument.Parse(content);
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var tokenBudget = attempt == 0
+                ? requestedMaxTokens
+                : Math.Min(Math.Max(requestedMaxTokens * 2, requestedMaxTokens + 1000), 8000);
+
+            var payload = new
+            {
+                model = _cfg.OpenAiModel,
+                messages = new[] { new { role = "user", content = userPrompt } },
+                response_format = new { type = "json_object" },
+                max_tokens = tokenBudget,
+            };
+            using var res = await _http.PostAsync("chat/completions",
+                new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"), ct);
+            var body = await res.Content.ReadAsStringAsync(ct);
+            if (!res.IsSuccessStatusCode)
+                throw new InvalidOperationException($"OpenAI-Fehler {(int)res.StatusCode}: {Truncate(body, 400)}");
+
+            using var doc = JsonDocument.Parse(body);
+            var choice = doc.RootElement.GetProperty("choices")[0];
+            var finishReason = choice.TryGetProperty("finish_reason", out var finish) ? finish.GetString() : null;
+            var content = choice.GetProperty("message").GetProperty("content").GetString() ?? "{}";
+
+            if (string.Equals(finishReason, "length", StringComparison.OrdinalIgnoreCase))
+            {
+                lastJsonError = new JsonException($"OpenAI-Antwort wurde wegen Tokenlimit abgeschnitten (max_tokens={tokenBudget}).");
+                continue;
+            }
+
+            try
+            {
+                return JsonDocument.Parse(content);
+            }
+            catch (JsonException ex)
+            {
+                lastJsonError = ex;
+                if (attempt == 0) continue;
+
+                throw new InvalidOperationException($"OpenAI-Antwort war kein valides JSON: {ex.Message}. Antwortauszug: {Truncate(content, 400)}", ex);
+            }
+        }
+
+        throw new InvalidOperationException(lastJsonError?.Message ?? "OpenAI-Antwort konnte nicht als JSON verarbeitet werden.");
     }
 
     /// <summary>Streamt Antwort-Tokens für den Karten-Chat.</summary>
