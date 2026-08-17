@@ -252,7 +252,8 @@ public class QuizService
             {{references}}
             """;
 
-        using var doc = await _openAi.CompleteJsonAsync(gradingPrompt, 2000, ct);
+        var gradingTokenBudget = Math.Min(Math.Max(2000, 900 + req.Answers.Count * 900), 8000);
+        using var doc = await _openAi.CompleteJsonAsync(gradingPrompt, gradingTokenBudget, ct);
         var root = doc.RootElement;
 
         double total = root.TryGetProperty("total_score", out var ts) ? ts.GetDouble() : 0;
