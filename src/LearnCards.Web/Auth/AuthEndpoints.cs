@@ -3,7 +3,9 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
+using LearnCards.Web.Domain;
 using LearnCards.Web.Infrastructure;
+using LearnCards.Web.Services;
 
 namespace LearnCards.Web.Auth;
 
@@ -19,15 +21,29 @@ public static class AuthEndpoints
     {
         var cfg = app.Services.GetRequiredService<AppConfig>();
 
-        app.MapGet("/auth/login", async (HttpContext http, OidcService oidc, IDataProtectionProvider dp, string? returnUrl) =>
+        app.MapGet("/auth/login", async (HttpContext http, OidcService oidc, UserService users, IDataProtectionProvider dp, string? returnUrl, string? devUser, string? devRoles) =>
         {
             returnUrl = SafeReturnUrl(returnUrl);
 
             if (cfg.AuthMode == "dev")
             {
+                // Dev-Modus: Standardbenutzer "local-dev-user" (Admin). Mit ?devUser=<name> lassen sich weitere
+                // Testbenutzer anmelden (für Mehrbenutzer-Tests); sie erhalten keine Sonderrechte.
                 var name = Environment.GetEnvironmentVariable("DEV_USER_NAME") ?? "Lokale Entwicklung";
                 var email = Environment.GetEnvironmentVariable("DEV_USER_EMAIL") ?? "dev@localhost";
-                await SignInAsync(http, sub: "local-dev-user", name: name, email: email);
+                var subject = UserService.DevDefaultSubject;
+                if (!string.IsNullOrEmpty(devUser) && System.Text.RegularExpressions.Regex.IsMatch(devUser, "^[a-z0-9_-]{1,32}$"))
+                {
+                    subject = "dev-" + devUser;
+                    name = devUser;
+                    email = devUser + "@localhost";
+                }
+                // ?devRoles=Admin.All,... simuliert den "roles"-Claim von Entra ID (nur Dev-Modus; durchläuft dieselbe Abbildung/Synchronisierung)
+                var simulatedRoles = string.IsNullOrWhiteSpace(devRoles) ? null
+                    : devRoles.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                var devAppUser = await users.SignInAsync(UserService.DevProvider, subject, name, email, simulatedRoles);
+                if (!devAppUser.IsActive) return Results.Redirect("/login?error=Zugang+gesperrt");
+                await SignInAsync(http, devAppUser, subject);
                 return Results.Redirect(returnUrl);
             }
 
@@ -48,7 +64,7 @@ public static class AuthEndpoints
             return Results.Redirect(url);
         }).AllowAnonymous();
 
-        app.MapGet("/auth/callback", async (HttpContext http, OidcService oidc, IDataProtectionProvider dp,
+        app.MapGet("/auth/callback", async (HttpContext http, OidcService oidc, UserService users, IDataProtectionProvider dp,
             string? code, string? state, string? error, string? error_description) =>
         {
             if (error is not null)
@@ -79,12 +95,18 @@ public static class AuthEndpoints
 
                 string? Get(string key) => claims.TryGetValue(key, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
 
-                await SignInAsync(http,
-                    sub: Get("sub") ?? "unknown",
-                    name: Get("name") ?? Get("preferred_username") ?? "Unbekannt",
-                    email: Get("email") ?? Get("preferred_username") ?? "",
-                    oid: Get("oid"));
+                var sub = Get("sub");
+                if (string.IsNullOrWhiteSpace(sub))
+                    return Results.Redirect("/login?error=ID-Token+enth%C3%A4lt+kein+Subject");
 
+                var appUser = await users.SignInAsync(cfg.OidcIssuer, sub,
+                    Get("name") ?? Get("preferred_username") ?? "Unbekannt",
+                    Get("email") ?? Get("preferred_username") ?? "",
+                    idpRoles: GetRoles(claims));
+                if (!appUser.IsActive)
+                    return Results.Redirect("/login?error=Zugang+gesperrt");
+
+                await SignInAsync(http, appUser, sub);
                 return Results.Redirect(authState.ReturnUrl);
             }
             catch (Exception ex)
@@ -113,16 +135,18 @@ public static class AuthEndpoints
         }).AllowAnonymous();
     }
 
-    private static async Task SignInAsync(HttpContext http, string sub, string name, string email, string? oid = null)
+    /// <summary>Setzt die Cookie-Session. "uid" (interne Benutzer-ID) wird ausschließlich hier serverseitig gesetzt;
+    /// Rollen kommen nicht aus dem Cookie, sondern werden bei jeder Anfrage frisch aus der Datenbank geladen (siehe Program.cs).</summary>
+    private static async Task SignInAsync(HttpContext http, AppUser user, string externalSubject)
     {
         var claims = new List<Claim>
         {
-            new(ClaimTypes.NameIdentifier, sub),
-            new("sub", sub),
-            new(ClaimTypes.Name, name),
+            new(ClaimTypes.NameIdentifier, user.Id),
+            new(UserClaims.UserId, user.Id),
+            new("sub", externalSubject),
+            new(ClaimTypes.Name, user.DisplayName),
         };
-        if (email.Length > 0) claims.Add(new Claim(ClaimTypes.Email, email));
-        if (oid is not null) claims.Add(new Claim("oid", oid));
+        if (user.Email.Length > 0) claims.Add(new Claim(ClaimTypes.Email, user.Email));
 
         var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
         await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
@@ -133,6 +157,20 @@ public static class AuthEndpoints
                 ExpiresUtc = DateTimeOffset.UtcNow.AddHours(10),
                 AllowRefresh = true,
             });
+    }
+
+    /// <summary>Liest die App-Rollen aus dem ID-Token ("roles", Array von Strings). Fehlender Claim = keine Rollen.</summary>
+    private static List<string> GetRoles(IReadOnlyDictionary<string, JsonElement> claims)
+    {
+        var result = new List<string>();
+        if (claims.TryGetValue("roles", out var v))
+        {
+            if (v.ValueKind == JsonValueKind.Array)
+                result.AddRange(v.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.String).Select(e => e.GetString()!));
+            else if (v.ValueKind == JsonValueKind.String)
+                result.Add(v.GetString()!);
+        }
+        return result;
     }
 
     private static string BuildRedirectUri(HttpContext http) =>

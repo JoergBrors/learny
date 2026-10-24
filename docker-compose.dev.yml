@@ -1,0 +1,32 @@
+# LearnCards — PostgreSQL nur für die lokale Entwicklung (VS Code: Konfiguration "… (PostgreSQL Docker)").
+#
+#   docker compose -f docker-compose.dev.yml up -d --wait      # Datenbank starten (wartet auf "healthy")
+#   docker compose -f docker-compose.dev.yml down              # stoppen, Daten bleiben im Volume
+#   docker compose -f docker-compose.dev.yml down -v           # stoppen und Daten löschen
+#
+# Der Host-Port ist bewusst 55432 (nicht 5432), damit eine lokal installierte PostgreSQL-Instanz nicht stört.
+# Anderer Port: DEV_POSTGRES_PORT setzen und die Werte in .vscode/launch.json anpassen.
+# Nur für Entwicklung: schwaches Passwort, nur an 127.0.0.1 gebunden. Nicht für Produktion (dafür docker-compose.yml).
+
+name: learncards-dev
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: learncards-dev-db
+    environment:
+      POSTGRES_USER: learncards
+      POSTGRES_PASSWORD: learncards
+      POSTGRES_DB: learncards
+    ports:
+      - "127.0.0.1:${DEV_POSTGRES_PORT:-55432}:5432"
+    volumes:
+      - dev_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U learncards -d learncards"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  dev_postgres_data:

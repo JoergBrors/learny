@@ -10,22 +10,127 @@ public static class Schema
         var id = provider == "postgres" ? "UUID" : "TEXT";
         var emptyJsonObject = "'{}'";
 
+        // ─── Benutzer, Identitäten, Rollen, Audit (ADR 0011) ───────────────
         yield return $"""
-            CREATE TABLE IF NOT EXISTS modules (
-                id          {id} PRIMARY KEY,
-                name        TEXT NOT NULL UNIQUE,
-                description TEXT NOT NULL DEFAULT '',
-                icon        TEXT NOT NULL DEFAULT '📚',
-                color       TEXT NOT NULL DEFAULT '#2AA79B',
-                created_at  TEXT NOT NULL,
-                updated_at  TEXT NOT NULL
+            CREATE TABLE IF NOT EXISTS users (
+                id              {id} PRIMARY KEY,
+                display_name    TEXT NOT NULL,
+                email           TEXT NOT NULL DEFAULT '',
+                status          TEXT NOT NULL DEFAULT 'active',
+                legacy_migrated INTEGER NOT NULL DEFAULT 0,
+                created_at      TEXT NOT NULL,
+                last_login_at   TEXT NOT NULL
             )
             """;
+
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS user_identities (
+                provider   TEXT NOT NULL,
+                subject    TEXT NOT NULL,
+                user_id    {id} NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (provider, subject)
+            )
+            """;
+
+        yield return "CREATE INDEX IF NOT EXISTS ix_user_identities_user ON user_identities(user_id)";
+
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS user_roles (
+                user_id    {id} NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                role       TEXT NOT NULL,
+                granted_by TEXT NULL,
+                granted_at TEXT NOT NULL,
+                PRIMARY KEY (user_id, role)
+            )
+            """;
+
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id            {id} PRIMARY KEY,
+                actor_user_id TEXT NULL,
+                action        TEXT NOT NULL,
+                target        TEXT NOT NULL DEFAULT '',
+                detail        TEXT NOT NULL DEFAULT '',
+                created_at    TEXT NOT NULL
+            )
+            """;
+
+        yield return "CREATE INDEX IF NOT EXISTS ix_audit_log_created ON audit_log(created_at)";
+
+        // ─── MCP-Zugänge (ADR 0013): benutzergebundene Tokens (nur als Hash gespeichert) und einmalige Übergabecodes ───
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS mcp_links (
+                id           {id} PRIMARY KEY,
+                user_id      {id} NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                name         TEXT NOT NULL,
+                kind         TEXT NOT NULL,
+                token_hash   TEXT NOT NULL UNIQUE,
+                token_hint   TEXT NOT NULL DEFAULT '',
+                created_at   TEXT NOT NULL,
+                expires_at   TEXT NOT NULL,
+                last_used_at TEXT NULL,
+                revoked_at   TEXT NULL
+            )
+            """;
+
+        yield return "CREATE INDEX IF NOT EXISTS ix_mcp_links_user ON mcp_links(user_id)";
+
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS mcp_link_codes (
+                code_hash   TEXT PRIMARY KEY,
+                user_id     {id} NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                client_name TEXT NOT NULL DEFAULT '',
+                created_at  TEXT NOT NULL,
+                expires_at  TEXT NOT NULL,
+                used_at     TEXT NULL
+            )
+            """;
+
+        yield return ModulesTable(provider, "modules");
+
+        // ─── Freigaben und globale Veröffentlichung (ADR 0015) ───
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS module_shares (
+                id                {id} PRIMARY KEY,
+                module_id         {id} NOT NULL REFERENCES modules(id) ON DELETE CASCADE,
+                recipient_user_id {id} NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                shared_by_user_id TEXT NOT NULL,
+                created_at        TEXT NOT NULL,
+                revoked_at        TEXT NULL,
+                UNIQUE (module_id, recipient_user_id)
+            )
+            """;
+
+        yield return "CREATE INDEX IF NOT EXISTS ix_module_shares_recipient ON module_shares(recipient_user_id)";
+
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS module_submissions (
+                id                {id} PRIMARY KEY,
+                publication_id    {id} NOT NULL,
+                kind              TEXT NOT NULL,
+                source_module_id  {id} NULL REFERENCES modules(id) ON DELETE SET NULL,
+                staged_module_id  {id} NULL REFERENCES modules(id) ON DELETE SET NULL,
+                submitter_user_id {id} NULL REFERENCES users(id) ON DELETE SET NULL,
+                submitter_name    TEXT NOT NULL,
+                module_name       TEXT NOT NULL,
+                card_count        INTEGER NOT NULL DEFAULT 0,
+                version           INTEGER NOT NULL DEFAULT 1,
+                status            TEXT NOT NULL,
+                reason            TEXT NOT NULL DEFAULT '',
+                submitted_at      TEXT NOT NULL,
+                decided_by        TEXT NULL,
+                decided_at        TEXT NULL
+            )
+            """;
+
+        yield return "CREATE INDEX IF NOT EXISTS ix_module_submissions_status ON module_submissions(status, submitted_at)";
 
         yield return $"""
             CREATE TABLE IF NOT EXISTS cards (
                 id           {id} PRIMARY KEY,
                 module_id    {id} NOT NULL REFERENCES modules(id) ON DELETE CASCADE,
+                owner_user_id {id} NULL REFERENCES users(id) ON DELETE SET NULL,
                 category     TEXT NOT NULL,
                 term         TEXT NOT NULL,
                 question     TEXT NOT NULL,
@@ -97,10 +202,59 @@ public static class Schema
                 feedback     TEXT NOT NULL DEFAULT '',
                 answers_json TEXT NOT NULL DEFAULT '[]',
                 stats_json   TEXT NOT NULL DEFAULT {emptyJsonObject},
+                context      TEXT NOT NULL DEFAULT 'private',
                 completed_at TEXT NOT NULL
             )
             """;
 
         yield return "CREATE INDEX IF NOT EXISTS ix_quiz_user ON quiz_results(user_sub, completed_at)";
+    }
+
+    /// <summary>
+    /// modules-Tabelle. <c>name</c> ist nur pro Eigentümer eindeutig (Index <c>ux_modules_owner_name</c>
+    /// in <see cref="OwnershipIndexStatements"/>). Auch für den SQLite-Rebuild unter anderem Namen genutzt.
+    /// </summary>
+    public static string ModulesTable(string provider, string tableName)
+    {
+        var id = provider == "postgres" ? "UUID" : "TEXT";
+        return $"""
+            CREATE TABLE IF NOT EXISTS {tableName} (
+                id            {id} PRIMARY KEY,
+                name          TEXT NOT NULL,
+                description   TEXT NOT NULL DEFAULT '',
+                icon          TEXT NOT NULL DEFAULT '📚',
+                color         TEXT NOT NULL DEFAULT '#2AA79B',
+                owner_user_id {id} NULL REFERENCES users(id) ON DELETE SET NULL,
+                scope         TEXT NOT NULL DEFAULT 'private',
+                publication_id {id} NULL,
+                global_version INTEGER NULL,
+                global_status TEXT NULL,
+                source_module_id {id} NULL REFERENCES modules(id) ON DELETE SET NULL,
+                source_owner_user_id {id} NULL REFERENCES users(id) ON DELETE SET NULL,
+                source_owner_name TEXT NULL,
+                published_at  TEXT NULL,
+                published_by  TEXT NULL,
+                created_at    TEXT NOT NULL,
+                updated_at    TEXT NOT NULL
+            )
+            """;
+    }
+
+    /// <summary>
+    /// Indizes auf Besitz-Spalten. Müssen NACH den Spalten-Migrationen laufen, weil bestehende Datenbanken
+    /// die Spalten <c>owner_user_id</c> erst durch die Migration erhalten.
+    /// </summary>
+    public static IEnumerable<string> OwnershipIndexStatements()
+    {
+        yield return "CREATE UNIQUE INDEX IF NOT EXISTS ux_modules_owner_name ON modules(owner_user_id, name)";
+        yield return "CREATE INDEX IF NOT EXISTS ix_modules_owner ON modules(owner_user_id)";
+        yield return "CREATE INDEX IF NOT EXISTS ix_cards_owner ON cards(owner_user_id)";
+    }
+
+    /// <summary>Indizes auf die Freigabe-/Veröffentlichungsspalten (ADR 0015); laufen nach <c>MigrateSharing*</c>.</summary>
+    public static IEnumerable<string> SharingIndexStatements()
+    {
+        yield return "CREATE INDEX IF NOT EXISTS ix_modules_scope ON modules(scope, global_status)";
+        yield return "CREATE INDEX IF NOT EXISTS ix_modules_publication ON modules(publication_id)";
     }
 }

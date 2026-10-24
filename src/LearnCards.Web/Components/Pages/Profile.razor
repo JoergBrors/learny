@@ -1,0 +1,246 @@
+@page "/profile"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject UserService Users
+@inject McpLinkService McpLinks
+@inject CardRepository Repo
+@inject AuthenticationStateProvider AuthState
+
+<PageTitle>Mein Profil — LearnCards</PageTitle>
+
+<div class="container">
+    <div class="page-head">
+        <div>
+            <h1>Mein Profil</h1>
+            <p class="muted">Persönliche Angaben, Rollen, eigene Inhalte und Lernergebnisse</p>
+        </div>
+        <div class="page-head-actions">
+            <a class="btn btn-ghost" href="/">← Lernmodule</a>
+            @if (_user is { IsAdmin: true })
+            {
+                <a class="btn btn-ghost" href="/admin">🛠 Administration</a>
+            }
+        </div>
+    </div>
+
+    @if (_message is not null)
+    {
+        <div class="alert @(_messageOk ? "alert-ok" : "alert-error")" role="status">@_message</div>
+    }
+
+    @if (_user is null)
+    {
+        <p class="muted">Profil wird geladen …</p>
+    }
+    else
+    {
+        <div class="card panel">
+            <h2 class="panel-title">Persönliche Angaben</h2>
+            <label class="form-label" for="displayName">Anzeigename</label>
+            <div class="form-row">
+                <input id="displayName" class="input" maxlength="80" @bind="_displayName" />
+                <button class="btn btn-primary" @onclick="SaveName" disabled="@string.IsNullOrWhiteSpace(_displayName)">Speichern</button>
+            </div>
+            <dl class="kv">
+                <dt>E-Mail</dt><dd>@(string.IsNullOrEmpty(_user.Email) ? "—" : _user.Email)</dd>
+                <dt>Status</dt><dd>@(_user.IsActive ? "Aktiv" : "Gesperrt")</dd>
+                <dt>Benutzer-ID</dt><dd><code>@_user.Id</code></dd>
+                <dt>Mitglied seit</dt><dd>@_user.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy")</dd>
+                <dt>Letzte Anmeldung</dt><dd>@_user.LastLoginAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</dd>
+            </dl>
+        </div>
+
+        <div class="card panel">
+            <h2 class="panel-title">Rollen</h2>
+            <p>
+                @foreach (var role in _user.Roles)
+                {
+                    <span class="badge badge-@role">@RoleLabel(role)</span>
+                }
+            </p>
+            <p class="muted">Rollen werden von Administratoren oder über die App-Rollen in Entra ID vergeben (bei jeder Anmeldung abgeglichen) und können hier nicht geändert werden.</p>
+            @if (_identities.Count > 0)
+            {
+                <h3>Verknüpfte Anmeldungen</h3>
+                <ul class="plain-list">
+                    @foreach (var i in _identities)
+                    {
+                        <li><code>@i.Provider</code> · @Shorten(i.Subject)</li>
+                    }
+                </ul>
+            }
+        </div>
+
+        <div class="card panel">
+            <h2 class="panel-title">Meine privaten Lerninhalte</h2>
+            <p>
+                <strong>@_summary.Modules</strong> Module ·
+                <strong>@_summary.ActiveCards</strong> aktive Karten ·
+                <strong>@_summary.ArchivedCards</strong> archivierte Karten
+            </p>
+            <p class="muted">Alle Module und Karten sind privat. Nur du siehst sie.</p>
+        </div>
+
+        <div class="card panel">
+            <h2 class="panel-title">Freigaben</h2>
+            <p class="muted">Von mir geteilt: noch keine · Mit mir geteilt: noch keine. Die Freigabe von Karten ist vorbereitet und folgt in einem späteren Ausbauschritt.</p>
+        </div>
+
+        <div class="card panel">
+            <h2 class="panel-title">Meine Lernergebnisse</h2>
+            @if (_results.Count == 0)
+            {
+                <p class="muted">Noch keine Quiz-Ergebnisse.</p>
+            }
+            else
+            {
+                <table class="table">
+                    <thead><tr><th>Datum</th><th>Modul</th><th>Kategorie</th><th>Punkte</th><th>Note</th></tr></thead>
+                    <tbody>
+                        @foreach (var r in _results)
+                        {
+                            <tr>
+                                <td>@r.CompletedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                                <td>@(_moduleNames.TryGetValue(r.ModuleId, out var n) ? n : "—")</td>
+                                <td>@(string.IsNullOrEmpty(r.Category) ? "Alle" : r.Category)</td>
+                                <td>@r.Score.ToString("0.#") / @r.MaxScore.ToString("0.#")</td>
+                                <td>@r.Grade</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+
+        <div class="card panel">
+            <h2 class="panel-title">MCP-Verknüpfungen</h2>
+            <p class="muted">
+                MCP-Clients arbeiten ausschließlich in deinem Namen und sehen nur deine eigenen Module und Karten.
+                Clients mit OAuth-Unterstützung verbinden sich über die Anmeldung bei Learny; für stdio-Clients (z. B. Claude Desktop) erzeugst du ein persönliches Token.
+            </p>
+
+            @if (_newToken is not null)
+            {
+                <div class="alert alert-ok" role="status">
+                    <strong>Neues Token — wird nur jetzt angezeigt, bitte sofort kopieren:</strong><br />
+                    <code>@_newToken</code>
+                    <p>Für stdio setzt du die Umgebungsvariable <code>LEARNCARDS_MCP_TOKEN</code> auf diesen Wert. Für HTTP sendest du <code>Authorization: Bearer @_newToken</code>.</p>
+                </div>
+            }
+
+            @if (_links.Count == 0)
+            {
+                <p>Noch keine MCP-Zugänge.</p>
+            }
+            else
+            {
+                <table class="table">
+                    <thead><tr><th>Name</th><th>Art</th><th>Token</th><th>Erstellt</th><th>Gültig bis</th><th>Zuletzt genutzt</th><th>Status</th><th></th></tr></thead>
+                    <tbody>
+                        @foreach (var l in _links)
+                        {
+                            <tr>
+                                <td>@l.Name</td>
+                                <td>@(l.Kind == "oauth" ? "OAuth-Anmeldung" : "Persönliches Token")</td>
+                                <td><code>@l.TokenHint</code></td>
+                                <td>@l.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy")</td>
+                                <td>@l.ExpiresAt.ToLocalTime().ToString("dd.MM.yyyy")</td>
+                                <td>@(l.LastUsedAt is null ? "—" : l.LastUsedAt.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm"))</td>
+                                <td>@(l.RevokedAt is not null ? "widerrufen" : l.IsActive ? "aktiv" : "abgelaufen")</td>
+                                <td class="actions">
+                                    @if (l.IsActive)
+                                    {
+                                        <button class="btn btn-ghost btn-sm" @onclick="() => RevokeLink(l.Id)">Widerrufen</button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+
+            <h3>Persönliches Token erzeugen</h3>
+            <div class="form-row">
+                <input class="input" maxlength="80" placeholder="Name, z. B. Claude Desktop" @bind="_tokenName" />
+                <select class="input" @bind="_tokenDays">
+                    <option value="30">30 Tage</option>
+                    <option value="90">90 Tage</option>
+                    <option value="365">365 Tage</option>
+                </select>
+                <button class="btn btn-primary" @onclick="CreateToken">Token erzeugen</button>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private AppUser? _user;
+    private string _displayName = "";
+    private List<UserIdentityInfo> _identities = new();
+    private OwnedContentSummary _summary = new();
+    private List<QuizResultRecord> _results = new();
+    private Dictionary<string, string> _moduleNames = new(StringComparer.OrdinalIgnoreCase);
+    private List<McpLink> _links = new();
+    private string _tokenName = "";
+    private int _tokenDays = 90;
+    private string? _newToken;
+    private string? _message;
+    private bool _messageOk;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        var uid = auth.User.GetUserId() ?? throw new UnauthorizedAccessException();
+        _user = await Users.GetAsync(uid) ?? throw new UnauthorizedAccessException();
+        _displayName = _user.DisplayName;
+        _identities = await Users.GetIdentitiesAsync(uid);
+        _summary = await Repo.GetOwnedSummaryAsync(uid);
+        _results = await Repo.QuizHistoryAsync(uid, limit: 10);
+        _links = await McpLinks.ListAsync(uid);
+        _moduleNames = (await Repo.ListModulesAsync(uid)).ToDictionary(m => m.Id, m => m.Name, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private async Task CreateToken()
+    {
+        if (_user is null) return;
+        var (token, _) = await McpLinks.CreateLinkAsync(_user.Id, _tokenName, "token", TimeSpan.FromDays(_tokenDays));
+        _newToken = token;
+        _tokenName = "";
+        _links = await McpLinks.ListAsync(_user.Id);
+    }
+
+    private async Task RevokeLink(string id)
+    {
+        if (_user is null) return;
+        var ok = await McpLinks.RevokeAsync(_user.Id, id);
+        _message = ok ? "✅ MCP-Zugang widerrufen." : "❌ MCP-Zugang nicht gefunden.";
+        _messageOk = ok;
+        _links = await McpLinks.ListAsync(_user.Id);
+    }
+
+    private async Task SaveName()
+    {
+        if (_user is null) return;
+        try
+        {
+            await Users.SetDisplayNameAsync(_user.Id, _displayName);
+            _user.DisplayName = _displayName.Trim();
+            _message = "✅ Anzeigename gespeichert.";
+            _messageOk = true;
+        }
+        catch (ArgumentException e)
+        {
+            _message = "❌ " + e.Message;
+            _messageOk = false;
+        }
+    }
+
+    private static string RoleLabel(string role) => role switch
+    {
+        Roles.Admin => "Administrator",
+        Roles.Auditor => "Global Learny Auditor",
+        _ => "Benutzer",
+    };
+
+    private static string Shorten(string s) => s.Length <= 14 ? s : s[..6] + "…" + s[^6..];
+}

@@ -37,6 +37,10 @@ public sealed class PostgresDatabase : IDatabase
             await MigrateCardContentColumnsAsync(ct);
             await MigrateQuizResultColumnsAsync(ct);
             await MigrateModuleDeleteCascadeAsync(ct);
+            await MigrateOwnershipAsync(ct);
+            await MigrateSharingAsync(ct);
+            foreach (var ddl in Schema.SharingIndexStatements())
+                await ExecCoreAsync(ddl, null, ct);
         }
         finally { _gate.Release(); }
     }
@@ -97,6 +101,35 @@ public sealed class PostgresDatabase : IDatabase
     {
         await EnsureCascadeConstraintAsync("cards", "module_id", "modules", "id", "cards_module_id_fkey", ct);
         await EnsureCascadeConstraintAsync("quiz_results", "module_id", "modules", "id", "quiz_results_module_id_fkey", ct);
+    }
+
+    /// <summary>
+    /// ADR 0011: Besitz-Spalten ergänzen, globale Eindeutigkeit von modules.name aufheben
+    /// (künftig eindeutig pro Eigentümer) und Besitz-Indizes anlegen. Idempotent; bestehende Zeilen behalten
+    /// owner_user_id = NULL ("unzugeordnet") und werden nicht automatisch einem Benutzer zugewiesen.
+    /// </summary>
+    private async Task MigrateOwnershipAsync(CancellationToken ct)
+    {
+        await EnsureTableColumnAsync("modules", "owner_user_id", "UUID NULL REFERENCES users(id) ON DELETE SET NULL", ct);
+        await EnsureTableColumnAsync("cards", "owner_user_id", "UUID NULL REFERENCES users(id) ON DELETE SET NULL", ct);
+        await ExecCoreAsync("ALTER TABLE modules DROP CONSTRAINT IF EXISTS modules_name_key", null, ct);
+        foreach (var ddl in Schema.OwnershipIndexStatements())
+            await ExecCoreAsync(ddl, null, ct);
+    }
+
+    /// <summary>ADR 0015: Freigabe-/Veröffentlichungsspalten an modules, Ergebniskontext an quiz_results. Idempotent; bestehende Zeilen bleiben "private".</summary>
+    private async Task MigrateSharingAsync(CancellationToken ct)
+    {
+        await EnsureTableColumnAsync("modules", "scope", "TEXT NOT NULL DEFAULT 'private'", ct);
+        await EnsureTableColumnAsync("modules", "publication_id", "UUID NULL", ct);
+        await EnsureTableColumnAsync("modules", "global_version", "INTEGER NULL", ct);
+        await EnsureTableColumnAsync("modules", "global_status", "TEXT NULL", ct);
+        await EnsureTableColumnAsync("modules", "source_module_id", "UUID NULL REFERENCES modules(id) ON DELETE SET NULL", ct);
+        await EnsureTableColumnAsync("modules", "source_owner_user_id", "UUID NULL REFERENCES users(id) ON DELETE SET NULL", ct);
+        await EnsureTableColumnAsync("modules", "source_owner_name", "TEXT NULL", ct);
+        await EnsureTableColumnAsync("modules", "published_at", "TEXT NULL", ct);
+        await EnsureTableColumnAsync("modules", "published_by", "TEXT NULL", ct);
+        await EnsureTableColumnAsync("quiz_results", "context", "TEXT NOT NULL DEFAULT 'private'", ct);
     }
 
     private async Task MigrateCardContentColumnsAsync(CancellationToken ct)

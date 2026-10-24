@@ -102,16 +102,27 @@ Unter GitHub → `Settings` → `Secrets and variables` → `Actions` → `Varia
 - `MCP_OAUTH_CLIENT_ID`
 - `MCP_OAUTH_CLIENT_SCOPES_JSON`
 
+## Neue Konfigurationswerte seit ADR 0011–0013 (noch nicht vom Workflow gerendert)
+
+Der Workflow ersetzt in `deploy/iis/web.env` nur die vorhandenen Platzhalter; `.env` wird bei jedem Deploy überschrieben. Folgende Werte daher als **IIS-Umgebungsvariablen**
+(Anwendungspool bzw. `web.config`, haben Vorrang vor `.env`) setzen — oder den Workflow um Platzhalter erweitern:
+
+- `AUTH_MODE=oidc` (in Produktion explizit; `auto` fällt ohne OIDC-Konfiguration auf den Dev-Login zurück, [Prüfbericht F1](reviews/2026-10-24-mehrbenutzer-pruefbericht.md))
+- `ADMIN_SUBJECTS` — Entra-`sub` des ersten Administrators; Rollen alternativ über die App-Rolle `Admin.All` ([ADR 0012](adr/0012-rollen-aus-entra-app-roles.md))
+- `MCP_PUBLIC_URL` — öffentliche URL des MCP-Servers (Allowlist für die OAuth-Rückleitung); ohne sie ist die OAuth-Anmeldung am MCP-Server nicht möglich
+- optional `OIDC_ROLE_MAP`, `MCP_TOKEN_DAYS`
+- am MCP-Server: `LEARNCARDS_WEB_PUBLIC_URL` (öffentliche Web-URL für die Browser-Anmeldung), für stdio-Clients `LEARNCARDS_MCP_TOKEN`
+
 ## GitHub Secrets
 
 Unter GitHub → `Settings` → `Secrets and variables` → `Actions` → `Secrets` anlegen:
 
 - `MCP_API_KEY`
-  Pflicht. Muss identisch in Web-App und MCP-Server verwendet werden.
+  Pflicht. Dienstschlüssel zwischen MCP-Server und Web-App (identisch in beiden). Gewährt keinen Datenzugriff; Benutzer arbeiten mit eigenen Tokens ([ADR 0013](adr/0013-mcp-benutzergebundene-anmeldung.md)).
 - `MCP_OAUTH_SIGNING_KEY`
-  Pflicht, solange `deploy/iis/mcpsettings.json` `oauth.enabled=true` setzt.
+  Wird vom Workflow weiterhin verlangt, solange `oauth.enabled=true` ist, vom MCP-Server aber **nicht mehr verwendet** (Tokens stellt die Web-App aus). Platzhalterwert setzen; Bereinigung des Workflows empfohlen.
 - `MCP_OAUTH_CLIENT_SECRET`
-  Pflicht, solange im MCP-Config mindestens ein OAuth-Client definiert ist.
+  Nur nötig, wenn im MCP-Config ein vorregistrierter OAuth-Client definiert ist (Clients registrieren sich üblicherweise dynamisch; `client_credentials` wird nicht mehr unterstützt).
 - `POSTGRES_PASSWORD`
   Optional. Nur nötig, wenn `web.env` PostgreSQL verwendet.
 - `OIDC_CLIENT_SECRET`
@@ -191,7 +202,7 @@ Nach dem Deploy liegen im `MCP_PHYSICAL_PATH` zwei wichtige Dateien:
 Das Skript `learncards-mcp.cmd`:
 
 - setzt `LEARNCARDS_API_URL` automatisch auf `IIS_BINDING_URL/api`, falls die Variable noch nicht gesetzt ist
-- übernimmt `MCP_API_KEY` nach `LEARNCARDS_MCP_API_KEY`, falls nötig
+- übernimmt `MCP_API_KEY` nach `LEARNCARDS_MCP_API_KEY`, falls nötig (Dienstschlüssel); der Benutzer trägt zusätzlich sein persönliches Token als `LEARNCARDS_MCP_TOKEN` in die Client-Konfiguration ein
 - startet anschließend `LearnCards.McpServer.exe`
 
 Damit kann z. B. Claude Desktop den MCP-Server selbst starten, sobald der Benutzer ihn im Client konfiguriert.
@@ -199,14 +210,14 @@ Damit kann z. B. Claude Desktop den MCP-Server selbst starten, sobald der Benutz
 Beispiel: den Inhalt aus `claude-desktop.learncards.json` in die lokale Claude-Desktop-Konfiguration übernehmen.
 Danach startet Claude den Server automatisch bei Bedarf, statt dass er manuell per Konsole gestartet werden muss.
 
-## Optional: HTTP-MCP mit proprietärem OAuth
+## Optional: HTTP-MCP mit OAuth-Anmeldung pro Benutzer
 
 Wenn der MCP-Server als eigenständiges Tool laufen soll:
 
 1. `mcpsettings.example.json` nach `mcpsettings.json` kopieren.
 2. `transports.http.enabled` aktivieren.
 3. Für einen reinen Serverbetrieb `transports.stdio.enabled` deaktivieren.
-4. Optional `oauth.enabled` aktivieren und `signingKey` sowie `clients` setzen.
+4. `oauth.enabled` aktivieren und `oauth.issuer` auf die **öffentliche** MCP-URL setzen (`signingKey`/`clients` sind nicht mehr nötig; die Anmeldung erfolgt bei Learny, [ADR 0013](adr/0013-mcp-benutzergebundene-anmeldung.md)).
 5. Die Datei im `MCP_PHYSICAL_PATH` ablegen.
 6. Optional `MCP_SERVICE_NAME` und `MCP_HTTP_HEALTH_URL` als Repository Variables setzen.
 7. Die Pipeline startet den HTTP-MCP-Server dann automatisch als Windows-Dienst, sobald
@@ -226,10 +237,9 @@ Ausgangsbasis. Empfohlene Werte daraus:
 
 Danach in `mcpsettings.json` nur noch diese produktiven Werte setzen:
 
-- `upstreamApi.apiKey`
-- `oauth.signingKey`
-- `oauth.clients[0].clientSecret`
-- optional weitere OAuth-Clients
+- `upstreamApi.apiKey` (Dienstschlüssel)
+- `oauth.issuer` (öffentliche MCP-URL; muss in der Web-App als `MCP_PUBLIC_URL` stehen)
+- optional `upstreamApi.webPublicUrl` bzw. Umgebungsvariable `LEARNCARDS_WEB_PUBLIC_URL`
 
 Der Server stellt dann bereit:
 
@@ -237,7 +247,7 @@ Der Server stellt dann bereit:
 - `GET /metadata`
 - `GET /schema/import/cards`
 - `GET /.well-known/oauth-authorization-server`
-- `POST /oauth/token`
+- `GET /oauth/authorize`, `POST /oauth/register`, `GET /oauth/callback`, `POST /oauth/token`
 
 Damit ist der MCP-Server nicht mehr nur ein per Client gestarteter `stdio`-Prozess, sondern kann
 auch als eigenständiger HTTP-Endpoint für MCP-fähige LLM-Clients betrieben werden.

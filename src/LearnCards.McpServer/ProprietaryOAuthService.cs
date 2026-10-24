@@ -5,16 +5,28 @@ using System.Text.Json.Nodes;
 
 namespace LearnCards.McpServer;
 
+/// <summary>
+/// OAuth-Autorisierungsserver des MCP-Servers (ADR 0013). Authorization Code + PKCE (S256) mit dynamischer Client-Registrierung.
+/// Die <b>Benutzeranmeldung und Zustimmung findet bei Learny statt</b> (Entra ID): Dieser Dienst authentifiziert niemanden selbst,
+/// sondern leitet an die Learny-Zustimmungsseite weiter und erhält von dort einen einmaligen Code, den er serverseitig gegen ein
+/// benutzergebundenes Learny-Token tauscht. Dieses Token ist zugleich das Access Token des MCP-Clients — der MCP-Server hält
+/// keinen Benutzerzustand, Widerruf und Ablauf entscheidet die Learny-API.
+/// </summary>
 public sealed class ProprietaryOAuthService
 {
+    private static readonly TimeSpan PendingLifetime = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan CodeLifetime = TimeSpan.FromMinutes(5);
+    private static readonly string[] ForbiddenRedirectSchemes = { "javascript", "data", "file", "vbscript", "about", "blob" };
+
     private readonly ProprietaryOAuthSettings _settings;
     private readonly ConcurrentDictionary<string, OAuthClientRegistration> _clients = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, PendingAuthorization> _pending = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, OAuthAuthorizationCode> _authorizationCodes = new(StringComparer.Ordinal);
 
     public ProprietaryOAuthService(ProprietaryOAuthSettings settings)
     {
         _settings = settings;
-        foreach (var client in settings.Clients)
+        foreach (var client in settings.Clients.Where(c => !string.IsNullOrWhiteSpace(c.ClientId)))
         {
             var registration = new OAuthClientRegistration(
                 client.ClientId,
@@ -44,9 +56,6 @@ public sealed class ProprietaryOAuthService
         IReadOnlyList<string> scopes,
         string applicationType)
     {
-        if (redirectUris.Count == 0)
-            throw new InvalidOperationException("invalid_redirect_uri");
-
         if (tokenEndpointAuthMethod is not ("none" or "client_secret_post"))
             throw new InvalidOperationException("invalid_client_metadata");
 
@@ -55,17 +64,13 @@ public sealed class ProprietaryOAuthService
             .Select(u => u.Trim())
             .Distinct(StringComparer.Ordinal)
             .ToArray();
-        if (normalizedRedirectUris.Length == 0)
+        if (normalizedRedirectUris.Length == 0 || normalizedRedirectUris.Any(u => !IsAcceptableRedirectUri(u)))
             throw new InvalidOperationException("invalid_redirect_uri");
 
-        var allowedScopes = scopes.Count == 0
-            ? _settings.Clients.SelectMany(c => c.Scopes).Distinct(StringComparer.Ordinal).DefaultIfEmpty("mcp").ToArray()
-            : scopes.Distinct(StringComparer.Ordinal).ToArray();
+        var allowedScopes = new[] { "mcp" };   // einziger Scope; unbekannte angefragte Scopes werden ignoriert
 
         var clientId = "learncards-" + Guid.NewGuid().ToString("N");
-        var clientSecret = tokenEndpointAuthMethod == "client_secret_post"
-            ? Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+', '-').Replace('/', '_')
-            : "";
+        var clientSecret = tokenEndpointAuthMethod == "client_secret_post" ? Base64UrlEncode(RandomNumberGenerator.GetBytes(32)) : "";
         var registration = new OAuthClientRegistration(
             clientId,
             clientSecret,
@@ -75,7 +80,7 @@ public sealed class ProprietaryOAuthService
             string.IsNullOrWhiteSpace(applicationType) ? "web" : applicationType,
             DateTimeOffset.UtcNow,
             true,
-            clientName);
+            clientName is { Length: > 100 } ? clientName[..100] : clientName);
         _clients[clientId] = registration;
         return registration;
     }
@@ -98,15 +103,15 @@ public sealed class ProprietaryOAuthService
         if (requestedScopes.Any(s => !client.Scopes.Contains(s, StringComparer.Ordinal)))
             throw new InvalidOperationException("invalid_scope");
 
-        var normalizedResource = NormalizeResource(resource, issuerBaseUrl);
+        var normalizedResource = NormalizeResource(resource);
         if (normalizedResource is not null && !normalizedResource.Equals(CanonicalResource(issuerBaseUrl), StringComparison.Ordinal))
             throw new InvalidOperationException("invalid_target");
 
+        // PKCE ist Pflicht, ausschließlich S256 (kein "plain")
         if (string.IsNullOrWhiteSpace(codeChallenge))
             throw new InvalidOperationException("invalid_request");
-
         var method = string.IsNullOrWhiteSpace(codeChallengeMethod) ? "S256" : codeChallengeMethod;
-        if (method is not ("S256" or "plain"))
+        if (method != "S256")
             throw new InvalidOperationException("invalid_request");
 
         return new OAuthAuthorizeRequest(
@@ -119,10 +124,23 @@ public sealed class ProprietaryOAuthService
             normalizedResource ?? CanonicalResource(issuerBaseUrl));
     }
 
-    public string IssueAuthorizationCode(OAuthAuthorizeRequest request)
+    /// <summary>Merkt die geprüfte Anfrage, während der Benutzer bei Learny zustimmt. Die ID dient als "state" gegenüber Learny.</summary>
+    public string CreatePending(OAuthAuthorizeRequest request)
+    {
+        Cleanup();
+        var id = Base64UrlEncode(RandomNumberGenerator.GetBytes(32));
+        _pending[id] = new PendingAuthorization(request, DateTimeOffset.UtcNow.Add(PendingLifetime));
+        return id;
+    }
+
+    /// <summary>Entnimmt (und löscht) die wartende Anfrage; null wenn unbekannt oder abgelaufen.</summary>
+    public OAuthAuthorizeRequest? TakePending(string id)
+        => !string.IsNullOrEmpty(id) && _pending.TryRemove(id, out var p) && p.ExpiresAt > DateTimeOffset.UtcNow ? p.Request : null;
+
+    /// <summary>Erzeugt den Autorisierungscode für den MCP-Client; er trägt das bereits getauschte Benutzer-Token.</summary>
+    public string IssueAuthorizationCode(OAuthAuthorizeRequest request, string userToken, DateTimeOffset tokenExpiresAt)
     {
         var code = Base64UrlEncode(RandomNumberGenerator.GetBytes(32));
-        var now = DateTimeOffset.UtcNow;
         _authorizationCodes[code] = new OAuthAuthorizationCode(
             code,
             request.Client.ClientId,
@@ -131,7 +149,9 @@ public sealed class ProprietaryOAuthService
             request.CodeChallenge,
             request.CodeChallengeMethod,
             request.Resource,
-            now.AddMinutes(10));
+            userToken,
+            tokenExpiresAt,
+            DateTimeOffset.UtcNow.Add(CodeLifetime));
         return code;
     }
 
@@ -145,78 +165,22 @@ public sealed class ProprietaryOAuthService
         string issuerBaseUrl)
     {
         var client = ValidateClientAuthentication(clientId, clientSecret);
-        if (!_authorizationCodes.TryRemove(code, out var authCode))
+        if (!_authorizationCodes.TryRemove(code ?? "", out var authCode))   // einmalig: Entnahme macht den Code ungültig
             throw new InvalidOperationException("invalid_grant");
 
-        if (!string.Equals(authCode.ClientId, client.ClientId, StringComparison.Ordinal))
-            throw new InvalidOperationException("invalid_grant");
-        if (!string.Equals(authCode.RedirectUri, redirectUri, StringComparison.Ordinal))
-            throw new InvalidOperationException("invalid_grant");
-        if (authCode.ExpiresAt <= DateTimeOffset.UtcNow)
+        if (!string.Equals(authCode.ClientId, client.ClientId, StringComparison.Ordinal)
+            || !string.Equals(authCode.RedirectUri, redirectUri, StringComparison.Ordinal)
+            || authCode.ExpiresAt <= DateTimeOffset.UtcNow)
             throw new InvalidOperationException("invalid_grant");
 
         ValidatePkce(authCode, codeVerifier);
 
-        var requestedResource = NormalizeResource(resource, issuerBaseUrl);
+        var requestedResource = NormalizeResource(resource);
         if (requestedResource is not null && !string.Equals(requestedResource, authCode.Resource, StringComparison.Ordinal))
             throw new InvalidOperationException("invalid_target");
 
-        return IssueAccessToken(client.ClientId, authCode.Scopes, authCode.Resource);
-    }
-
-    public OAuthTokenResult IssueClientCredentialsToken(string clientId, string clientSecret, string? scope)
-    {
-        var client = ValidateClientAuthentication(clientId, clientSecret);
-        var requestedScopes = ResolveScopes(client, scope);
-        if (requestedScopes.Count == 0)
-            requestedScopes = client.Scopes.ToHashSet(StringComparer.Ordinal);
-
-        if (requestedScopes.Any(s => !client.Scopes.Contains(s, StringComparer.Ordinal)))
-            throw new InvalidOperationException("invalid_scope");
-
-        return IssueAccessToken(client.ClientId, requestedScopes, CanonicalResource(_settings.Issuer));
-    }
-
-    public bool TryValidateBearerToken(string token, out OAuthPrincipal principal, out string error)
-    {
-        principal = default;
-        error = "invalid_token";
-        if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(_settings.SigningKey))
-            return false;
-
-        var parts = token.Split('.');
-        if (parts.Length != 3)
-            return false;
-
-        var signingInput = $"{parts[0]}.{parts[1]}";
-        var expected = Base64UrlEncode(HMACSHA256.HashData(Encoding.UTF8.GetBytes(_settings.SigningKey), Encoding.ASCII.GetBytes(signingInput)));
-        if (!CryptographicOperations.FixedTimeEquals(Encoding.ASCII.GetBytes(parts[2]), Encoding.ASCII.GetBytes(expected)))
-            return false;
-
-        JsonObject? payload;
-        try
-        {
-            payload = JsonNode.Parse(Base64UrlDecodeToString(parts[1]))?.AsObject();
-        }
-        catch
-        {
-            return false;
-        }
-
-        if (payload is null)
-            return false;
-
-        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        if (payload["iss"]?.GetValue<string>() != _settings.Issuer) return false;
-        if (payload["aud"]?.GetValue<string>() != _settings.Audience) return false;
-        if (payload["exp"]?.GetValue<long>() < now) return false;
-        if (payload["nbf"]?.GetValue<long>() > now) return false;
-
-        principal = new OAuthPrincipal(
-            payload["client_id"]?.GetValue<string>() ?? payload["sub"]?.GetValue<string>() ?? "",
-            payload["scope"]?.GetValue<string>() ?? "",
-            payload["resource"]?.GetValue<string>() ?? "");
-        return principal.ClientId.Length > 0;
+        var seconds = (int)Math.Max(1, (authCode.UserTokenExpiresAt - DateTimeOffset.UtcNow).TotalSeconds);
+        return new OAuthTokenResult(authCode.UserToken, "Bearer", seconds, string.Join(' ', authCode.Scopes));
     }
 
     public JsonObject AuthorizationServerMetadata(string issuerBaseUrl) => new()
@@ -225,54 +189,26 @@ public sealed class ProprietaryOAuthService
         ["authorization_endpoint"] = issuerBaseUrl.TrimEnd('/') + "/oauth/authorize",
         ["token_endpoint"] = issuerBaseUrl.TrimEnd('/') + "/oauth/token",
         ["registration_endpoint"] = issuerBaseUrl.TrimEnd('/') + "/oauth/register",
-        ["grant_types_supported"] = new JsonArray("authorization_code", "client_credentials"),
+        ["grant_types_supported"] = new JsonArray("authorization_code"),
         ["response_types_supported"] = new JsonArray("code"),
         ["response_modes_supported"] = new JsonArray("query"),
-        ["code_challenge_methods_supported"] = new JsonArray("S256", "plain"),
+        ["code_challenge_methods_supported"] = new JsonArray("S256"),
         ["token_endpoint_auth_methods_supported"] = new JsonArray("client_secret_post", "none"),
-        ["scopes_supported"] = new JsonArray(AllScopes().Select(s => (JsonNode)s).ToArray()),
+        ["scopes_supported"] = new JsonArray("mcp"),
         ["service_documentation"] = issuerBaseUrl.TrimEnd('/') + "/metadata",
     };
 
     private OAuthClientRegistration ValidateClientAuthentication(string clientId, string? clientSecret)
     {
-        var client = FindClient(clientId);
-        if (client is null)
-            throw new InvalidOperationException("invalid_client");
-
+        var client = FindClient(clientId) ?? throw new InvalidOperationException("invalid_client");
         if (client.TokenEndpointAuthMethod == "none")
             return client;
 
-        if (client.ClientSecret != clientSecret)
+        if (clientSecret is null
+            || !CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(client.ClientSecret), Encoding.UTF8.GetBytes(clientSecret)))
             throw new InvalidOperationException("invalid_client");
 
         return client;
-    }
-
-    private OAuthTokenResult IssueAccessToken(string clientId, IEnumerable<string> scopes, string resource)
-    {
-        var scopeText = string.Join(' ', scopes.Distinct(StringComparer.Ordinal).OrderBy(s => s, StringComparer.Ordinal));
-        var now = DateTimeOffset.UtcNow;
-        var expires = now.AddMinutes(Math.Max(_settings.TokenLifetimeMinutes, 1));
-        var payload = new JsonObject
-        {
-            ["iss"] = _settings.Issuer,
-            ["aud"] = _settings.Audience,
-            ["sub"] = clientId,
-            ["client_id"] = clientId,
-            ["scope"] = scopeText,
-            ["resource"] = resource,
-            ["iat"] = now.ToUnixTimeSeconds(),
-            ["nbf"] = now.ToUnixTimeSeconds(),
-            ["exp"] = expires.ToUnixTimeSeconds(),
-            ["jti"] = Guid.NewGuid().ToString("N"),
-        };
-
-        return new OAuthTokenResult(
-            CreateJwt(payload),
-            "Bearer",
-            (int)(expires - now).TotalSeconds,
-            payload["scope"]!.GetValue<string>());
     }
 
     private static void ValidatePkce(OAuthAuthorizationCode authCode, string? codeVerifier)
@@ -280,49 +216,40 @@ public sealed class ProprietaryOAuthService
         if (string.IsNullOrWhiteSpace(codeVerifier))
             throw new InvalidOperationException("invalid_grant");
 
-        var expected = authCode.CodeChallengeMethod switch
-        {
-            "plain" => codeVerifier,
-            _ => Base64UrlEncode(SHA256.HashData(Encoding.ASCII.GetBytes(codeVerifier))),
-        };
-
-        if (!string.Equals(expected, authCode.CodeChallenge, StringComparison.Ordinal))
+        var expected = Base64UrlEncode(SHA256.HashData(Encoding.ASCII.GetBytes(codeVerifier)));
+        if (!CryptographicOperations.FixedTimeEquals(Encoding.ASCII.GetBytes(expected), Encoding.ASCII.GetBytes(authCode.CodeChallenge)))
             throw new InvalidOperationException("invalid_grant");
     }
 
-    private HashSet<string> ResolveScopes(OAuthClientRegistration client, string? scope)
+    private static HashSet<string> ResolveScopes(OAuthClientRegistration client, string? scope)
     {
         if (string.IsNullOrWhiteSpace(scope))
             return client.Scopes.ToHashSet(StringComparer.Ordinal);
 
         var requestedScopes = scope.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .ToHashSet(StringComparer.Ordinal);
-        if (requestedScopes.Count == 0)
-            requestedScopes = client.Scopes.ToHashSet(StringComparer.Ordinal);
-        return requestedScopes;
+        return requestedScopes.Count == 0 ? client.Scopes.ToHashSet(StringComparer.Ordinal) : requestedScopes;
     }
 
-    private IEnumerable<string> AllScopes()
-        => _clients.Values.SelectMany(c => c.Scopes).Distinct(StringComparer.Ordinal).OrderBy(s => s, StringComparer.Ordinal);
-
-    private string CreateJwt(JsonObject payload)
+    /// <summary>https, Loopback-http (native Apps) oder benutzerdefiniertes Schema — nie javascript:/data:/file:.</summary>
+    private static bool IsAcceptableRedirectUri(string uri)
     {
-        var header = new JsonObject
-        {
-            ["alg"] = "HS256",
-            ["typ"] = "JWT",
-        };
+        if (!Uri.TryCreate(uri, UriKind.Absolute, out var u) || !string.IsNullOrEmpty(u.Fragment)) return false;
+        if (ForbiddenRedirectSchemes.Contains(u.Scheme, StringComparer.OrdinalIgnoreCase)) return false;
+        if (u.Scheme.Equals("http", StringComparison.OrdinalIgnoreCase)) return u.IsLoopback;
+        return true;
+    }
 
-        var encodedHeader = Base64UrlEncode(Encoding.UTF8.GetBytes(header.ToJsonString()));
-        var encodedPayload = Base64UrlEncode(Encoding.UTF8.GetBytes(payload.ToJsonString()));
-        var signingInput = $"{encodedHeader}.{encodedPayload}";
-        var signature = Base64UrlEncode(HMACSHA256.HashData(Encoding.UTF8.GetBytes(_settings.SigningKey), Encoding.ASCII.GetBytes(signingInput)));
-        return $"{signingInput}.{signature}";
+    private void Cleanup()
+    {
+        var now = DateTimeOffset.UtcNow;
+        foreach (var kv in _pending.Where(kv => kv.Value.ExpiresAt <= now).ToList()) _pending.TryRemove(kv.Key, out _);
+        foreach (var kv in _authorizationCodes.Where(kv => kv.Value.ExpiresAt <= now).ToList()) _authorizationCodes.TryRemove(kv.Key, out _);
     }
 
     public static string CanonicalResource(string issuerBaseUrl) => issuerBaseUrl.TrimEnd('/') + "/mcp";
 
-    private static string? NormalizeResource(string? resource, string issuerBaseUrl)
+    private static string? NormalizeResource(string? resource)
     {
         if (string.IsNullOrWhiteSpace(resource))
             return null;
@@ -335,18 +262,6 @@ public sealed class ProprietaryOAuthService
 
     private static string Base64UrlEncode(byte[] data) =>
         Convert.ToBase64String(data).TrimEnd('=').Replace('+', '-').Replace('/', '_');
-
-    private static string Base64UrlDecodeToString(string value)
-    {
-        var padded = value.Replace('-', '+').Replace('_', '/');
-        padded += (padded.Length % 4) switch
-        {
-            2 => "==",
-            3 => "=",
-            _ => "",
-        };
-        return Encoding.UTF8.GetString(Convert.FromBase64String(padded));
-    }
 }
 
 public sealed record OAuthClientRegistration(
@@ -369,6 +284,8 @@ public sealed record OAuthAuthorizeRequest(
     string CodeChallengeMethod,
     string Resource);
 
+public sealed record PendingAuthorization(OAuthAuthorizeRequest Request, DateTimeOffset ExpiresAt);
+
 public sealed record OAuthAuthorizationCode(
     string Code,
     string ClientId,
@@ -377,8 +294,8 @@ public sealed record OAuthAuthorizationCode(
     string CodeChallenge,
     string CodeChallengeMethod,
     string Resource,
+    string UserToken,
+    DateTimeOffset UserTokenExpiresAt,
     DateTimeOffset ExpiresAt);
 
 public readonly record struct OAuthTokenResult(string AccessToken, string TokenType, int ExpiresIn, string Scope);
-
-public readonly record struct OAuthPrincipal(string ClientId, string Scope, string Resource);

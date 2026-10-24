@@ -12,12 +12,23 @@ OpenAI-Client laufen über den eingebauten `HttpClient`).
 - `src/LearnCards.Web/` — Blazor Web App (.NET 10, interaktive Server-Komponenten) + REST-API
   unter `/api` + OIDC-Login unter `/auth/*`. Eine einzige deploybare Einheit.
 - `src/LearnCards.McpServer/` — eigenständiger MCP-Server mit `stdio`- und HTTP-Transport,
-  spricht mit der Web-API über `X-MCP-Key` und kann optional ein dateibasiertes proprietäres OAuth
-  für HTTP-Clients bereitstellen.
+  spricht mit der Web-API im Namen **eines Benutzers** (OAuth-Anmeldung bei Learny oder persönliches Token, siehe [ADR 0013](docs/adr/0013-mcp-benutzergebundene-anmeldung.md));
+  der gemeinsame `X-MCP-Key` ist nur ein Dienstschlüssel ohne Datenzugriff.
 - `nginx/` — optionaler Reverse Proxy für TLS-Terminierung im Docker-Betrieb.
 - `docker-compose.yml` — Postgres + Web (+ MCP-Server-Profil, + nginx-Profil).
 
 Details: [docs/architecture.md](docs/architecture.md).
+
+## Benutzer, Rollen und Datenschutz
+
+LearnCards ist mehrbenutzerfähig ([ADR 0011](docs/adr/0011-mehrbenutzerarchitektur.md)):
+
+- Jeder Benutzer hat eine eigene interne ID, ein Profil (`/profile`) und **private Module und Karten**; andere Benutzer sehen sie nicht (kein gemeinsamer Kartenbestand).
+  Persönliche Lerndaten (Lernstatus, Chat-Verlauf, Quiz-Ergebnisse, Theme) sind ebenfalls benutzerbezogen.
+- Rollen: `user`, `admin` (Benutzerverwaltung unter `/admin`), `auditor`. Sie lassen sich in der App oder über Entra-ID-App-Rollen vergeben
+  (`Admin.All` → `admin`, [ADR 0012](docs/adr/0012-rollen-aus-entra-app-roles.md)).
+- Über MCP arbeitet jeder Benutzer nur in seinem Bereich; Zugänge sind im Profil widerrufbar.
+- Ergebnisse der Sicherheitsprüfung: [Prüfbericht](docs/reviews/2026-10-24-mehrbenutzer-pruefbericht.md) (u. a. Hinweis: für Produktion `AUTH_MODE=oidc` explizit setzen).
 
 ## Datenbank: lokal SQLite, produktiv PostgreSQL
 
@@ -45,11 +56,11 @@ dotnet run
 ```
 
 Die App startet unter `http://localhost:5000`. Ohne konfigurierte Entra-ID-Werte greift
-automatisch der lokale Dev-Login (`AUTH_MODE=auto` → `dev`), ohne konfigurierten
+automatisch der lokale Dev-Login (`AUTH_MODE=auto` → `dev`; der Dev-Benutzer ist **Administrator** — nie in Produktion, dort `AUTH_MODE=oidc` setzen), ohne konfigurierten
 `OPENAI_API_KEY` laufen Chat und Quiz mit einem klar gekennzeichneten Offline-Fallback.
 
-Alternativ in VS Code: `App (lokal: Web + MCP)` aus der Debug-Ansicht starten
-(`.vscode/launch.json`).
+Alternativ in VS Code in der Debug-Ansicht **App (SQLite)** oder **App (PostgreSQL Docker)** starten (`.vscode/launch.json`;
+PostgreSQL läuft dafür im Container aus `docker-compose.dev.yml`, siehe [docs/local-development.md](docs/local-development.md)).
 
 MCP-Server separat starten (z. B. für Claude Desktop):
 
@@ -57,6 +68,11 @@ MCP-Server separat starten (z. B. für Claude Desktop):
 cd src/LearnCards.McpServer
 dotnet run
 ```
+
+> **Mehrbenutzer (ADR 0011/0013):** Jeder Benutzer arbeitet über MCP nur in seinem eigenen Bereich. HTTP-Clients melden sich per **OAuth** an (Anmeldung und Zustimmung
+> bei Learny), stdio-Clients nutzen ein **persönliches Token** (`LEARNCARDS_MCP_TOKEN`, erzeugt unter `/profile`). Der gemeinsame `MCP_API_KEY` ist nur noch ein
+> Dienstschlüssel des MCP-Servers und gewährt keinen Datenzugriff. Zugänge lassen sich im Profil widerrufen. Beim ersten Start nach dem Update `ADMIN_SUBJECTS` setzen und
+> unzugeordneten Altbestand unter `/admin` einem Benutzer zuweisen.
 
 Im produktiven IIS-Deployment wird der MCP-Server nicht als Windows-Dienst betrieben, sondern
 vom MCP-Client automatisch gestartet. Die GitHub-Action erzeugt dafür im MCP-Zielordner
@@ -68,8 +84,8 @@ Für einen eigenständigen HTTP-Betrieb liegt unter
 
 - `stdio` für klassische MCP-Desktop-Clients bedienen
 - zusätzlich oder alternativ HTTP unter `/mcp` bereitstellen
-- unter `/.well-known/oauth-authorization-server` und `/oauth/token` ein einfaches proprietäres
-  OAuth für Bearer-Token anbieten
+- unter `/.well-known/oauth-authorization-server`, `/oauth/authorize`, `/oauth/register`, `/oauth/token` einen OAuth-Ablauf (Authorization Code + PKCE) anbieten,
+  bei dem die Anmeldung bei Learny stattfindet und Tokens an den jeweiligen Benutzer gebunden sind
 - unter `/metadata` und per MCP-Tool `get_import_schema` das aktuelle Import-Schema des Learn-Servers liefern
 
 Für IIS-/Windows-Dienst-Betrieb gibt es zusätzlich eine produktionsnahe Vorlage unter
@@ -78,7 +94,7 @@ Für IIS-/Windows-Dienst-Betrieb gibt es zusätzlich eine produktionsnahe Vorlag
 - `upstreamApi.baseUrl` zeigt auf `http://localhost/api`
 - `stdio` ist deaktiviert
 - `http` ist aktiviert auf `http://127.0.0.1:8787`
-- proprietäres OAuth ist aktiviert und muss nur noch mit echten Secrets befüllt werden
+- OAuth ist aktiviert; `oauth.issuer` muss die öffentliche MCP-URL sein, die Web-App braucht `MCP_PUBLIC_URL` (siehe [ADR 0013](docs/adr/0013-mcp-benutzergebundene-anmeldung.md))
 
 Für ein vollständig repo-basiertes IIS-Deployment liegen zusätzlich diese Dateien unter `deploy/iis/`:
 
@@ -176,7 +192,13 @@ Beide Dateien lassen sich direkt über den JSON-Import in der Startseite laden.
 ## Dokumentation
 
 - [Architektur](docs/architecture.md)
-- [Lokale Entwicklung](docs/local-development.md)
+- [Architekturentscheidungen (ADR)](docs/adr/README.md)
+- [Entwickeln mit KI-Assistenten](docs/ai-development.md) · [AGENTS.md](AGENTS.md)
+- [Lokale Entwicklung (VS Code, PostgreSQL-Docker, MCP-Anmeldung)](docs/local-development.md)
+- [Datenbankschema](docs/database-schema.md)
+- [Tests](docs/testing.md)
+- [Prüfbericht Mehrbenutzerfähigkeit](docs/reviews/2026-10-24-mehrbenutzer-pruefbericht.md)
+- [Prompt für das GPT-Projekt (Änderungsaufträge)](docs/gpt-project-prompt.md)
 - [Azure-Deployment](docs/azure-deployment.md)
 - [IIS-Deployment per GitHub Actions](docs/iis-deployment.md)
 - [Migration von der Python-Version](docs/migration-notes.md)

@@ -39,7 +39,8 @@ public class ChatService
             yield return token;
     }
 
-    public Task<Card?> GetCardAsync(string cardId) => _repo.GetCardAsync(cardId);
+    /// <summary>Lädt die Karte nur, wenn sie dem Benutzer gehört (ADR 0011).</summary>
+    public Task<Card?> GetCardAsync(string cardId, string userId) => _repo.GetCardAsync(cardId, userId);
 
     public async Task<string> NormalizeQuestionAsync(Card card, string question, CancellationToken ct = default)
     {

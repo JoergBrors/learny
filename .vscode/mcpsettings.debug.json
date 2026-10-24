@@ -17,11 +17,9 @@
     }
   },
   "oauth": {
-    "enabled": false,
-    "issuer": "learncards-mcp-debug",
+    "enabled": true,
+    "issuer": "http://127.0.0.1:8787",
     "audience": "learncards-mcp-debug",
-    "signingKey": "replace-me-for-debug-if-oauth-is-enabled",
-    "tokenLifetimeMinutes": 60,
     "clients": []
   }
 }

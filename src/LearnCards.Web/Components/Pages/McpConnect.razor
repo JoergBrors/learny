@@ -1,0 +1,80 @@
+@page "/mcp/connect"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject McpLinkService Links
+@inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthState
+
+<PageTitle>MCP-Zugriff erlauben — LearnCards</PageTitle>
+
+<div class="container narrow">
+    <div class="page-head">
+        <div>
+            <h1>MCP-Zugriff erlauben</h1>
+            <p class="muted">Verknüpfung eines MCP-Clients mit deinem Learny-Konto</p>
+        </div>
+    </div>
+
+    @if (_error is not null)
+    {
+        <div class="alert alert-error" role="alert">@_error</div>
+        <a class="btn btn-ghost" href="/">← Zur Startseite</a>
+    }
+    else
+    {
+        <div class="card panel">
+            <p>
+                Der MCP-Client <strong>@(string.IsNullOrWhiteSpace(Client) ? "(ohne Namen)" : Client)</strong> möchte sich mit
+                deinem Konto <strong>@_userName</strong> verbinden.
+            </p>
+            <ul>
+                <li>Der Client darf <strong>deine eigenen</strong> Module und Karten lesen, anlegen, importieren und archivieren.</li>
+                <li>Er sieht keine Inhalte anderer Benutzer und hat keinen Zugriff auf Profil, Rollen oder Administration.</li>
+                <li>Du kannst die Verknüpfung jederzeit unter <a href="/profile">Mein Profil</a> widerrufen.</li>
+            </ul>
+            <p class="muted">Der Clientname stammt vom Client selbst und ist nicht geprüft. Erlaube den Zugriff nur, wenn du diese Verbindung gerade selbst gestartet hast.</p>
+            <div class="form-row">
+                <button class="btn btn-primary" @onclick="() => DecideAsync(true)" disabled="@_busy">Erlauben</button>
+                <button class="btn btn-ghost" @onclick="() => DecideAsync(false)" disabled="@_busy">Ablehnen</button>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "return")] public string? ReturnUrl { get; set; }
+    [SupplyParameterFromQuery(Name = "state")] public string? State { get; set; }
+    [SupplyParameterFromQuery(Name = "client")] public string? Client { get; set; }
+
+    private string _userId = "";
+    private string _userName = "";
+    private string? _error;
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _userId = auth.User.GetUserId() ?? throw new UnauthorizedAccessException();
+        _userName = auth.User.Identity?.Name ?? "";
+
+        if (string.IsNullOrWhiteSpace(State))
+            _error = "Die Anfrage ist unvollständig (state fehlt).";
+        else if (!Links.IsAllowedReturnUrl(ReturnUrl))
+            _error = "Die Rückleitungs-URL ist nicht erlaubt. Der Administrator muss MCP_PUBLIC_URL für diesen MCP-Server konfigurieren.";
+    }
+
+    private async Task DecideAsync(bool approve)
+    {
+        _busy = true;
+        try
+        {
+            var url = await Links.CompleteConsentAsync(_userId, ReturnUrl ?? "", State ?? "", Client ?? "", approve);
+            Nav.NavigateTo(url, forceLoad: true);
+        }
+        catch (ArgumentException e)
+        {
+            _error = e.Message;
+            _busy = false;
+        }
+    }
+}

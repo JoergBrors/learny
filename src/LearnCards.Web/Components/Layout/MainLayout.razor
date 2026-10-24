@@ -17,9 +17,13 @@
                     </a>
                     <div class="topbar-actions">
                         <a class="btn btn-ghost btn-sm" href="/help">Hilfe</a>
-                        <span class="user-chip" title="@context.User.Identity?.Name">
+                        @if (context.User.IsInRole(Roles.Admin))
+                        {
+                            <a class="btn btn-ghost btn-sm" href="/admin">Administration</a>
+                        }
+                        <a class="user-chip" href="/profile" title="Mein Profil: @context.User.Identity?.Name">
                             @Initials(context.User.Identity?.Name)
-                        </span>
+                        </a>
                         <button class="icon-btn" @onclick="ToggleTheme" title="Hell-/Dunkelmodus umschalten" aria-label="Hell-/Dunkelmodus umschalten">
                             <span aria-hidden="true">@(_dark ? "☀️" : "🌙")</span>
                         </button>
@@ -52,7 +56,7 @@
             try
             {
                 var auth = await AuthState.GetAuthenticationStateAsync();
-                _userSub = auth.User.FindFirst("sub")?.Value ?? "";
+                _userSub = auth.User.GetUserId() ?? "";
                 var storedTheme = string.IsNullOrWhiteSpace(_userSub) ? "" : await Repo.GetThemeAsync(_userSub);
                 if (storedTheme is "dark" or "light")
                     await JS.InvokeVoidAsync("lcTheme.set", storedTheme);

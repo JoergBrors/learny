@@ -3,4 +3,7 @@
     <Project Path="src/LearnCards.McpServer/LearnCards.McpServer.csproj" />
     <Project Path="src/LearnCards.Web/LearnCards.Web.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/LearnCards.IntegrationTests/LearnCards.IntegrationTests.csproj" />
+  </Folder>
 </Solution>

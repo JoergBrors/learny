@@ -81,7 +81,7 @@
     protected override async Task OnParametersSetAsync()
     {
         var auth = await AuthState.GetAuthenticationStateAsync();
-        _userSub = auth.User.FindFirst("sub")?.Value ?? "";
+        _userSub = auth.User.GetUserId() ?? "";
         await LoadHistoryAsync();
     }
 

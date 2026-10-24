@@ -6,7 +6,7 @@ using LearnCards.Web.Domain;
 namespace LearnCards.Web.Services;
 
 /// <summary>Datenzugriff für Module, Karten und Quiz-Ergebnisse.</summary>
-public class CardRepository
+public partial class CardRepository
 {
     public sealed record ImportProgress(int Processed, int Total, string Module, string Term);
 
@@ -15,36 +15,37 @@ public class CardRepository
     public CardRepository(IDatabase db) => _db = db;
 
     // ─── Module ─────────────────────────────────────────────────────────────
+    // Alle Zugriffe sind auf den Eigentümer (ownerId = interne Benutzer-ID) eingeschränkt (ADR 0011).
+    // Fremde oder unzugeordnete Datensätze verhalten sich wie "nicht vorhanden".
 
-    public async Task<List<ModuleInfo>> ListModulesAsync()
+    private const string ModuleColumns =
+        "m.id, m.name, m.description, m.icon, m.color, m.owner_user_id, m.scope, m.publication_id, m.global_version, m.global_status, " +
+        "m.source_module_id, m.source_owner_user_id, m.source_owner_name, m.published_at, m.created_at, m.updated_at";
+
+    private const string ModuleSelect =
+        "SELECT " + ModuleColumns + ", COUNT(c.id) AS card_count, SUM(CASE WHEN c.archived = 0 THEN 1 ELSE 0 END) AS active_count " +
+        "FROM modules m LEFT JOIN cards c ON c.module_id = m.id";
+
+    private const string ModuleGroupBy = "GROUP BY " + ModuleColumns;
+
+    public async Task<List<ModuleInfo>> ListModulesAsync(string ownerId)
     {
-        var rows = await _db.QueryAsync("""
-            SELECT m.id, m.name, m.description, m.icon, m.color, m.created_at, m.updated_at,
-                   COUNT(c.id) AS card_count,
-                   SUM(CASE WHEN c.archived = 0 THEN 1 ELSE 0 END) AS active_count
-            FROM modules m
-            LEFT JOIN cards c ON c.module_id = m.id
-            GROUP BY m.id, m.name, m.description, m.icon, m.color, m.created_at, m.updated_at
-            ORDER BY m.name
-            """);
-        return rows.Select(MapModule).ToList();
+        var rows = await _db.QueryAsync($"{ModuleSelect} WHERE m.owner_user_id = @owner AND m.scope = 'private' {ModuleGroupBy} ORDER BY m.name",
+            new[] { ("owner", (object?)ownerId) });
+        var modules = rows.Select(MapModule).ToList();
+        foreach (var m in modules) m.Context = ContextPrivate;
+        return modules;
     }
 
-    public async Task<ModuleInfo?> GetModuleAsync(string id)
+    public async Task<ModuleInfo?> GetModuleAsync(string id, string ownerId)
     {
-        var rows = await _db.QueryAsync("""
-            SELECT m.id, m.name, m.description, m.icon, m.color, m.created_at, m.updated_at,
-                   COUNT(c.id) AS card_count,
-                   SUM(CASE WHEN c.archived = 0 THEN 1 ELSE 0 END) AS active_count
-            FROM modules m
-            LEFT JOIN cards c ON c.module_id = m.id
-            WHERE m.id = @id
-            GROUP BY m.id, m.name, m.description, m.icon, m.color, m.created_at, m.updated_at
-            """, new[] { ("id", (object?)id) });
+        if (!UserService.IsGuid(id)) return null;
+        var rows = await _db.QueryAsync($"{ModuleSelect} WHERE m.id = @id AND m.owner_user_id = @owner {ModuleGroupBy}",
+            new (string, object?)[] { ("id", id), ("owner", ownerId) });
         return rows.Count == 0 ? null : MapModule(rows[0]);
     }
 
-    public async Task<ModuleInfo> CreateModuleAsync(ModuleCreateRequest req)
+    public async Task<ModuleInfo> CreateModuleAsync(ModuleCreateRequest req, string ownerId)
     {
         var m = new ModuleInfo
         {
@@ -52,50 +53,70 @@ public class CardRepository
             Description = req.Description,
             Icon = string.IsNullOrWhiteSpace(req.Icon) ? "📚" : req.Icon,
             Color = string.IsNullOrWhiteSpace(req.Color) ? "#2AA79B" : req.Color,
+            OwnerUserId = ownerId,
         };
         await _db.ExecuteAsync("""
-            INSERT INTO modules (id, name, description, icon, color, created_at, updated_at)
-            VALUES (@id, @name, @description, @icon, @color, @created_at, @updated_at)
+            INSERT INTO modules (id, name, description, icon, color, owner_user_id, created_at, updated_at)
+            VALUES (@id, @name, @description, @icon, @color, @owner, @created_at, @updated_at)
             """, new (string, object?)[]
         {
             ("id", m.Id), ("name", m.Name), ("description", m.Description),
-            ("icon", m.Icon), ("color", m.Color), ("created_at", m.CreatedAt), ("updated_at", m.UpdatedAt),
+            ("icon", m.Icon), ("color", m.Color), ("owner", ownerId), ("created_at", m.CreatedAt), ("updated_at", m.UpdatedAt),
         });
         return m;
     }
 
-    public async Task<ModuleInfo> GetOrCreateModuleByNameAsync(string name)
+    public async Task<ModuleInfo> GetOrCreateModuleByNameAsync(string name, string ownerId)
     {
-        var rows = await _db.QueryAsync("SELECT id, name, description, icon, color, created_at, updated_at FROM modules WHERE name = @name",
-            new[] { ("name", (object?)name.Trim()) });
+        var rows = await _db.QueryAsync("""
+            SELECT id, name, description, icon, color, owner_user_id, created_at, updated_at
+            FROM modules WHERE name = @name AND owner_user_id = @owner
+            """, new (string, object?)[] { ("name", name.Trim()), ("owner", ownerId) });
         if (rows.Count > 0) return MapModule(rows[0]);
-        return await CreateModuleAsync(new ModuleCreateRequest { Name = name });
+        return await CreateModuleAsync(new ModuleCreateRequest { Name = name }, ownerId);
     }
 
-    public Task<int> DeleteModuleAsync(string id) =>
-        _db.ExecuteAsync("DELETE FROM modules WHERE id = @id", new[] { ("id", (object?)id) });
+    /// <summary>
+    /// Löscht ein eigenes Modul. Haben andere Benutzer bereits Lernergebnisse darauf (Freigabe), wird nicht gelöscht
+    /// (die Fremdschlüssel würden deren Ergebnisse mitlöschen) — <see cref="InvalidOperationException"/>.
+    /// </summary>
+    public async Task<int> DeleteModuleAsync(string id, string ownerId)
+    {
+        if (!UserService.IsGuid(id)) return 0;
+        if (await ForeignResultCountAsync("module_id", id, ownerId) > 0
+            && (await GetModuleAsync(id, ownerId)) is not null)
+            throw new InvalidOperationException("Das Modul kann nicht gelöscht werden: Andere Benutzer haben bereits Lernergebnisse darauf. Widerrufe die Freigaben und archiviere stattdessen die Karten.");
+        return await _db.ExecuteAsync("DELETE FROM modules WHERE id = @id AND owner_user_id = @owner",
+            new (string, object?)[] { ("id", id), ("owner", ownerId) });
+    }
 
     // ─── Karten ─────────────────────────────────────────────────────────────
 
-    public async Task<List<Card>> ListCardsAsync(string? moduleId = null, string? category = null, bool archived = false)
+    public async Task<List<Card>> ListCardsAsync(string ownerId, string? moduleId = null, string? category = null, bool archived = false)
     {
-        var sql = "SELECT * FROM cards WHERE archived = @archived";
-        var args = new List<(string, object?)> { ("archived", archived) };
-        if (!string.IsNullOrEmpty(moduleId)) { sql += " AND module_id = @module_id"; args.Add(("module_id", moduleId)); }
+        var sql = "SELECT * FROM cards WHERE owner_user_id = @owner AND archived = @archived";
+        var args = new List<(string, object?)> { ("owner", ownerId), ("archived", archived) };
+        if (!string.IsNullOrEmpty(moduleId))
+        {
+            if (!UserService.IsGuid(moduleId)) return new();
+            sql += " AND module_id = @module_id"; args.Add(("module_id", moduleId));
+        }
         if (!string.IsNullOrEmpty(category)) { sql += " AND category = @category"; args.Add(("category", category)); }
         sql += " ORDER BY category, sort_order, term";
         return (await _db.QueryAsync(sql, args)).Select(MapCard).ToList();
     }
 
-    public async Task<List<Card>> ListSlideCardsAsync(string moduleId, string? category = null)
+    public async Task<List<Card>> ListSlideCardsAsync(string ownerId, string moduleId, string? category = null)
     {
+        if (!UserService.IsGuid(moduleId)) return new();
         var sql = """
             SELECT * FROM cards
-            WHERE module_id = @module_id
+            WHERE owner_user_id = @owner
+              AND module_id = @module_id
               AND archived = 0
               AND slide_number IS NOT NULL
             """;
-        var args = new List<(string, object?)> { ("module_id", moduleId) };
+        var args = new List<(string, object?)> { ("owner", ownerId), ("module_id", moduleId) };
         if (!string.IsNullOrWhiteSpace(category))
         {
             sql += " AND category = @category";
@@ -107,27 +128,33 @@ public class CardRepository
             .ToList();
     }
 
-    public async Task<List<string>> ListCategoriesAsync(string moduleId)
+    public async Task<List<string>> ListCategoriesAsync(string ownerId, string moduleId)
     {
+        if (!UserService.IsGuid(moduleId)) return new();
         var rows = await _db.QueryAsync(
-            "SELECT DISTINCT category FROM cards WHERE module_id = @m AND archived = 0 ORDER BY category",
-            new[] { ("m", (object?)moduleId) });
+            "SELECT DISTINCT category FROM cards WHERE owner_user_id = @owner AND module_id = @m AND archived = 0 ORDER BY category",
+            new (string, object?)[] { ("owner", ownerId), ("m", moduleId) });
         return rows.Select(r => r["category"] ?? "").Where(c => c.Length > 0).ToList();
     }
 
-    public async Task<Card?> GetCardAsync(string id)
+    public async Task<Card?> GetCardAsync(string id, string ownerId)
     {
-        var rows = await _db.QueryAsync("SELECT * FROM cards WHERE id = @id", new[] { ("id", (object?)id) });
+        if (!UserService.IsGuid(id)) return null;
+        var rows = await _db.QueryAsync("SELECT * FROM cards WHERE id = @id AND owner_user_id = @owner",
+            new (string, object?)[] { ("id", id), ("owner", ownerId) });
         return rows.Count == 0 ? null : MapCard(rows[0]);
     }
 
-    public async Task<Card> CreateCardAsync(CardJson data)
+    public async Task<Card> CreateCardAsync(CardJson data, string ownerId)
     {
-        var module = await GetOrCreateModuleByNameAsync(data.Module);
+        var module = await GetOrCreateModuleByNameAsync(data.Module, ownerId);
         var card = new Card
         {
-            Id = string.IsNullOrWhiteSpace(data.Id) ? Guid.NewGuid().ToString() : data.Id!,
+            // Eine vom Client vorgegebene ID wird nur übernommen, wenn sie noch nirgends existiert —
+            // sonst würde eine Kollision fremde Karten verraten oder überschreiben.
+            Id = await ResolveNewCardIdAsync(data.Id),
             ModuleId = module.Id,
+            OwnerUserId = ownerId,
             Category = data.Category,
             Term = data.Term,
             Question = data.Question,
@@ -148,20 +175,28 @@ public class CardRepository
         return card;
     }
 
+    private async Task<string> ResolveNewCardIdAsync(string? requested)
+    {
+        if (string.IsNullOrWhiteSpace(requested) || !Guid.TryParse(requested, out var g)) return Guid.NewGuid().ToString();
+        var id = g.ToString();
+        var exists = await _db.QueryAsync("SELECT 1 FROM cards WHERE id = @id", new[] { ("id", (object?)id) });
+        return exists.Count == 0 ? id : Guid.NewGuid().ToString();
+    }
+
     private Task InsertCardAsync(Card c) => _db.ExecuteAsync("""
-        INSERT INTO cards (id, module_id, category, term, question, definition, how_it_works,
+        INSERT INTO cards (id, module_id, owner_user_id, category, term, question, definition, how_it_works,
                            context, key_fact, reference_answer, chat_prompt, official_sources_json,
                            slide_number, target_time_sec, quiz_json,
                            archived, sort_order, created_at, updated_at)
-        VALUES (@id, @module_id, @category, @term, @question, @definition, @how_it_works,
+        VALUES (@id, @module_id, @owner_user_id, @category, @term, @question, @definition, @how_it_works,
                 @context, @key_fact, @reference_answer, @chat_prompt, @official_sources_json,
                 @slide_number, @target_time_sec, @quiz_json,
                 @archived, @sort_order, @created_at, @updated_at)
         """, CardArgs(c));
 
-    public async Task<Card?> UpdateCardAsync(string id, CardJson data)
+    public async Task<Card?> UpdateCardAsync(string id, CardJson data, string ownerId)
     {
-        var card = await GetCardAsync(id);
+        var card = await GetCardAsync(id, ownerId);
         if (card is null) return null;
         card.Category = data.Category;
         card.Term = data.Term;
@@ -185,30 +220,38 @@ public class CardRepository
                 chat_prompt=@chat_prompt, official_sources_json=@official_sources_json,
                 slide_number=@slide_number, target_time_sec=@target_time_sec, quiz_json=@quiz_json,
                 archived=@archived, sort_order=@sort_order, updated_at=@updated_at
-            WHERE id=@id
+            WHERE id=@id AND owner_user_id=@owner_user_id
             """, CardArgs(card));
         return card;
     }
 
-    public async Task<Card?> SetArchivedAsync(string id, bool archived)
+    public async Task<Card?> SetArchivedAsync(string id, bool archived, string ownerId)
     {
-        var n = await _db.ExecuteAsync("UPDATE cards SET archived=@a, updated_at=@u WHERE id=@id",
-            new (string, object?)[] { ("a", archived), ("u", DateTime.UtcNow), ("id", id) });
-        return n == 0 ? null : await GetCardAsync(id);
+        if (!UserService.IsGuid(id)) return null;
+        var n = await _db.ExecuteAsync("UPDATE cards SET archived=@a, updated_at=@u WHERE id=@id AND owner_user_id=@owner",
+            new (string, object?)[] { ("a", archived), ("u", DateTime.UtcNow), ("id", id), ("owner", ownerId) });
+        return n == 0 ? null : await GetCardAsync(id, ownerId);
     }
 
-    public Task<int> DeleteCardAsync(string id) =>
-        _db.ExecuteAsync("DELETE FROM cards WHERE id = @id", new[] { ("id", (object?)id) });
+    /// <summary>Löscht eine eigene Karte; bei Lernergebnissen anderer Benutzer auf dieser Karte → <see cref="InvalidOperationException"/> (archivieren statt löschen).</summary>
+    public async Task<int> DeleteCardAsync(string id, string ownerId)
+    {
+        if (!UserService.IsGuid(id)) return 0;
+        if (await ForeignResultCountAsync("card_id", id, ownerId) > 0 && (await GetCardAsync(id, ownerId)) is not null)
+            throw new InvalidOperationException("Die Karte kann nicht gelöscht werden: Andere Benutzer haben bereits Lernergebnisse darauf. Archiviere sie stattdessen.");
+        return await _db.ExecuteAsync("DELETE FROM cards WHERE id = @id AND owner_user_id = @owner",
+            new (string, object?)[] { ("id", id), ("owner", ownerId) });
+    }
 
     // ─── Import ─────────────────────────────────────────────────────────────
 
     public async Task<(int Created, int Updated, int Skipped)> ImportAsync(
         List<CardJson> cards,
         bool overwriteExisting,
+        string ownerId,
         Func<ImportProgress, Task>? progress = null)
     {
         int created = 0, updated = 0, skipped = 0;
-        var moduleCache = new Dictionary<string, ModuleInfo>();
 
         for (var i = 0; i < cards.Count; i++)
         {
@@ -222,26 +265,18 @@ public class CardRepository
                 continue;
             }
 
-            if (!moduleCache.TryGetValue(data.Module, out var module))
+            // Nur eigene Karten gelten als "vorhanden"; eine fremde ID führt zu einer neuen eigenen Karte.
+            var existing = string.IsNullOrWhiteSpace(data.Id) ? null : await GetCardAsync(data.Id!, ownerId);
+
+            if (existing is not null && !overwriteExisting) { skipped++; }
+            else if (existing is not null)
             {
-                module = await GetOrCreateModuleByNameAsync(data.Module);
-                moduleCache[data.Module] = module;
-            }
-
-            var cardId = string.IsNullOrWhiteSpace(data.Id) ? Guid.NewGuid().ToString() : data.Id!;
-            var existing = await GetCardAsync(cardId);
-
-            if (existing is not null && !overwriteExisting) { skipped++; continue; }
-
-            if (existing is not null)
-            {
-                await UpdateCardAsync(cardId, data);
+                await UpdateCardAsync(existing.Id, data, ownerId);
                 updated++;
             }
             else
             {
-                data.Id = cardId;
-                await CreateCardAsync(data);
+                await CreateCardAsync(data, ownerId);
                 created++;
             }
 
@@ -251,20 +286,68 @@ public class CardRepository
         return (created, updated, skipped);
     }
 
+    // ─── Besitz / Administration (Aufrufer müssen die Admin-Rolle vorab über UserService prüfen) ───
+
+    public async Task<OwnedContentSummary> GetOwnedSummaryAsync(string ownerId)
+    {
+        var m = await _db.QueryAsync("SELECT COUNT(*) AS n FROM modules WHERE owner_user_id = @o", new[] { ("o", (object?)ownerId) });
+        var c = await _db.QueryAsync("""
+            SELECT COALESCE(SUM(CASE WHEN archived = 0 THEN 1 ELSE 0 END), 0) AS active,
+                   COALESCE(SUM(CASE WHEN archived = 0 THEN 0 ELSE 1 END), 0) AS archived
+            FROM cards WHERE owner_user_id = @o
+            """, new[] { ("o", (object?)ownerId) });
+        return new OwnedContentSummary
+        {
+            Modules = DbValue.ToInt(m.FirstOrDefault()?.GetValueOrDefault("n")),
+            ActiveCards = DbValue.ToInt(c.FirstOrDefault()?.GetValueOrDefault("active")),
+            ArchivedCards = DbValue.ToInt(c.FirstOrDefault()?.GetValueOrDefault("archived")),
+        };
+    }
+
+    /// <summary>Module ohne Eigentümer (Altbestand vor ADR 0011) — nur für die Administration.</summary>
+    public async Task<List<ModuleInfo>> ListUnownedModulesAsync()
+    {
+        var rows = await _db.QueryAsync($"{ModuleSelect} WHERE m.owner_user_id IS NULL AND m.scope = 'private' {ModuleGroupBy} ORDER BY m.name");
+        return rows.Select(MapModule).ToList();
+    }
+
+    /// <summary>
+    /// Weist ein unzugeordnetes Modul samt Karten einem Benutzer zu. Fehler: "not_found", "already_owned", "name_conflict".
+    /// </summary>
+    public async Task<string?> AssignUnownedModuleAsync(string moduleId, string newOwnerId)
+    {
+        if (!UserService.IsGuid(moduleId)) return "not_found";
+        var mod = await _db.QueryAsync("SELECT name, owner_user_id FROM modules WHERE id = @id AND scope = 'private'", new[] { ("id", (object?)moduleId) });
+        if (mod.Count == 0) return "not_found";
+        if (mod[0].GetValueOrDefault("owner_user_id") is { Length: > 0 }) return "already_owned";
+
+        var clash = await _db.QueryAsync("SELECT 1 FROM modules WHERE owner_user_id = @o AND name = @n",
+            new (string, object?)[] { ("o", newOwnerId), ("n", mod[0]["name"]) });
+        if (clash.Count > 0) return "name_conflict";
+
+        await _db.ExecuteAsync("UPDATE modules SET owner_user_id = @o WHERE id = @id AND owner_user_id IS NULL",
+            new (string, object?)[] { ("o", newOwnerId), ("id", moduleId) });
+        await _db.ExecuteAsync("UPDATE cards SET owner_user_id = @o WHERE module_id = @id",
+            new (string, object?)[] { ("o", newOwnerId), ("id", moduleId) });
+        return null;
+    }
+
     // ─── Quiz-Ergebnisse ────────────────────────────────────────────────────
 
     public Task SaveQuizResultAsync(QuizResultRecord r) => _db.ExecuteAsync("""
-        INSERT INTO quiz_results (id, module_id, card_id, user_sub, category, score, max_score, grade, feedback, answers_json, stats_json, completed_at)
-        VALUES (@id, @module_id, @card_id, @user_sub, @category, @score, @max_score, @grade, @feedback, @answers_json, @stats_json, @completed_at)
+        INSERT INTO quiz_results (id, module_id, card_id, user_sub, category, score, max_score, grade, feedback, answers_json, stats_json, context, completed_at)
+        VALUES (@id, @module_id, @card_id, @user_sub, @category, @score, @max_score, @grade, @feedback, @answers_json, @stats_json, @context, @completed_at)
         """, new (string, object?)[]
     {
         ("id", r.Id), ("module_id", r.ModuleId), ("card_id", string.IsNullOrWhiteSpace(r.CardId) ? null : r.CardId), ("user_sub", r.UserSub), ("category", r.Category),
         ("score", r.Score), ("max_score", r.MaxScore), ("grade", r.Grade), ("feedback", r.Feedback),
-        ("answers_json", r.AnswersJson), ("stats_json", r.StatsJson), ("completed_at", r.CompletedAt),
+        ("answers_json", r.AnswersJson), ("stats_json", r.StatsJson), ("context", r.Context), ("completed_at", r.CompletedAt),
     });
 
     public async Task<List<QuizResultRecord>> QuizHistoryAsync(string userSub, string? moduleId = null, string? cardId = null, int limit = 50)
     {
+        if ((!string.IsNullOrEmpty(moduleId) && !UserService.IsGuid(moduleId)) || (!string.IsNullOrEmpty(cardId) && !UserService.IsGuid(cardId)))
+            return new();
         var sql = "SELECT * FROM quiz_results WHERE user_sub = @u";
         var args = new List<(string, object?)> { ("u", userSub) };
         if (!string.IsNullOrEmpty(moduleId)) { sql += " AND module_id = @m"; args.Add(("m", moduleId)); }
@@ -285,7 +368,7 @@ public class CardRepository
     }
 
     public Task<int> DeleteQuizResultAsync(string userSub, string quizResultId) =>
-        _db.ExecuteAsync("""
+        !UserService.IsGuid(quizResultId) ? Task.FromResult(0) : _db.ExecuteAsync("""
             DELETE FROM quiz_results
             WHERE id = @id AND user_sub = @user_sub
             """, new (string, object?)[]
@@ -314,6 +397,7 @@ public class CardRepository
 
     public async Task<UserCardState?> GetUserCardStateAsync(string userSub, string cardId)
     {
+        if (!UserService.IsGuid(cardId)) return null;
         var rows = await _db.QueryAsync("""
             SELECT user_sub, card_id, is_checked, marked_review, updated_at
             FROM user_card_states
@@ -324,6 +408,7 @@ public class CardRepository
 
     public async Task<Dictionary<string, UserCardState>> GetUserCardStatesAsync(string userSub, string moduleId)
     {
+        if (!UserService.IsGuid(moduleId)) return new(StringComparer.OrdinalIgnoreCase);
         var rows = await _db.QueryAsync("""
             SELECT s.user_sub, s.card_id, s.is_checked, s.marked_review, s.updated_at
             FROM user_card_states s
@@ -347,7 +432,7 @@ public class CardRepository
 
     public async Task<List<Card>> ListCheckedCardsAsync(string moduleId, string? category, string userSub)
     {
-        var allCards = await ListCardsAsync(moduleId, category, archived: false);
+        var allCards = await ListReadableCardsAsync(userSub, moduleId, category);
         var states = await GetUserCardStatesAsync(userSub, moduleId);
         return allCards.Where(c => states.TryGetValue(c.Id, out var s) && s.IsChecked).ToList();
     }
@@ -369,6 +454,7 @@ public class CardRepository
 
     public async Task<List<ChatHistoryEntry>> GetChatHistoryAsync(string userSub, string cardId, int limit = 50)
     {
+        if (!UserService.IsGuid(cardId)) return new();
         var rows = await _db.QueryAsync($"""
             SELECT id, user_sub, card_id, original_question, normalized_question, assistant_answer, created_at
             FROM chat_history
@@ -388,6 +474,15 @@ public class CardRepository
         Description = r.GetValueOrDefault("description") ?? "",
         Icon = r.GetValueOrDefault("icon") ?? "📚",
         Color = r.GetValueOrDefault("color") ?? "#2AA79B",
+        OwnerUserId = r.GetValueOrDefault("owner_user_id"),
+        Scope = r.GetValueOrDefault("scope") ?? "private",
+        PublicationId = r.GetValueOrDefault("publication_id"),
+        GlobalVersion = r.GetValueOrDefault("global_version") is { Length: > 0 } gv ? DbValue.ToInt(gv) : null,
+        GlobalStatus = r.GetValueOrDefault("global_status"),
+        SourceModuleId = r.GetValueOrDefault("source_module_id"),
+        SourceOwnerUserId = r.GetValueOrDefault("source_owner_user_id"),
+        SourceOwnerName = r.GetValueOrDefault("source_owner_name"),
+        PublishedAt = r.GetValueOrDefault("published_at") is { Length: > 0 } pa ? DbValue.ToDateTime(pa) : null,
         CreatedAt = DbValue.ToDateTime(r.GetValueOrDefault("created_at")),
         UpdatedAt = DbValue.ToDateTime(r.GetValueOrDefault("updated_at")),
         CardCount = DbValue.ToInt(r.GetValueOrDefault("card_count")),
@@ -398,6 +493,7 @@ public class CardRepository
     {
         Id = r.GetValueOrDefault("id") ?? "",
         ModuleId = r.GetValueOrDefault("module_id") ?? "",
+        OwnerUserId = r.GetValueOrDefault("owner_user_id"),
         Category = r.GetValueOrDefault("category") ?? "",
         Term = r.GetValueOrDefault("term") ?? "",
         Question = r.GetValueOrDefault("question") ?? "",
@@ -430,6 +526,7 @@ public class CardRepository
         Feedback = r.GetValueOrDefault("feedback") ?? "",
         AnswersJson = r.GetValueOrDefault("answers_json") ?? "[]",
         StatsJson = r.GetValueOrDefault("stats_json") ?? "{}",
+        Context = r.GetValueOrDefault("context") ?? "private",
         CompletedAt = DbValue.ToDateTime(r.GetValueOrDefault("completed_at")),
     };
 
@@ -455,7 +552,7 @@ public class CardRepository
 
     private static (string, object?)[] CardArgs(Card c) => new (string, object?)[]
     {
-        ("id", c.Id), ("module_id", c.ModuleId), ("category", c.Category), ("term", c.Term),
+        ("id", c.Id), ("module_id", c.ModuleId), ("owner_user_id", c.OwnerUserId), ("category", c.Category), ("term", c.Term),
         ("question", c.Question), ("definition", c.Definition), ("how_it_works", c.HowItWorks),
         ("context", c.Context), ("key_fact", c.KeyFact), ("reference_answer", c.ReferenceAnswer),
         ("chat_prompt", c.ChatPrompt), ("official_sources_json", JsonSerializer.Serialize(c.OfficialSources, AppJson.Options)),

@@ -10,6 +10,24 @@ public class ModuleInfo
     public string Description { get; set; } = "";
     public string Icon { get; set; } = "📚";
     public string Color { get; set; } = "#2AA79B";
+    /// <summary>Eigentümer (interne Benutzer-ID); null = unzugeordneter Altbestand (nur für Administratoren sichtbar) oder globales Modul.</summary>
+    public string? OwnerUserId { get; set; }
+    /// <summary>"private" (Eigentum eines Benutzers) oder "global" (vom Administrator veröffentlichte Version, ADR 0015).</summary>
+    public string Scope { get; set; } = "private";
+    /// <summary>Stabile Identität einer globalen Veröffentlichung über alle ihre Versionen hinweg.</summary>
+    public string? PublicationId { get; set; }
+    public int? GlobalVersion { get; set; }
+    /// <summary>"staged" (eingereicht, nicht lernbar), "active", "superseded" (durch neuere Version ersetzt) oder "deactivated".</summary>
+    public string? GlobalStatus { get; set; }
+    public string? SourceModuleId { get; set; }
+    public string? SourceOwnerUserId { get; set; }
+    public string? SourceOwnerName { get; set; }
+    public DateTime? PublishedAt { get; set; }
+    /// <summary>Kontext aus Sicht des anfragenden Benutzers: "private", "shared" oder "global" (nicht gespeichert).</summary>
+    public string Context { get; set; } = "private";
+    /// <summary>Anzeigename des Eigentümers bzw. Herausgebers (bei "shared"/"global"; nicht gespeichert).</summary>
+    public string OwnerName { get; set; } = "";
+    public bool IsGlobal => Scope == "global";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public int CardCount { get; set; }
@@ -21,6 +39,8 @@ public class Card
 {
     public string Id { get; set; } = Guid.NewGuid().ToString();
     public string ModuleId { get; set; } = "";
+    /// <summary>Eigentümer (interne Benutzer-ID); entspricht immer dem Eigentümer des Moduls.</summary>
+    public string? OwnerUserId { get; set; }
     public string Category { get; set; } = "";
     public string Term { get; set; } = "";
     public string Question { get; set; } = "";
@@ -61,6 +81,8 @@ public class QuizResultRecord
     public string Feedback { get; set; } = "";
     public string AnswersJson { get; set; } = "[]";
     public string StatsJson { get; set; } = "{}";
+    /// <summary>Lernkontext des Ergebnisses: "private", "shared" oder "global" (ADR 0015).</summary>
+    public string Context { get; set; } = "private";
     public DateTime CompletedAt { get; set; } = DateTime.UtcNow;
 }
 

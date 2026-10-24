@@ -1,0 +1,193 @@
+@page "/admin"
+@attribute [Authorize(Roles = Roles.Admin)]
+@rendermode InteractiveServer
+@inject UserService Users
+@inject CardRepository Repo
+@inject AuthenticationStateProvider AuthState
+
+<PageTitle>Administration — LearnCards</PageTitle>
+
+<div class="container">
+    <div class="page-head">
+        <div>
+            <h1>Administration</h1>
+            <p class="muted">Benutzer, Rollen und unzugeordneter Altbestand. Über Entra-ID-App-Rollen vergebene Rollen (z. B. Admin.All) werden bei der nächsten Anmeldung wieder gesetzt; manuell vergebene bleiben bestehen.</p>
+        </div>
+        <div class="page-head-actions">
+            <a class="btn btn-ghost" href="/profile">← Mein Profil</a>
+        </div>
+    </div>
+
+    @if (_message is not null)
+    {
+        <div class="alert @(_messageOk ? "alert-ok" : "alert-error")" role="status">@_message</div>
+    }
+
+    @if (!_ready)
+    {
+        <p class="muted">Wird geladen …</p>
+    }
+    else
+    {
+        <div class="card panel">
+            <h2 class="panel-title">Benutzer</h2>
+            <table class="table">
+                <thead><tr><th>Name</th><th>E-Mail</th><th>Rollen</th><th>Status</th><th>Aktionen</th></tr></thead>
+                <tbody>
+                    @foreach (var u in _users)
+                    {
+                        <tr>
+                            <td>@u.DisplayName<br /><small class="muted"><code>@u.Id</code></small></td>
+                            <td>@u.Email</td>
+                            <td>
+                                @foreach (var r in u.Roles) { <span class="badge badge-@r">@r</span> }
+                            </td>
+                            <td>@(u.IsActive ? "aktiv" : "gesperrt")</td>
+                            <td class="actions">
+                                <button class="btn btn-ghost btn-sm" @onclick="() => ToggleRole(u, Roles.Admin)">Admin @(u.IsAdmin ? "entziehen" : "vergeben")</button>
+                                <button class="btn btn-ghost btn-sm" @onclick="() => ToggleRole(u, Roles.Auditor)">Auditor @(u.IsAuditor ? "entziehen" : "vergeben")</button>
+                                <button class="btn btn-ghost btn-sm" @onclick="() => ToggleStatus(u)">@(u.IsActive ? "Sperren" : "Entsperren")</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card panel">
+            <h2 class="panel-title">Unzugeordnete Module (Altbestand)</h2>
+            <p class="muted">Diese Module stammen aus der Zeit vor der Mehrbenutzerfähigkeit und haben keinen Eigentümer.
+                Sie sind für normale Benutzer unsichtbar, bis du sie einem Benutzer zuweist. Es erfolgt keine automatische Zuordnung.</p>
+            @if (_unowned.Count == 0)
+            {
+                <p>Keine unzugeordneten Module vorhanden.</p>
+            }
+            else
+            {
+                <table class="table">
+                    <thead><tr><th>Modul</th><th>Karten</th><th>Zuweisen an</th></tr></thead>
+                    <tbody>
+                        @foreach (var m in _unowned)
+                        {
+                            <tr>
+                                <td>@m.Icon @m.Name</td>
+                                <td>@m.CardCount</td>
+                                <td class="actions">
+                                    <select class="input" @onchange="e => _assignTargets[m.Id] = e.Value?.ToString() ?? string.Empty">
+                                        <option value="">— Benutzer wählen —</option>
+                                        @foreach (var u in _users.Where(x => x.IsActive))
+                                        {
+                                            <option value="@u.Id">@u.DisplayName (@u.Email)</option>
+                                        }
+                                    </select>
+                                    <button class="btn btn-primary btn-sm" @onclick="() => Assign(m.Id)">Zuweisen</button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+
+        <div class="card panel">
+            <h2 class="panel-title">Protokoll (letzte 25 Aktionen)</h2>
+            <table class="table">
+                <thead><tr><th>Zeit</th><th>Aktion</th><th>Ziel</th><th>Detail</th></tr></thead>
+                <tbody>
+                    @foreach (var a in _audit)
+                    {
+                        <tr>
+                            <td>@a.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                            <td>@a.Action</td>
+                            <td><small><code>@a.Target</code></small></td>
+                            <td>@a.Detail</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@code {
+    private string _actorId = "";
+    private bool _ready;
+    private List<AppUser> _users = new();
+    private List<ModuleInfo> _unowned = new();
+    private List<AuditEntry> _audit = new();
+    private readonly Dictionary<string, string> _assignTargets = new();
+    private string? _message;
+    private bool _messageOk;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _actorId = auth.User.GetUserId() ?? throw new UnauthorizedAccessException();
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        try
+        {
+            // Serverseitige Rollenprüfung gegen die DB (nicht nur das Seitenattribut).
+            await Users.RequireRoleAsync(_actorId, Roles.Admin);
+            _users = await Users.ListAsync();
+            _unowned = await Repo.ListUnownedModulesAsync();
+            _audit = await Users.ListAuditAsync(_actorId, 25);
+            _ready = true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            _ready = false;
+            Fail("Administratorrechte erforderlich.");
+        }
+    }
+
+    private Task ToggleRole(AppUser u, string role) => Run(async () =>
+    {
+        var roles = u.Roles.ToHashSet();
+        if (!roles.Remove(role)) roles.Add(role);
+        await Users.SetRolesAsync(_actorId, u.Id, roles);
+        return "Rollen aktualisiert.";
+    });
+
+    private Task ToggleStatus(AppUser u) => Run(async () =>
+    {
+        await Users.SetStatusAsync(_actorId, u.Id, !u.IsActive);
+        return u.IsActive ? "Benutzer gesperrt." : "Benutzer entsperrt.";
+    });
+
+    private Task Assign(string moduleId) => Run(async () =>
+    {
+        if (!_assignTargets.TryGetValue(moduleId, out var target) || string.IsNullOrEmpty(target))
+            throw new ArgumentException("Bitte zuerst einen Benutzer auswählen.");
+        await Users.RequireRoleAsync(_actorId, Roles.Admin);
+        var error = await Repo.AssignUnownedModuleAsync(moduleId, target);
+        if (error is not null)
+            throw new InvalidOperationException(error switch
+            {
+                "name_conflict" => "Der Benutzer besitzt bereits ein Modul mit diesem Namen.",
+                "already_owned" => "Das Modul hat bereits einen Eigentümer.",
+                _ => "Modul nicht gefunden.",
+            });
+        await Users.WriteAuditAsync(_actorId, "module.assign-owner", moduleId, $"owner={target}");
+        return "Modul zugewiesen.";
+    });
+
+    private async Task Run(Func<Task<string>> action)
+    {
+        try
+        {
+            Ok(await action());
+            await ReloadAsync();
+        }
+        catch (Exception e) when (e is ArgumentException or InvalidOperationException or KeyNotFoundException or UnauthorizedAccessException)
+        {
+            Fail(e.Message);
+        }
+    }
+
+    private void Ok(string m) { _message = "✅ " + m; _messageOk = true; }
+    private void Fail(string m) { _message = "❌ " + m; _messageOk = false; }
+}

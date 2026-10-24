@@ -80,6 +80,8 @@ az webapp config appsettings set --resource-group <RESOURCE_GROUP> --name learnc
   OIDC_WEB_SCOPE='openid profile email api://<CLIENT_ID>/access_as_user' \
   OPENAI_API_KEY='<OPENAI_KEY>' \
   MCP_API_KEY='<STARKER_ZUFALLSSTRING>' \
+  MCP_PUBLIC_URL='https://<oeffentliche-mcp-url>' \
+  ADMIN_SUBJECTS='<ENTRA_SUB_DES_ERSTEN_ADMINS>' \
   APP_DOMAIN=learncards-app.azurewebsites.net \
   ASPNETCORE_FORWARDEDHEADERS_ENABLED=true \
   DATA_PROTECTION_DIR=/home/data/keys
@@ -93,6 +95,10 @@ Wichtig:
 - **`OIDC_ISSUER`/`OIDC_CLIENT_ID`/…** — dieselbe Entra-ID-App-Registrierung wie lokal, ergänzt um
   die Produktions-Redirect-URI `https://learncards-app.azurewebsites.net/auth/callback` in der
   App-Registrierung.
+- **`AUTH_MODE=oidc`** — in Produktion immer explizit setzen; `auto` würde bei unvollständiger OIDC-Konfiguration auf den Dev-Login (Administrator ohne Anmeldung) zurückfallen ([Prüfbericht F1](reviews/2026-10-24-mehrbenutzer-pruefbericht.md)).
+- **`ADMIN_SUBJECTS`** — Entra-`sub` (nicht E-Mail) des ersten Administrators; weitere Rollen über die App-Rolle `Admin.All` in Entra ([ADR 0012](adr/0012-rollen-aus-entra-app-roles.md), optional `OIDC_ROLE_MAP`).
+  Bestehende Module/Karten aus der Zeit vor der Mehrbenutzerfähigkeit sind unzugeordnet und werden in `/admin` einem Benutzer zugewiesen ([ADR 0011](adr/0011-mehrbenutzerarchitektur.md)).
+- **`MCP_PUBLIC_URL`** — öffentliche URL des MCP-Servers; nur dorthin darf die OAuth-Anmeldung zurückleiten ([ADR 0013](adr/0013-mcp-benutzergebundene-anmeldung.md)). Optional `MCP_TOKEN_DAYS`.
 - **`ASPNETCORE_FORWARDEDHEADERS_ENABLED`** — App Service terminiert TLS vor der App; die App
   muss `X-Forwarded-Proto` auswerten, damit OIDC-Redirect-URIs korrekt auf `https://` lauten
   (bereits in `Program.cs` über `UseForwardedHeaders` vorbereitet).
@@ -114,4 +120,5 @@ Service aktiv) beibehalten, damit ein Client während seiner Sitzung an derselbe
 
 Der MCP-Server läuft nicht in Azure — er ist ein lokaler stdio-Prozess, den Claude Desktop o. ä.
 auf dem Rechner des Nutzers startet und der über `LEARNCARDS_API_URL=https://learncards-app.azurewebsites.net/api`
-sowie den produktiven `MCP_API_KEY` gegen die Azure Web App spricht.
+im Namen **des Benutzers** gegen die Azure Web App spricht: dazu unter `/profile` ein persönliches Token erzeugen und als `LEARNCARDS_MCP_TOKEN` setzen.
+Der `MCP_API_KEY` ist nur ein Dienstschlüssel (OAuth-Code-Tausch) und gewährt keinen Datenzugriff. Ein als HTTP-Dienst betriebener MCP-Server meldet Benutzer per OAuth an (`LEARNCARDS_WEB_PUBLIC_URL` = öffentliche Web-URL).

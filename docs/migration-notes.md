@@ -13,7 +13,7 @@ Datenmodell, Karten-JSON-Format und API-Routen sind bewusst kompatibel gehalten.
   JSON-Feldnamen (snake_case)
 - MCP-Tools (`add_card`, `import_cards`, `list_modules`, `list_cards`, `archive_card`,
   `restore_card`) mit identischen Namen/Schemas
-- Grundidee der Auth: OIDC-geschützte API + separater `X-MCP-Key` für MCP-Zugriff
+- Grundidee der Auth: OIDC-geschützte API (seit ADR 0011–0013: benutzergebundene MCP-Tokens statt gemeinsamem `X-MCP-Key`-Zugriff)
 
 ## Was sich geändert hat
 
@@ -28,6 +28,13 @@ Datenmodell, Karten-JSON-Format und API-Routen sind bewusst kompatibel gehalten.
 | MCP-Server | Python (`mcp`-Paket), separater Prozess | .NET-Konsolenanwendung, eigene stdio-JSON-RPC-Implementierung |
 | Reverse Proxy | nginx zwingend für Full-Stack | nginx optional (nur für TLS-Terminierung im Docker-Betrieb) |
 
+## Weiterentwicklung gegenüber der Python-Version
+
+Seit der Portierung ist die Lösung **mehrbenutzerfähig**: Module und Karten gehören jetzt einem Benutzer (in der Python-Version waren sie global), es gibt Rollen, ein Profil und benutzergebundene MCP-Zugänge
+([ADR 0011](adr/0011-mehrbenutzerarchitektur.md), [0012](adr/0012-rollen-aus-entra-app-roles.md), [0013](adr/0013-mcp-benutzergebundene-anmeldung.md)).
+Bei der Datenübernahme aus der Python-Version entsteht daher **unzugeordneter Altbestand**, den ein Administrator unter `/admin` einem Benutzer zuweist; das Schema ist nicht mehr identisch
+(siehe [database-schema.md](database-schema.md)).
+
 ## Warum keine NuGet-Pakete?
 
 Siehe [architecture.md](architecture.md#warum-ohne-nuget-pakete). Kurzfassung: Damit Build und
@@ -37,7 +44,7 @@ EF Core/Npgsql/das offizielle OpenAI-SDK ohne Änderungen an API oder UI möglic
 
 ## Datenmigration von PostgreSQL (Python-Version) zu dieser Lösung
 
-Das Schema ist identisch (`modules`, `cards`, `quiz_results`), daher genügt ein Dump/Restore:
+Die Tabellen `modules`, `cards`, `quiz_results` stimmen in den Kernspalten überein; beim ersten Start migriert die Anwendung das Schema (neue Besitz-Spalten, neue Tabellen), daher genügt ein Dump/Restore:
 
 ```bash
 pg_dump --data-only --table=modules --table=cards --table=quiz_results \
@@ -47,4 +54,6 @@ psql -h <neuer-host> -U learncards learncards < data.sql
 
 Alternativ: Karten über `GET /api/cards/` aus der alten API exportieren und über
 `POST /api/import/cards` (bzw. das MCP-Tool `import_cards`) in die neue Lösung importieren —
-das Karten-JSON-Format ist unverändert kompatibel.
+das Karten-JSON-Format ist unverändert kompatibel (die importierten Karten gehören dem importierenden Benutzer).
+
+Hinweis: Nach einem Restore sind `modules`/`cards` ohne Eigentümer — Zuordnung durch einen Administrator unter `/admin`.

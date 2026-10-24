@@ -622,3 +622,19 @@ kbd {
   .module-meta { flex-wrap: wrap; }
   .card-term, .card-question { max-width: none; }
 }
+
+/* ─── Profil / Administration (ADR 0011) ─────────────────────────────── */
+.table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+.table th, .table td { text-align: left; padding: .55rem .6rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+.table th { color: var(--ink-soft); font-weight: 600; }
+.table .actions { display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; }
+.badge { display: inline-block; padding: .15rem .6rem; margin: 0 .3rem .3rem 0; border-radius: 999px; font-size: .78rem; border: 1px solid var(--border); color: var(--ink-soft); }
+.badge-admin { border-color: var(--danger); color: var(--danger); }
+.badge-auditor { border-color: var(--warn); color: var(--warn); }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: .35rem 1.2rem; margin: 1rem 0 0; }
+.kv dt { color: var(--ink-soft); }
+.kv dd { margin: 0; word-break: break-all; }
+.plain-list { list-style: none; padding: 0; margin: .4rem 0 0; }
+a.user-chip { text-decoration: none; }
+
+.container.narrow { max-width: 42rem; }

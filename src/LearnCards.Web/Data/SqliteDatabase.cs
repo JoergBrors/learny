@@ -40,6 +40,8 @@ public sealed class SqliteDatabase : IDatabase
             EnsureColumn("cards", "quiz_json", "TEXT NOT NULL DEFAULT '[]'");
             EnsureColumn("quiz_results", "card_id", "TEXT NULL");
             EnsureColumn("quiz_results", "stats_json", "TEXT NOT NULL DEFAULT '{}'");
+            MigrateOwnership();
+            MigrateSharing();
         }
         finally { _gate.Release(); }
     }
@@ -101,6 +103,65 @@ public sealed class SqliteDatabase : IDatabase
 
     private void ExecRaw(string sql) => Run(sql, null, wantRows: false);
 
+    /// <summary>
+    /// ADR 0011: Besitz-Spalten ergänzen, modules neu aufbauen (SQLite kann das inline-UNIQUE auf name nicht
+    /// per ALTER entfernen) und Besitz-Indizes anlegen. Idempotent; bestehende Zeilen behalten
+    /// owner_user_id = NULL ("unzugeordnet").
+    /// </summary>
+    private void MigrateOwnership()
+    {
+        EnsureColumn("modules", "owner_user_id", "TEXT NULL REFERENCES users(id) ON DELETE SET NULL");
+        EnsureColumn("cards", "owner_user_id", "TEXT NULL REFERENCES users(id) ON DELETE SET NULL");
+
+        var ddl = Run("SELECT sql FROM sqlite_master WHERE type='table' AND name='modules'", null, wantRows: true)
+            .Rows.FirstOrDefault()?.GetValueOrDefault("sql") ?? "";
+        if (ddl.Contains("UNIQUE", StringComparison.OrdinalIgnoreCase))
+        {
+            // Offizielles 12-Schritte-Verfahren: FK-Prüfung aus, Tabelle neu aufbauen, wieder ein.
+            ExecRaw("PRAGMA foreign_keys=OFF");
+            try
+            {
+                ExecRaw("BEGIN");
+                try
+                {
+                    ExecRaw("DROP TABLE IF EXISTS modules_rebuild");
+                    ExecRaw(Schema.ModulesTable(ProviderName, "modules_rebuild"));
+                    ExecRaw("""
+                        INSERT INTO modules_rebuild (id, name, description, icon, color, owner_user_id, created_at, updated_at)
+                        SELECT id, name, description, icon, color, owner_user_id, created_at, updated_at FROM modules
+                        """);
+                    ExecRaw("DROP TABLE modules");
+                    ExecRaw("ALTER TABLE modules_rebuild RENAME TO modules");
+                    ExecRaw("COMMIT");
+                }
+                catch
+                {
+                    ExecRaw("ROLLBACK");
+                    throw;
+                }
+            }
+            finally { ExecRaw("PRAGMA foreign_keys=ON"); }
+        }
+
+        foreach (var stmt in Schema.OwnershipIndexStatements()) ExecRaw(stmt);
+    }
+
+    /// <summary>ADR 0015: Freigabe-/Veröffentlichungsspalten an modules, Ergebniskontext an quiz_results. Idempotent.</summary>
+    private void MigrateSharing()
+    {
+        EnsureColumn("modules", "scope", "TEXT NOT NULL DEFAULT 'private'");
+        EnsureColumn("modules", "publication_id", "TEXT NULL");
+        EnsureColumn("modules", "global_version", "INTEGER NULL");
+        EnsureColumn("modules", "global_status", "TEXT NULL");
+        EnsureColumn("modules", "source_module_id", "TEXT NULL REFERENCES modules(id) ON DELETE SET NULL");
+        EnsureColumn("modules", "source_owner_user_id", "TEXT NULL REFERENCES users(id) ON DELETE SET NULL");
+        EnsureColumn("modules", "source_owner_name", "TEXT NULL");
+        EnsureColumn("modules", "published_at", "TEXT NULL");
+        EnsureColumn("modules", "published_by", "TEXT NULL");
+        EnsureColumn("quiz_results", "context", "TEXT NOT NULL DEFAULT 'private'");
+        foreach (var stmt in Schema.SharingIndexStatements()) ExecRaw(stmt);
+    }
+
     private void EnsureColumn(string table, string column, string definition)
     {
         var rows = Run($"PRAGMA table_info({table})", null, wantRows: true).Rows;
@@ -157,7 +218,8 @@ public sealed class SqliteDatabase : IDatabase
             {
                 if (name != Lib) return IntPtr.Zero;
                 string[] candidates = OperatingSystem.IsWindows()
-                    ? new[] { "sqlite3.dll", "winsqlite3.dll", "e_sqlite3.dll" }
+                    // winsqlite3.dll (Windows-Systembibliothek) zuerst: ein "sqlite3.dll" im PATH (z. B. von AWS CLI) ist oft inkompatibel.
+                    ? new[] { "winsqlite3.dll", "sqlite3.dll", "e_sqlite3.dll" }
                     : OperatingSystem.IsMacOS()
                         ? new[] { "libsqlite3.dylib", "/usr/lib/libsqlite3.dylib" }
                         : new[] { "libsqlite3.so.0", "libsqlite3.so", "/usr/lib/x86_64-linux-gnu/libsqlite3.so.0" };

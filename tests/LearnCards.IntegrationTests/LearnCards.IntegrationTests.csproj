@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Paketfreie Integrationstests (ADR 0002): startet LearnCards.Web als Prozess mit temporärer SQLite-Datenbank
+       und prüft Mehrbenutzer-Isolation und Rollen über HTTP. Start: dotnet run (siehe docs) -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+</Project>

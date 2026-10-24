@@ -1,4 +1,5 @@
 @inject QuizService Quiz
+@inject AuthenticationStateProvider AuthState
 
 <div class="modal-backdrop" @onclick="CloseIfIdle">
     <div class="modal" role="dialog" aria-modal="true" aria-label="Seitenquiz" @onclick:stopPropagation>
@@ -47,7 +48,8 @@
 
         try
         {
-            _questions = await Quiz.GetCardQuizAsync(CardId);
+            var auth = await AuthState.GetAuthenticationStateAsync();
+            _questions = await Quiz.GetCardQuizAsync(CardId, auth.User.GetUserId() ?? throw new UnauthorizedAccessException());
             if (_questions.Count == 0)
                 _error = "Für diese Karte stehen aktuell keine Seiten-Quizfragen zur Verfügung.";
         }

@@ -161,14 +161,14 @@
     {
         _loading = true;
         var auth = await AuthState.GetAuthenticationStateAsync();
-        _userSub = auth.User.FindFirst("sub")?.Value ?? "";
-        _module = await Repo.GetModuleAsync(ModuleId);
+        _userSub = auth.User.GetUserId() ?? throw new UnauthorizedAccessException();
+        _module = await Repo.GetModuleAsync(ModuleId, _userSub);
         if (_module is not null)
         {
-            _categories = await Repo.ListCategoriesAsync(ModuleId);
-            _cards = await Repo.ListCardsAsync(ModuleId, _category, archived: false);
-            _slideCards = await Repo.ListSlideCardsAsync(ModuleId, _category);
-            _archivedCards = await Repo.ListCardsAsync(ModuleId, null, archived: true);
+            _categories = await Repo.ListCategoriesAsync(_userSub, ModuleId);
+            _cards = await Repo.ListCardsAsync(_userSub, ModuleId, _category, archived: false);
+            _slideCards = await Repo.ListSlideCardsAsync(_userSub, ModuleId, _category);
+            _archivedCards = await Repo.ListCardsAsync(_userSub, ModuleId, null, archived: true);
             _archivedCount = _archivedCards.Count;
             _hasSlideMode = _slideCards.Count > 0;
             _slideMax = _slideCards.Count == 0 ? 0 : _slideCards.Max(c => c.SlideNumber ?? 0);
@@ -233,13 +233,13 @@
 
     private async Task ArchiveAsync(string id)
     {
-        await Repo.SetArchivedAsync(id, true);
+        await Repo.SetArchivedAsync(id, true, _userSub);
         await ReloadAsync();
     }
 
     private async Task RestoreAsync(string id)
     {
-        await Repo.SetArchivedAsync(id, false);
+        await Repo.SetArchivedAsync(id, false, _userSub);
         await ReloadAsync();
     }
 

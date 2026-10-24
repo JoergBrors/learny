@@ -1,13 +1,23 @@
 {
+  // Start über das Debug-Dropdown. Empfohlen:
+  //   "App (SQLite)"             Web + MCP-Server, lokale SQLite-Datei, kein Docker nötig
+  //   "App (PostgreSQL Docker)"  Web + MCP-Server gegen PostgreSQL im Docker-Container (docker-compose.dev.yml, Port 55432)
+  // Die Compounds starten die Datenbank (falls nötig) und bauen vorher. Details: docs/local-development.md
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "LearnCards.Web (dotnet run)",
+      "name": "Web (SQLite)",
       "type": "coreclr",
       "request": "launch",
       "program": "${workspaceFolder}/src/LearnCards.Web/bin/Debug/net10.0/LearnCards.Web.dll",
       "cwd": "${workspaceFolder}/src/LearnCards.Web",
-      "env": { "ASPNETCORE_ENVIRONMENT": "Development" },
+      "env": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "ASPNETCORE_URLS": "http://localhost:5000",
+        "DB_PROVIDER": "sqlite",
+        "MCP_API_KEY": "change-me-mcp-key",
+        "MCP_PUBLIC_URL": "http://127.0.0.1:8787"
+      },
       "serverReadyAction": {
         "action": "openExternally",
         "pattern": "Now listening on:\\s+(https?://\\S+)"
@@ -15,7 +25,32 @@
       "console": "internalConsole"
     },
     {
-      "name": "LearnCards.McpServer (lokal)",
+      "name": "Web (PostgreSQL Docker)",
+      "type": "coreclr",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/LearnCards.Web/bin/Debug/net10.0/LearnCards.Web.dll",
+      "cwd": "${workspaceFolder}/src/LearnCards.Web",
+      "env": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "ASPNETCORE_URLS": "http://localhost:5000",
+        "DB_PROVIDER": "postgres",
+        "POSTGRES_HOST": "127.0.0.1",
+        "POSTGRES_PORT": "55432",
+        "POSTGRES_USER": "learncards",
+        "POSTGRES_PASSWORD": "learncards",
+        "POSTGRES_DB": "learncards",
+        "POSTGRES_SSLMODE": "disable",
+        "MCP_API_KEY": "change-me-mcp-key",
+        "MCP_PUBLIC_URL": "http://127.0.0.1:8787"
+      },
+      "serverReadyAction": {
+        "action": "openExternally",
+        "pattern": "Now listening on:\\s+(https?://\\S+)"
+      },
+      "console": "internalConsole"
+    },
+    {
+      "name": "MCP-Server (lokal)",
       "type": "coreclr",
       "request": "launch",
       "program": "${workspaceFolder}/src/LearnCards.McpServer/bin/Debug/net10.0/LearnCards.McpServer.dll",
@@ -26,24 +61,36 @@
       "console": "integratedTerminal"
     },
     {
-      "name": "MCP Health",
-      "type": "pwa-msedge",
+      "name": "MCP-Health im Browser",
+      "type": "msedge",
       "request": "launch",
       "url": "http://127.0.0.1:8787/health"
     }
   ],
   "compounds": [
     {
-      "name": "App",
-      "preLaunchTask": "build-app",
+      "name": "App (SQLite)",
+      "preLaunchTask": "build: app",
       "stopAll": true,
-      "configurations": ["LearnCards.Web (dotnet run)", "LearnCards.McpServer (lokal)"]
+      "configurations": ["Web (SQLite)", "MCP-Server (lokal)"]
     },
     {
-      "name": "App + MCP Health",
-      "preLaunchTask": "build-app",
+      "name": "App (PostgreSQL Docker)",
+      "preLaunchTask": "dev: postgres up + build",
       "stopAll": true,
-      "configurations": ["LearnCards.Web (dotnet run)", "LearnCards.McpServer (lokal)", "MCP Health"]
+      "configurations": ["Web (PostgreSQL Docker)", "MCP-Server (lokal)"]
+    },
+    {
+      "name": "App (SQLite) + MCP-Health",
+      "preLaunchTask": "build: app",
+      "stopAll": true,
+      "configurations": ["Web (SQLite)", "MCP-Server (lokal)", "MCP-Health im Browser"]
+    },
+    {
+      "name": "App (PostgreSQL Docker) + MCP-Health",
+      "preLaunchTask": "dev: postgres up + build",
+      "stopAll": true,
+      "configurations": ["Web (PostgreSQL Docker)", "MCP-Server (lokal)", "MCP-Health im Browser"]
     }
   ]
 }

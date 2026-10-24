@@ -1,36 +1,122 @@
 {
   "version": "2.0.0",
   "tasks": [
+    // ─── Build ──────────────────────────────────────────────────────────
     {
-      "label": "build-web",
+      "label": "build: web",
       "type": "process",
       "command": "dotnet",
       "args": ["build", "${workspaceFolder}/src/LearnCards.Web/LearnCards.Web.csproj"],
-      "problemMatcher": "$msCompile"
+      "problemMatcher": "$msCompile",
+      "group": "build"
     },
     {
-      "label": "build-mcp",
+      "label": "build: mcp",
       "type": "process",
       "command": "dotnet",
       "args": ["build", "${workspaceFolder}/src/LearnCards.McpServer/LearnCards.McpServer.csproj"],
-      "problemMatcher": "$msCompile"
+      "problemMatcher": "$msCompile",
+      "group": "build"
     },
     {
-      "label": "build-app",
+      "label": "build: app",
+      "dependsOn": ["build: web", "build: mcp"],
       "dependsOrder": "sequence",
-      "dependsOn": ["build-web", "build-mcp"],
+      "problemMatcher": [],
+      "group": { "kind": "build", "isDefault": true }
+    },
+
+    // ─── PostgreSQL im Docker für die Entwicklung (docker-compose.dev.yml) ───
+    {
+      "label": "dev: postgres up",
+      "type": "shell",
+      "command": "docker compose -f docker-compose.dev.yml up -d --wait",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "silent", "panel": "shared" }
+    },
+    {
+      "label": "dev: postgres up + build",
+      "dependsOn": ["dev: postgres up", "build: app"],
+      "dependsOrder": "sequence",
       "problemMatcher": []
     },
+    {
+      "label": "dev: postgres down",
+      "type": "shell",
+      "command": "docker compose -f docker-compose.dev.yml down",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "dev: postgres reset (Daten löschen)",
+      "type": "shell",
+      "command": "docker compose -f docker-compose.dev.yml down -v",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "dev: postgres psql",
+      "type": "shell",
+      "command": "docker compose -f docker-compose.dev.yml exec db psql -U learncards -d learncards",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": { "focus": true, "panel": "dedicated" }
+    },
+
+    // ─── Integrationstests (docs/testing.md) ────────────────────────────
+    {
+      "label": "test: integration (SQLite)",
+      "dependsOn": ["build: app"],
+      "type": "process",
+      "command": "dotnet",
+      "args": ["run", "--project", "${workspaceFolder}/tests/LearnCards.IntegrationTests", "--no-build"],
+      "problemMatcher": [],
+      "group": "test"
+    },
+    {
+      "label": "dev: postgres test database (neu anlegen)",
+      "dependsOn": ["dev: postgres up"],
+      "type": "shell",
+      "command": "docker compose -f docker-compose.dev.yml exec -T db psql -U learncards -d postgres -c \"DROP DATABASE IF EXISTS learncards_test WITH (FORCE)\" -c \"CREATE DATABASE learncards_test\"",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "test: integration (PostgreSQL Docker)",
+      "dependsOn": ["dev: postgres test database (neu anlegen)", "build: app"],
+      "dependsOrder": "sequence",
+      "type": "process",
+      "command": "dotnet",
+      "args": ["run", "--project", "${workspaceFolder}/tests/LearnCards.IntegrationTests", "--no-build"],
+      "options": {
+        "env": {
+          "TEST_DB_PROVIDER": "postgres",
+          "POSTGRES_HOST": "127.0.0.1",
+          "POSTGRES_PORT": "55432",
+          "POSTGRES_USER": "learncards",
+          "POSTGRES_PASSWORD": "learncards",
+          "POSTGRES_DB": "learncards_test",
+          "POSTGRES_SSLMODE": "disable"
+        }
+      },
+      "problemMatcher": [],
+      "group": "test"
+    },
+
+    // ─── Vollständiger Container-Betrieb (docker-compose.yml) ───────────
     {
       "label": "docker: full stack up",
       "type": "shell",
       "command": "docker compose up --build -d",
+      "options": { "cwd": "${workspaceFolder}" },
       "problemMatcher": []
     },
     {
       "label": "docker: full stack down",
       "type": "shell",
       "command": "docker compose down",
+      "options": { "cwd": "${workspaceFolder}" },
       "problemMatcher": []
     }
   ]

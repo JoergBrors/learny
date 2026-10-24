@@ -46,6 +46,24 @@ public class AppConfig
 
     // MCP
     public string McpApiKey { get; set; } = "";
+    /// <summary>
+    /// Öffentliche Basis-URLs des MCP-Servers (kommagetrennt, z. B. https://mcp.example.com). Nur Rückleitungen auf
+    /// {Basis}/oauth/callback sind für die MCP-Zustimmung erlaubt (Schutz vor offenen Weiterleitungen). ADR 0013.
+    /// Leer im Dev-Modus: http://127.0.0.1:8787 und http://localhost:8787.
+    /// </summary>
+    public List<string> McpPublicUrls { get; set; } = new();
+    /// <summary>Gültigkeit benutzergebundener MCP-Tokens aus der OAuth-Anmeldung in Tagen (Standard 30).</summary>
+    public int McpTokenDays { get; set; } = 30;
+
+    // Benutzer / Rollen
+    /// <summary>
+    /// Zuordnung von Entra-ID-App-Rollen (Claim "roles", Spalte "Value" der App role) zu internen Rollen
+    /// (OIDC_ROLE_MAP, z. B. "Admin.All=admin,Auditor=auditor"). Standard: "Admin.All=admin". "user" hat jeder Benutzer ohnehin.
+    /// </summary>
+    public Dictionary<string, string> RoleMap { get; set; } = new(StringComparer.OrdinalIgnoreCase) { ["Admin.All"] = "admin" };
+
+    /// <summary>IdP-Subjects (kommagetrennt), die beim Login die Rolle "admin" erhalten (Bootstrap).</summary>
+    public HashSet<string> AdminSubjects { get; set; } = new(StringComparer.Ordinal);
 
     public static AppConfig Load()
     {
@@ -66,7 +84,26 @@ public class AppConfig
             OpenAiModel = E("OPENAI_MODEL", "gpt-4o-mini"),
             OpenAiBaseUrl = E("OPENAI_BASE_URL", "https://api.openai.com/v1").TrimEnd('/'),
             McpApiKey = E("MCP_API_KEY"),
+            McpPublicUrls = E("MCP_PUBLIC_URL").Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(u => u.TrimEnd('/')).ToList(),
+            McpTokenDays = int.TryParse(E("MCP_TOKEN_DAYS"), out var mtd) ? Math.Clamp(mtd, 1, 365) : 30,
+            AdminSubjects = E("ADMIN_SUBJECTS").Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .ToHashSet(StringComparer.Ordinal),
         };
+
+        if (E("OIDC_ROLE_MAP") is { Length: > 0 } roleMap)
+        {
+            cfg.RoleMap = new(StringComparer.OrdinalIgnoreCase);
+            foreach (var pair in roleMap.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                var eq = pair.IndexOf('=');
+                if (eq <= 0) continue;
+                var external = pair[..eq].Trim();
+                var internalRole = pair[(eq + 1)..].Trim().ToLowerInvariant();
+                // "user" besitzt jeder; nur bekannte, privilegierte interne Rollen sind abbildbar
+                if (external.Length > 0 && internalRole is "admin" or "auditor") cfg.RoleMap[external] = internalRole;
+            }
+        }
 
         // ── Datenbank-Provider bestimmen ────────────────────────────────
         var provider = E("DB_PROVIDER", "auto").ToLowerInvariant();
@@ -101,6 +138,8 @@ public class AppConfig
                   && !cfg.OidcClientId.StartsWith("YOUR_", StringComparison.OrdinalIgnoreCase))
                     ? "oidc" : "dev",
         };
+        if (cfg.McpPublicUrls.Count == 0 && cfg.AuthMode == "dev")
+            cfg.McpPublicUrls = new() { "http://127.0.0.1:8787", "http://localhost:8787" };
         return cfg;
     }
 

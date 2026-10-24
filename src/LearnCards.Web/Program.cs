@@ -1,9 +1,11 @@
 using LearnCards.Web.Api;
 using LearnCards.Web.Auth;
 using LearnCards.Web.Components;
+using LearnCards.Web.Domain;
 using LearnCards.Web.Data;
 using LearnCards.Web.Infrastructure;
 using LearnCards.Web.Services;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -26,6 +28,8 @@ builder.Services.AddSingleton<OpenAiClient>();
 builder.Services.AddSingleton<QuizService>();
 builder.Services.AddSingleton<ChatService>();
 builder.Services.AddSingleton<OidcService>();
+builder.Services.AddSingleton<UserService>();
+builder.Services.AddSingleton<McpLinkService>();
 
 // DataProtection-Schlüssel persistieren (Login-Cookies überleben Neustarts; ./data auch als Docker-Volume)
 var keysDir = Path.GetFullPath(Environment.GetEnvironmentVariable("DATA_PROTECTION_DIR") ?? "data/keys");
@@ -44,6 +48,24 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         options.SlidingExpiration = true;
         options.ExpireTimeSpan = TimeSpan.FromHours(10);
         options.LoginPath = "/login";
+        // Bei jeder Anfrage: Benutzer existiert und ist aktiv; Rollen frisch aus der DB (nicht aus dem Cookie).
+        // Alte Cookies ohne "uid" (vor ADR 0011) werden abgelehnt → erneuter Login.
+        options.Events.OnValidatePrincipal = async ctx =>
+        {
+            var users = ctx.HttpContext.RequestServices.GetRequiredService<UserService>();
+            var user = await users.GetAsync(ctx.Principal.GetUserId());
+            if (user is null || !user.IsActive)
+            {
+                ctx.RejectPrincipal();
+                await ctx.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+                return;
+            }
+            if (ctx.Principal?.Identity is System.Security.Claims.ClaimsIdentity identity)
+            {
+                foreach (var old in identity.FindAll(System.Security.Claims.ClaimTypes.Role).ToList()) identity.RemoveClaim(old);
+                foreach (var role in user.Roles) identity.AddClaim(new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, role));
+            }
+        };
         options.Events.OnRedirectToLogin = ctx =>
         {
             // API-Aufrufe bekommen 401 statt HTML-Redirect

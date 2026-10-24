@@ -209,7 +209,7 @@
     protected override async Task OnParametersSetAsync()
     {
         var auth = await AuthState.GetAuthenticationStateAsync();
-        _userSub = auth.User.FindFirst("sub")?.Value ?? "unknown";
+        _userSub = auth.User.GetUserId() ?? throw new UnauthorizedAccessException();
         await LoadHistoryAsync();
     }
 

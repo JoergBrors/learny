@@ -51,6 +51,10 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
       MCP_API_KEY: ${MCP_API_KEY:-change-me-mcp-key}
+      MCP_PUBLIC_URL: ${MCP_PUBLIC_URL:-}
+      MCP_TOKEN_DAYS: ${MCP_TOKEN_DAYS:-30}
+      ADMIN_SUBJECTS: ${ADMIN_SUBJECTS:-}
+      OIDC_ROLE_MAP: ${OIDC_ROLE_MAP:-}
       APP_DOMAIN: ${APP_DOMAIN:-localhost}
       DEBUG: ${DEBUG:-false}
       ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"

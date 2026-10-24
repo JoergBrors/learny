@@ -51,6 +51,13 @@ public sealed class McpSettings
         if (!string.IsNullOrWhiteSpace(apiKey))
             UpstreamApi.ApiKey = apiKey;
 
+        if (Environment.GetEnvironmentVariable("LEARNCARDS_WEB_PUBLIC_URL") is { Length: > 0 } webUrl)
+            UpstreamApi.WebPublicUrl = webUrl;
+
+        // Persönliches Token des Benutzers für stdio (im Learny-Profil erzeugt)
+        if (Environment.GetEnvironmentVariable("LEARNCARDS_MCP_TOKEN") is { Length: > 0 } token)
+            UpstreamApi.Token = token.Trim();
+
         if (Environment.GetEnvironmentVariable("LEARNCARDS_MCP_HTTP_URLS") is { Length: > 0 } urls)
         {
             Transports.Http.Enabled = true;
@@ -73,6 +80,13 @@ public sealed class McpSettings
             : UpstreamApi.BaseUrl.TrimEnd('/');
 
         UpstreamApi.ApiKey ??= "";
+        UpstreamApi.Token ??= "";
+        // Öffentliche Basis-URL der Learny-Weboberfläche (Browser-Weiterleitung zur Anmeldung/Zustimmung). Standard: API-URL ohne "/api".
+        if (string.IsNullOrWhiteSpace(UpstreamApi.WebPublicUrl))
+            UpstreamApi.WebPublicUrl = UpstreamApi.BaseUrl.EndsWith("/api", StringComparison.OrdinalIgnoreCase)
+                ? UpstreamApi.BaseUrl[..^4]
+                : UpstreamApi.BaseUrl;
+        UpstreamApi.WebPublicUrl = UpstreamApi.WebPublicUrl.TrimEnd('/');
         Transports.Http.Urls = Transports.Http.Urls
             .Where(u => !string.IsNullOrWhiteSpace(u))
             .Select(u => u.Trim())
@@ -102,7 +116,12 @@ public sealed class McpSettings
 public sealed class UpstreamApiSettings
 {
     public string BaseUrl { get; set; } = "http://localhost:5000/api";
+    /// <summary>Dienstschlüssel (X-MCP-Key): nur für Code-Tausch und öffentliches Schema, kein Datenzugriff.</summary>
     public string ApiKey { get; set; } = "";
+    /// <summary>Persönliches Learny-Token für den stdio-Transport (Env LEARNCARDS_MCP_TOKEN).</summary>
+    public string Token { get; set; } = "";
+    /// <summary>Öffentliche URL der Learny-Weboberfläche für die Anmeldung (Env LEARNCARDS_WEB_PUBLIC_URL).</summary>
+    public string WebPublicUrl { get; set; } = "";
 }
 
 public sealed class McpTransportSettings
@@ -127,7 +146,9 @@ public sealed class ProprietaryOAuthSettings
     public bool Enabled { get; set; }
     public string Issuer { get; set; } = "learncards-mcp";
     public string Audience { get; set; } = "learncards-mcp";
+    /// <summary>Nicht mehr verwendet (ADR 0013: Tokens stellt Learny aus); bleibt aus Kompatibilität zu bestehenden mcpsettings.json lesbar.</summary>
     public string SigningKey { get; set; } = "";
+    /// <summary>Nicht mehr verwendet; die Gültigkeit bestimmt Learny (MCP_TOKEN_DAYS).</summary>
     public int TokenLifetimeMinutes { get; set; } = 60;
     public List<OAuthClientSettings> Clients { get; set; } = new();
 }
