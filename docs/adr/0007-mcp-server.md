@@ -2,7 +2,7 @@
 
 - **Status:** Akzeptiert
 - **Datum:** 2026-10-24
-- **Ergänzt durch:** [0013](0013-mcp-benutzergebundene-anmeldung.md) (Authentifizierung: benutzergebundene Tokens statt gemeinsamem Schlüssel; OAuth-Anmeldung über Learny)
+- **Ergänzt durch:** [0016](0016-bilder-in-lernkarten.md) (`add_card`/`import_cards` mit `images[]`, keine Bildlogik im MCP-Server), [0013](0013-mcp-benutzergebundene-anmeldung.md) (Authentifizierung: benutzergebundene Tokens statt gemeinsamem Schlüssel; OAuth-Anmeldung über Learny), [0015](0015-freigaben-globale-lernmodule.md) (`list_modules` mit `scope`)
 
 ## Kontext
 
@@ -15,8 +15,8 @@ KI-Clients (z. B. Claude Desktop) sollen Karten lesen, anlegen und importieren k
 - Transporte: `stdio` und/oder HTTP (`/mcp`), konfiguriert über `mcpsettings.json` (`McpSettings.cs`).
 - *(überholt durch [0013](0013-mcp-benutzergebundene-anmeldung.md): kein `client_credentials` mehr, Anmeldung bei Learny)* OAuth für HTTP-Clients in `ProprietaryOAuthService`
   inkl. `/.well-known/oauth-authorization-server` und `/oauth/token`.
-- Registrierte Tools (`McpProtocol.RegisterTool`): `get_import_schema`, `add_card`, `import_cards`,
-  `list_modules`, `list_cards`, `archive_card`, `restore_card`.
+- Registrierte Tools (`McpProtocol.RegisterTool`): `get_import_schema`, `whoami` (seit ADR 0013), `add_card`, `import_cards`,
+  `list_modules` (seit ADR 0015 mit `scope`), `list_cards`, `archive_card`, `restore_card`.
 > **Stand 2026-10-24:** Die Authentifizierung per gemeinsamem `X-MCP-Key` ist durch [ADR 0013](0013-mcp-benutzergebundene-anmeldung.md) ersetzt: Daten-Aufrufe laufen mit dem Token des Benutzers. Zusätzlich gibt es das Tool `whoami`.
 
 - Clients werden angewiesen, vor dem Import das Schema abzurufen und keine Felder zu erfinden.

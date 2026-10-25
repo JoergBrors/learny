@@ -21,6 +21,10 @@
                         {
                             <a class="btn btn-ghost btn-sm" href="/admin">Administration</a>
                         }
+                        else if (context.User.IsInRole(Roles.Auditor))
+                        {
+                            <a class="btn btn-ghost btn-sm" href="/admin">Globale Inhalte</a>
+                        }
                         <a class="user-chip" href="/profile" title="Mein Profil: @context.User.Identity?.Name">
                             @Initials(context.User.Identity?.Name)
                         </a>

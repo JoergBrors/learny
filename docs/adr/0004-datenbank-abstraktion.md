@@ -2,7 +2,7 @@
 
 - **Status:** Akzeptiert
 - **Datum:** 2026-10-24
-- **Ergänzt durch:** [0011](0011-mehrbenutzerarchitektur.md) (Besitzspalten, Migrationen), [0013](0013-mcp-benutzergebundene-anmeldung.md) (MCP-Tabellen)
+- **Ergänzt durch:** [0016](0016-bilder-in-lernkarten.md) (Spalte `cards.images_json`), [0011](0011-mehrbenutzerarchitektur.md) (Besitzspalten, Migrationen), [0013](0013-mcp-benutzergebundene-anmeldung.md) (MCP-Tabellen), [0015](0015-freigaben-globale-lernmodule.md) (Freigabe-/Veröffentlichungstabellen und -spalten)
 
 ## Kontext
 
@@ -14,7 +14,7 @@ Lokale Entwicklung soll ohne Docker laufen; Produktion (Docker, Azure) nutzt Pos
 - Werte werden **als Text** übertragen; `DbValue` (`ToText`, `ToBool`, `ToInt`, …) und `CardRepository` konvertieren.
 - Auswahl über `DB_PROVIDER` (`auto` → SQLite ohne `POSTGRES_HOST`, sonst PostgreSQL) in `AppConfig`.
 - Schema liegt in `Data/Schema.cs` (`CREATE TABLE/INDEX IF NOT EXISTS`) und wird beim Start angelegt.
-  Tabellen: `users`, `user_identities`, `user_roles`, `audit_log`, `mcp_links`, `mcp_link_codes`, `modules`, `cards`, `user_preferences`, `user_card_states`, `chat_history`, `quiz_results`
+  Tabellen: `users`, `user_identities`, `user_roles`, `audit_log`, `mcp_links`, `mcp_link_codes`, `module_shares`, `module_submissions`, `modules`, `cards`, `user_preferences`, `user_card_states`, `chat_history`, `quiz_results`
   (Details: [database-schema.md](../database-schema.md)).
 
 ## Konsequenzen

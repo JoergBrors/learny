@@ -5,6 +5,7 @@ using LearnCards.Web.Domain;
 using LearnCards.Web.Data;
 using LearnCards.Web.Infrastructure;
 using LearnCards.Web.Services;
+using LearnCards.Web.Services.ImageStorage;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
@@ -23,6 +24,11 @@ builder.Services.AddHttpClient();
 builder.Services.AddSingleton<IDatabase>(_ => cfg.DbProvider == DbProvider.Postgres
     ? new PostgresDatabase(cfg.Postgres)
     : new SqliteDatabase(cfg.SqlitePath));
+// Bildspeicher (ADR 0017): Registry (primärer Provider + weitere konfigurierte), Cache, Bilddienst
+builder.Services.AddSingleton<ImageStorageRegistry>();
+builder.Services.AddSingleton<IImageCache>(sp => ImageCacheFactory.Create(cfg.ImageStorage, out FileImageCache? _));
+builder.Services.AddSingleton<CardImageService>();
+builder.Services.AddSingleton<ImageMigrationService>();
 builder.Services.AddSingleton<CardRepository>();
 builder.Services.AddSingleton<OpenAiClient>();
 builder.Services.AddSingleton<QuizService>();
@@ -30,6 +36,7 @@ builder.Services.AddSingleton<ChatService>();
 builder.Services.AddSingleton<OidcService>();
 builder.Services.AddSingleton<UserService>();
 builder.Services.AddSingleton<McpLinkService>();
+builder.Services.AddSingleton<SharingService>();
 
 // DataProtection-Schlüssel persistieren (Login-Cookies überleben Neustarts; ./data auch als Docker-Volume)
 var keysDir = Path.GetFullPath(Environment.GetEnvironmentVariable("DATA_PROTECTION_DIR") ?? "data/keys");
@@ -122,6 +129,14 @@ app.MapRazorComponents<App>()
 // ─── Datenbank initialisieren ──────────────────────────────────────────────
 var db = app.Services.GetRequiredService<IDatabase>();
 await db.InitAsync();
+// Bilder aus der früheren Speicherung (images_json, ADR 0016) einmalig in card_images überführen — idempotent, ohne Datenverlust
+var imageService = app.Services.GetRequiredService<CardImageService>();
+var convertedImages = await imageService.MigrateLegacyInlineImagesAsync();
+if (convertedImages > 0) app.Logger.LogInformation("Bilder von {Count} Karten in den Bildspeicher überführt (images_json bleibt unverändert).", convertedImages);
+var primaryHealth = await imageService.Registry.Primary.CheckHealthAsync();
+app.Logger.Log(primaryHealth.Ok ? LogLevel.Information : LogLevel.Warning, "Bildspeicher '{Provider}': {Message} ({Ms} ms){Cache}",
+    imageService.Registry.PrimaryName, primaryHealth.Message, (int)primaryHealth.Latency.TotalMilliseconds,
+    imageService.Cache.Enabled ? ", Cache aktiv" : ", Cache aus");
 app.Logger.LogInformation("LearnCards gestartet — DB-Provider: {Provider}, Auth-Modus: {Auth}, OpenAI: {OpenAi}, .env: {Env}",
     db.ProviderName, cfg.AuthMode, cfg.OpenAiConfigured ? "konfiguriert" : "nicht konfiguriert", EnvLoader.LoadedFrom ?? "—");
 

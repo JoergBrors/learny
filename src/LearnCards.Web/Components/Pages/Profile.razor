@@ -3,6 +3,7 @@
 @rendermode InteractiveServer
 @inject UserService Users
 @inject McpLinkService McpLinks
+@inject SharingService Sharing
 @inject CardRepository Repo
 @inject AuthenticationStateProvider AuthState
 
@@ -83,7 +84,37 @@
 
         <div class="card panel">
             <h2 class="panel-title">Freigaben</h2>
-            <p class="muted">Von mir geteilt: noch keine · Mit mir geteilt: noch keine. Die Freigabe von Karten ist vorbereitet und folgt in einem späteren Ausbauschritt.</p>
+            <h3>Von mir geteilt</h3>
+            @if (_outgoing.Count == 0)
+            {
+                <p class="muted">Du hast noch kein Modul freigegeben. Öffne ein eigenes Modul und wähle „Modul freigeben“.</p>
+            }
+            else
+            {
+                <ul class="plain-list share-results">
+                    @foreach (var s in _outgoing)
+                    {
+                        <li>
+                            <span><a href="/module/@s.ModuleId"><strong>@s.ModuleName</strong></a> → @s.RecipientName <span class="muted">(@s.RecipientEmail)</span></span>
+                            <button class="btn btn-ghost btn-sm" @onclick="() => RevokeShare(s)">Widerrufen</button>
+                        </li>
+                    }
+                </ul>
+            }
+            <h3>Mit mir geteilt</h3>
+            @if (_incoming.Count == 0)
+            {
+                <p class="muted">Niemand hat bisher ein Modul für dich freigegeben.</p>
+            }
+            else
+            {
+                <ul class="plain-list share-results">
+                    @foreach (var m in _incoming)
+                    {
+                        <li><span><a href="/module/@m.Id"><strong>@m.Name</strong></a> <span class="muted">von @m.OwnerName · nur lernen</span></span></li>
+                    }
+                </ul>
+            }
         </div>
 
         <div class="card panel">
@@ -180,6 +211,8 @@
     private OwnedContentSummary _summary = new();
     private List<QuizResultRecord> _results = new();
     private Dictionary<string, string> _moduleNames = new(StringComparer.OrdinalIgnoreCase);
+    private List<ShareInfo> _outgoing = new();
+    private List<ModuleInfo> _incoming = new();
     private List<McpLink> _links = new();
     private string _tokenName = "";
     private int _tokenDays = 90;
@@ -197,7 +230,18 @@
         _summary = await Repo.GetOwnedSummaryAsync(uid);
         _results = await Repo.QuizHistoryAsync(uid, limit: 10);
         _links = await McpLinks.ListAsync(uid);
+        _outgoing = await Sharing.ListOutgoingSharesAsync(uid);
+        _incoming = await Repo.ListSharedWithMeAsync(uid);
         _moduleNames = (await Repo.ListModulesAsync(uid)).ToDictionary(m => m.Id, m => m.Name, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private async Task RevokeShare(ShareInfo s)
+    {
+        if (_user is null) return;
+        var ok = await Sharing.RevokeShareAsync(_user.Id, s.ModuleId, s.RecipientUserId);
+        _message = ok ? $"✅ Freigabe für {s.RecipientName} widerrufen." : "❌ Freigabe nicht gefunden.";
+        _messageOk = ok;
+        _outgoing = await Sharing.ListOutgoingSharesAsync(_user.Id);
     }
 
     private async Task CreateToken()

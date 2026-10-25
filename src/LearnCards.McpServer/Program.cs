@@ -62,7 +62,7 @@ static void RegisterCoreTools(McpServerEngine engine, LearnCardsApiClient api, M
 
     engine.RegisterTool(
         new ToolDefinition("add_card",
-            "Create a single learning card in the LearnCards platform. Use only source-grounded facts and preserve the canonical import structure.",
+            "Create a single learning card in the LearnCards platform. Use only source-grounded facts and preserve the canonical import structure. Optional images[]: each entry needs mime_type (image/png, image/jpeg or image/webp) and data_base64 (plain standard Base64 of the real image file, no 'data:' prefix); alt_text and caption are optional. Limits: max 5 images per card, max 2 MiB per decoded image; prefer small images (< 200 KiB) because Base64 inside tool arguments consumes model context. Only include images you were actually given; never invent Base64 data. Call get_import_schema for the exact, current rules.",
             CardUpsertSchema()),
         async (args, ct) =>
         {
@@ -78,7 +78,7 @@ static void RegisterCoreTools(McpServerEngine engine, LearnCardsApiClient api, M
 
     engine.RegisterTool(
         new ToolDefinition("import_cards",
-            "Import multiple learning cards at once. Always consult get_import_schema first and keep answers grounded in the provided official sources.",
+            "Import multiple learning cards at once. Always consult get_import_schema first and keep answers grounded in the provided official sources. Cards may contain images[] (mime_type, data_base64, alt_text, caption) as described in the schema: real files only, standard Base64 without a 'data:' prefix, max 5 images per card and 2 MiB per decoded image. Many or large images make the request very large — import such cards in small batches; the server reports rejected cards with a reason in the result. With overwrite_existing=true an omitted images field keeps existing images, [] removes them.",
             """
             {
               "type": "object",
@@ -102,23 +102,40 @@ static void RegisterCoreTools(McpServerEngine engine, LearnCardsApiClient api, M
                 var created = res?["created"]?.GetValue<int>() ?? 0;
                 var updated = res?["updated"]?.GetValue<int>() ?? 0;
                 var skipped = res?["skipped"]?.GetValue<int>() ?? 0;
-                return new ToolCallResult($"Import complete: {created} created, {updated} updated, {skipped} skipped.");
+                var errors = res?["errors"] as JsonArray;
+                var detail = errors is { Count: > 0 }
+                    ? "\nRejected cards:\n" + string.Join("\n", errors.Select(e => "- " + e?.GetValue<string>()))
+                    : "";
+                return new ToolCallResult($"Import complete: {created} created, {updated} updated, {skipped} skipped.{detail}");
             }
             catch (McpApiException ex) { return new ToolCallResult($"API error {ex.StatusCode}: {ex.Message}", true); }
         });
 
     engine.RegisterTool(
         new ToolDefinition("list_modules",
-            "List all learning modules with their card counts.",
-            """{"type": "object", "properties": {}}"""),
-        async (_, ct) =>
+            "List the learning modules this connection may use, with card counts. scope: private (default, your own modules), shared (modules other users shared with you), global (published by an administrator) or all. Shared and global modules are read-only.",
+            """
+            {
+              "type": "object",
+              "properties": {
+                "scope": {"type": "string", "enum": ["private", "shared", "global", "all"], "default": "private", "description": "Which modules to list"}
+              }
+            }
+            """),
+        async (args, ct) =>
         {
             try
             {
-                var modules = await api.GetAsync("modules/", ct) as JsonArray;
+                var scope = args["scope"]?.GetValue<string>() is { Length: > 0 } sc ? sc : "private";
+                var modules = await api.GetAsync($"modules/?scope={Uri.EscapeDataString(scope)}", ct) as JsonArray;
                 if (modules is null || modules.Count == 0) return new ToolCallResult("No modules found.");
                 var lines = modules.Select(m =>
-                    $"• {m?["name"]?.GetValue<string>()} — {m?["active_count"]?.GetValue<int>()} active / {m?["card_count"]?.GetValue<int>()} total cards (id: {m?["id"]?.GetValue<string>()})");
+                {
+                    var context = m?["context"]?.GetValue<string>() ?? "private";
+                    var owner = m?["owner_name"]?.GetValue<string>() is { Length: > 0 } o ? $", from: {o}" : "";
+                    var version = m?["global_version"]?.GetValue<int>() is int v ? $", version {v}" : "";
+                    return $"• {m?["name"]?.GetValue<string>()} [{context}{owner}{version}] — {m?["active_count"]?.GetValue<int>()} active / {m?["card_count"]?.GetValue<int>()} total cards (id: {m?["id"]?.GetValue<string>()})";
+                });
                 return new ToolCallResult(string.Join("\n", lines));
             }
             catch (McpApiException ex) { return new ToolCallResult($"API error {ex.StatusCode}: {ex.Message}", true); }
@@ -126,7 +143,7 @@ static void RegisterCoreTools(McpServerEngine engine, LearnCardsApiClient api, M
 
     engine.RegisterTool(
         new ToolDefinition("list_cards",
-            "List cards in a module, optionally filtered by category. Includes official source count so clients can prefer source-backed cards.",
+            "List cards in a module you may read (your own, shared with you, or global), optionally filtered by category. Includes official source count so clients can prefer source-backed cards. Archived cards are only listed for your own modules.",
             """
             {
               "type": "object",
@@ -591,6 +608,21 @@ static string CardUpsertSchema() =>
           }
         },
         "chat_prompt": {"type": "string", "description": "System prompt for the AI chatbot on this card."},
+        "images": {
+          "type": "array",
+          "maxItems": 5,
+          "description": "Optional images (max 5, each max 2 MiB decoded; prefer < 200 KiB). Only real images you were given — never invent Base64.",
+          "items": {
+            "type": "object",
+            "required": ["mime_type", "data_base64"],
+            "properties": {
+              "mime_type": {"type": "string", "enum": ["image/png", "image/jpeg", "image/webp"], "description": "Must match the real image type"},
+              "data_base64": {"type": "string", "description": "Plain standard Base64 of the image file, WITHOUT a 'data:' prefix"},
+              "alt_text": {"type": "string", "maxLength": 300, "description": "Alternative text describing the image (accessibility)"},
+              "caption": {"type": "string", "maxLength": 300, "description": "Optional caption"}
+            }
+          }
+        },
         "sort_order": {"type": "integer", "description": "Display order within category", "default": 0}
       }
     }

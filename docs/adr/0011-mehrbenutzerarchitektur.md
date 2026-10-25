@@ -3,6 +3,7 @@
 - **Status:** Akzeptiert
 - **Datum:** 2026-10-24
 - **Teilweise ersetzt durch:** [0013](0013-mcp-benutzergebundene-anmeldung.md) (`MCP_LINKED_USER_ID` entfällt; MCP-Zugriff läuft über benutzergebundene Tokens)
+- **Differenziert durch:** [0015](0015-freigaben-globale-lernmodule.md) (freigegebene und globale Module als explizit verwaltete Ausnahmen vom reinen Privateigentum; Rolle `auditor` erhält dort lesende Rechte)
 - **Geprüft in:** [Mehrbenutzer-Prüfbericht](../reviews/2026-10-24-mehrbenutzer-pruefbericht.md); Härtungsvorschlag: [0014](0014-sitzungs-und-betriebsmodus-haertung.md)
 - **Ergänzt durch:** [0012](0012-rollen-aus-entra-app-roles.md) (Rollen aus Entra-ID-App-Rollen)
 - **Ergänzt:** [0005](0005-authentifizierung.md) (Authentifizierung), [0004](0004-datenbank-abstraktion.md) (Schemaänderungen)
@@ -54,8 +55,7 @@ Ein Benutzer hat mehrere Rollen (`user_roles`); `user` besitzt jeder Benutzer im
 - Auch Administratoren sehen **keine fremden privaten Inhalte** über die normale API. Administration ≠ Dateneinsicht.
 - Rollen werden ausschließlich über `UserService` vergeben, der die Rolle des Aufrufers **gegen die DB** prüft
   (`RequireRoleAsync`), nicht gegen Claims. Der letzte aktive Admin kann weder Rolle noch Zugang verlieren; man kann sich nicht selbst sperren.
-- Die Rolle `auditor` ist angelegt und zuweisbar, gewährt in dieser Ausbaustufe aber noch keine zusätzlichen Zugriffe
-  (es gibt noch keine globalen Inhalte). Weitere Rollen/Rechte werden bei Bedarf in der ADR zum Freigabemodell entschieden.
+- Die Rolle `auditor` war in dieser Ausbaustufe nur angelegt und zuweisbar (keine zusätzlichen Zugriffe); lesende Rechte auf globale Inhalte/Ergebnisse folgen mit [0015](0015-freigaben-globale-lernmodule.md). Weitere Rollen/Rechte werden bei Bedarf in der ADR zum Freigabemodell entschieden.
 - Bootstrap: Subjects in `ADMIN_SUBJECTS` (kommagetrennt, IdP-`sub`; **nicht** E-Mail, da nicht verlässlich verifiziert) erhalten beim Login
   die Rolle `admin`; im Dev-Modus zusätzlich der Standardbenutzer `local-dev-user`.
 - Administrative Aktionen (Rollen, Sperren, Zuweisung, Erstanlage) werden in `audit_log` protokolliert.

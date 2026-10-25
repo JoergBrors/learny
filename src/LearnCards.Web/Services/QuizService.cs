@@ -28,7 +28,7 @@ public class QuizService
 
     public async Task<List<CardQuizQuestion>> GetCardQuizAsync(string cardId, string userSub, CancellationToken ct = default)
     {
-        var card = await _repo.GetCardAsync(cardId, userSub)
+        var card = await _repo.GetReadableCardAsync(cardId, userSub)
             ?? throw new InvalidOperationException("Die ausgewählte Karte wurde nicht gefunden.");
 
         if (card.Archived)
@@ -173,10 +173,12 @@ public class QuizService
 
     public async Task<QuizResultResponse> SubmitQuizAsync(QuizSubmitRequest req, string userSub, CancellationToken ct = default)
     {
-        // Ergebnisse dürfen nur auf eigene Module/Karten verweisen (ADR 0011).
-        if (await _repo.GetModuleAsync(req.ModuleId, userSub) is null)
-            throw new InvalidOperationException("Das ausgewählte Modul wurde nicht gefunden.");
-        if (!string.IsNullOrWhiteSpace(req.CardId) && await _repo.GetCardAsync(req.CardId, userSub) is null)
+        // Ergebnisse dürfen nur auf Module/Karten verweisen, die der Benutzer lernen darf: eigene, freigegebene oder globale (ADR 0011/0015).
+        var access = await _repo.ResolveModuleAccessAsync(userSub, req.ModuleId)
+            ?? throw new InvalidOperationException("Das ausgewählte Modul wurde nicht gefunden.");
+        if (!string.IsNullOrWhiteSpace(req.CardId)
+            && (await _repo.GetReadableCardAsync(req.CardId, userSub) is not { } selected
+                || !string.Equals(selected.ModuleId, access.Module.Id, StringComparison.OrdinalIgnoreCase)))
             throw new InvalidOperationException("Die ausgewählte Karte wurde nicht gefunden.");
 
         var checkedCards = await ResolveQuizCardsAsync(req.ModuleId, req.Category, userSub, req.CardId);
@@ -193,6 +195,7 @@ public class QuizService
             ModuleId = req.ModuleId,
             CardId = req.CardId,
             UserSub = userSub,
+            Context = access.Context,
             Category = req.Category,
             Score = result.Score,
             MaxScore = result.MaxScore,
@@ -488,7 +491,7 @@ public class QuizService
     {
         if (!string.IsNullOrWhiteSpace(cardId))
         {
-            var card = await _repo.GetCardAsync(cardId, userSub);
+            var card = await _repo.GetReadableCardAsync(cardId, userSub);
             if (card is null || card.Archived || !string.Equals(card.ModuleId, moduleId, StringComparison.OrdinalIgnoreCase))
                 return new();
             return new List<Card> { card };
@@ -501,12 +504,12 @@ public class QuizService
     {
         if (!string.IsNullOrWhiteSpace(cardId))
         {
-            var card = await _repo.GetCardAsync(cardId, userSub);
+            var card = await _repo.GetReadableCardAsync(cardId, userSub);
             if (card is null || card.Archived || !string.Equals(card.ModuleId, moduleId, StringComparison.OrdinalIgnoreCase))
                 return new();
             return new List<Card> { card };
         }
 
-        return await _repo.ListCardsAsync(userSub, moduleId, string.IsNullOrEmpty(category) ? null : category, archived: false);
+        return await _repo.ListReadableCardsAsync(userSub, moduleId, string.IsNullOrEmpty(category) ? null : category);
     }
 }

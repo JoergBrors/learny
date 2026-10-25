@@ -88,6 +88,20 @@ Wichtig: Der MCP-Server ist ein `stdio`-Server. Er wird deshalb nicht sinnvoll a
 Hintergrunddienst betrieben, sondern normalerweise automatisch vom MCP-Client gestartet.
 Für das IIS-Deployment erzeugt die Pipeline dafür ein fertiges `learncards-mcp.cmd`.
 
+### Umgebungsvariablen des MCP-Servers
+
+Neben `mcpsettings.json` (Pfad über `LEARNCARDS_MCP_CONFIG`) überschreiben diese Variablen die Konfiguration:
+
+| Variable | Wirkung |
+|---|---|
+| `LEARNCARDS_MCP_CONFIG` | Pfad zur `mcpsettings.json` (sonst Suche im Arbeitsverzeichnis, darüber und neben der EXE) |
+| `LEARNCARDS_API_URL` | Basis-URL der Web-API, z. B. `http://localhost:5000/api` |
+| `LEARNCARDS_MCP_API_KEY` / `MCP_API_KEY` | Dienstschlüssel (nur Code-Tausch und Schema, kein Datenzugriff) |
+| `LEARNCARDS_MCP_TOKEN` | persönliches Learny-Token des Benutzers für den stdio-Transport ([ADR 0013](adr/0013-mcp-benutzergebundene-anmeldung.md)) |
+| `LEARNCARDS_WEB_PUBLIC_URL` | öffentliche URL der Web-Oberfläche für die OAuth-Anmeldung im Browser |
+| `LEARNCARDS_MCP_STDIO` / `LEARNCARDS_MCP_HTTP` | `true`/`false`: Transporte ein-/ausschalten |
+| `LEARNCARDS_MCP_HTTP_URLS` | Listener des HTTP-Transports, Semikolon-getrennt (aktiviert HTTP), z. B. `http://127.0.0.1:8787` |
+
 ## 4. MCP-Server als eigenständiger HTTP-Dienst
 
 Wenn der MCP-Server nicht nur per `stdio`, sondern als eigenständiger Prozess laufen soll:
@@ -162,6 +176,17 @@ curl -b cookies.txt http://localhost:5000/api/modules/
 Ohne Login antwortet `/api/*` mit `401`. Authentifizieren per Browser-Login (`/auth/login`) oder mit einem persönlichen MCP-Token
 (`Authorization: Bearer lcm_…`, nur Daten-Routen). Der `X-MCP-Key` gewährt **keinen** Datenzugriff (nur Schema und Code-Tausch).
 Automatisierte Integrationstests: [testing.md](testing.md).
+
+## 7a. Freigaben und globale Module ausprobieren
+
+Mit zwei Browser-Sitzungen (normal + privates Fenster) und Dev-Login: `http://localhost:5000/auth/login?devUser=anna` bzw. `?devUser=ben`; der Standardbenutzer `local-dev-user` ist Administrator.
+
+1. Als *anna* ein Modul importieren, im Modul **Modul freigeben** wählen, *ben* suchen und freigeben.
+2. Als *ben* unter **Mit mir geteilt** lernen und ein Quiz machen; anna sieht Bens Ergebnisse nicht.
+3. Als *anna* **Zur globalen Veröffentlichung einreichen**; als Administrator unter `/admin` → *Veröffentlichungsvorschläge* Vorschau ansehen und **Veröffentlichen**.
+4. Unter **Globale Module** lernen alle Benutzer; Administrator und Auditor (`/admin`, Rolle `auditor`) sehen unter *Globale Lernergebnisse* die minimierten Ergebnisse.
+
+Hintergrund und Regeln: [ADR 0015](adr/0015-freigaben-globale-lernmodule.md).
 
 ## 8. Demo-JSON importieren
 

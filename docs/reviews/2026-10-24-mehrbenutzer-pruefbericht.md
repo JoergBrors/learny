@@ -6,6 +6,9 @@
 - **Ergebnis in einem Satz:** Die Benutzertrennung ist in der aktuellen Implementierung wirksam (keine Datenvermischung zwischen Benutzern gefunden); es bestehen aber ein
   **hohes** Konfigurationsrisiko (Dev-Login als stiller Rückfall) und mehrere mittlere/niedrige Punkte bei Sitzungsverwaltung und Gleichzeitigkeit.
 
+> **Nachtrag:** Nach diesem Bericht wurden mit [ADR 0015](../adr/0015-freigaben-globale-lernmodule.md) persönliche Freigaben und globale Module eingeführt. Die Aussagen „keine gemeinsamen Module/Karten“ und „keine Ergebnisse über Benutzergrenzen" beziehen sich auf den geprüften Stand; Freigabe-/Globalzugriffe sind
+> separat durch Tests abgesichert (Abschnitt „Freigaben und globale Module“ in [testing.md](../testing.md)). Die Befunde F1–F11 bestehen unverändert.
+
 ## 0. Wichtiger Hinweis zu den Annahmen des Auftrags
 
 Der Auftrag beschreibt Module/Karten als **global** und den `X-MCP-Key` als **vollen API-Zugriff ohne Benutzer** („Annahme: gemeinsame Nutzung ist beabsichtigt“).

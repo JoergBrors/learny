@@ -54,6 +54,8 @@ public class Card
     public int? SlideNumber { get; set; }
     public int? TargetTimeSec { get; set; }
     public List<CardQuizQuestion> Quiz { get; set; } = new();
+    /// <summary>Optionale Bilder (Base64, ADR 0016); leer = keine Bilder.</summary>
+    public List<CardImage> Images { get; set; } = new();
     public bool Archived { get; set; }
     public int SortOrder { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -134,6 +136,11 @@ public class CardJson
     public int? SlideNumber { get; set; }
     public int? TargetTimeSec { get; set; }
     public List<CardQuizQuestion> Quiz { get; set; } = new();
+    /// <summary>
+    /// Optionale Bilder (ADR 0016). <c>null</c> = Feld fehlt: neue Karte ohne Bilder, bestehende Karte behält ihre Bilder;
+    /// <c>[]</c> = Bilder bewusst entfernen.
+    /// </summary>
+    public List<CardImage>? Images { get; set; }
     public bool Archived { get; set; }
     public int SortOrder { get; set; }
 
@@ -163,6 +170,8 @@ public class CardJson
                 return (false, "'correct_index' muss auf eine vorhandene Option zeigen");
             if (string.IsNullOrWhiteSpace(quiz.Explanation)) return (false, "Jede Quizfrage benötigt eine 'explanation'");
         }
+        var (imagesOk, imagesError) = CardImageValidator.ValidateAndNormalize(Images);
+        if (!imagesOk) return (false, imagesError);
         return (true, "");
     }
 }

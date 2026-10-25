@@ -11,7 +11,8 @@ public static class CardImportSchema
         ["grounding_rules"] = new JsonArray(
             "Use only facts contained in the cards themselves and their official sources.",
             "Do not invent missing fields or unsupported facts.",
-            "If a source-backed answer cannot be formed, ask for clarification instead of guessing."),
+            "If a source-backed answer cannot be formed, ask for clarification instead of guessing.",
+            "Only add images that were actually provided to you. Never invent, guess or fabricate Base64 image data."),
         ["batch_schema"] = BatchSchema(),
         ["card_schema"] = CardSchema(),
         ["example"] = ExampleBatch(),
@@ -105,6 +106,7 @@ public static class CardImportSchema
                     },
                 },
             },
+            ["images"] = ImagesSchema(),
             ["official_sources"] = new JsonObject
             {
                 ["type"] = "array",
@@ -140,6 +142,52 @@ public static class CardImportSchema
         },
     };
 
+    /// <summary>Beschreibt <c>images[]</c>; Limits kommen aus <see cref="Domain.CardImageLimits"/> (ADR 0016).</summary>
+    private static JsonObject ImagesSchema() => new()
+    {
+        ["type"] = "array",
+        ["nullable"] = true,
+        ["maxItems"] = Domain.CardImageLimits.MaxImagesPerCard,
+        ["description"] =
+            $"Optional images shown on the card (at most {Domain.CardImageLimits.MaxImagesPerCard}). Omit the field or send [] for no images. " +
+            "On import with overwrite_existing=true, an omitted images field keeps the existing images; [] removes them. " +
+            $"Each image must be a real file of type {string.Join(", ", Domain.CardImageLimits.AllowedMimeTypes)}, at most {Domain.CardImageLimits.MaxDecodedBytes / (1024 * 1024)} MiB decoded " +
+            "(prefer small images, e.g. below 200 KiB: large Base64 strings consume model context and may exceed client or request limits). " +
+            "data_base64 is plain standard Base64 of the file bytes WITHOUT a 'data:' prefix. mime_type must match the real image type. Never invent Base64 data.",
+        ["items"] = new JsonObject
+        {
+            ["type"] = "object",
+            ["required"] = new JsonArray("mime_type", "data_base64"),
+            ["properties"] = new JsonObject
+            {
+                ["mime_type"] = new JsonObject
+                {
+                    ["type"] = "string",
+                    ["enum"] = new JsonArray(Domain.CardImageLimits.AllowedMimeTypes.Select(m => (JsonNode)m).ToArray()),
+                },
+                ["data_base64"] = new JsonObject
+                {
+                    ["type"] = "string",
+                    ["contentEncoding"] = "base64",
+                    ["description"] = "Standard Base64 of the image file (no data: URI prefix).",
+                    ["maxLength"] = Domain.CardImageLimits.MaxBase64Chars,
+                },
+                ["alt_text"] = new JsonObject
+                {
+                    ["type"] = "string",
+                    ["maxLength"] = Domain.CardImageLimits.MaxTextLength,
+                    ["description"] = "Alternative text describing the image (accessibility). Strongly recommended.",
+                },
+                ["caption"] = new JsonObject
+                {
+                    ["type"] = "string",
+                    ["maxLength"] = Domain.CardImageLimits.MaxTextLength,
+                    ["description"] = "Optional caption shown below the image.",
+                },
+            },
+        },
+    };
+
     private static JsonObject ExampleBatch() => new()
     {
         ["cards"] = new JsonArray(new JsonObject
@@ -166,6 +214,13 @@ public static class CardImportSchema
                     "Weil Digests keine Registry benötigen"),
                 ["correct_index"] = 1,
                 ["explanation"] = "Ein Digest referenziert ein unveränderliches Artefakt und macht Deployments reproduzierbar.",
+            }),
+            ["images"] = new JsonArray(new JsonObject
+            {
+                ["mime_type"] = "image/png",
+                ["data_base64"] = "iVBORw0KGgoAAAANSUhEUgAAACAAAAAQCAIAAAD4YuoOAAAAI0lEQVR42mPg94mhKWIAYq3ls2mERi0YtWDUglELRpIFNEUAOleXE3NVou0AAAAASUVORK5CYII=",
+                ["alt_text"] = "Farbige Beispielfläche (32 × 16 Pixel)",
+                ["caption"] = "Beispielbild",
             }),
             ["official_sources"] = new JsonArray(new JsonObject
             {

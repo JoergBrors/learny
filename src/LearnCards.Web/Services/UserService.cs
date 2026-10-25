@@ -194,6 +194,49 @@ public class UserService
         return actor;
     }
 
+    /// <summary>Wie <see cref="RequireRoleAsync"/>, aber mindestens eine der Rollen genügt (z. B. Administrator oder Auditor für lesende Einsicht).</summary>
+    public async Task<AppUser> RequireAnyRoleAsync(string? actorUserId, params string[] roles)
+    {
+        var actor = await GetAsync(actorUserId);
+        if (actor is null || !actor.IsActive || !actor.Roles.Any(r => roles.Contains(r)))
+            throw new UnauthorizedAccessException($"Eine der Rollen ({string.Join(", ", roles)}) ist erforderlich.");
+        return actor;
+    }
+
+    /// <summary>
+    /// Sucht aktive Benutzer für die Freigabe (Name oder E-Mail, mindestens 3 Zeichen, höchstens 10 Treffer, ohne den Suchenden selbst).
+    /// Datenschutz: liefert nur Anzeigename und E-Mail, nie Rollen oder Inhalte.
+    /// </summary>
+    public async Task<List<UserSearchResult>> SearchUsersAsync(string requesterId, string? query)
+    {
+        var q = (query ?? "").Trim().ToLowerInvariant();
+        if (q.Length < 3 || q.Length > 80) return new();
+        var pattern = "%" + q.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_") + "%";
+        var rows = await _db.QueryAsync("""
+            SELECT id, display_name, email FROM users
+            WHERE status = 'active' AND CAST(id AS TEXT) <> @me
+              AND (LOWER(display_name) LIKE @q ESCAPE '\' OR LOWER(email) LIKE @q ESCAPE '\')
+            ORDER BY display_name LIMIT 10
+            """, new (string, object?)[] { ("me", requesterId), ("q", pattern) });
+        return rows.Select(r => new UserSearchResult { Id = r["id"] ?? "", DisplayName = r.GetValueOrDefault("display_name") ?? "", Email = r.GetValueOrDefault("email") ?? "" }).ToList();
+    }
+
+    /// <summary>Protokolleinträge zu Veröffentlichungen für Administrator und Auditor (nur Aktionen "publication.*" und "submission.*").</summary>
+    public async Task<List<AuditEntry>> ListPublicationAuditAsync(string? actorUserId, int limit = 100)
+    {
+        await RequireAnyRoleAsync(actorUserId, Roles.Admin, Roles.Auditor);
+        var rows = await _db.QueryAsync($"""
+            SELECT id, actor_user_id, action, target, detail, created_at FROM audit_log
+            WHERE action LIKE 'publication.%' OR action LIKE 'submission.%'
+            ORDER BY created_at DESC LIMIT {Math.Clamp(limit, 1, 500)}
+            """);
+        return rows.Select(r => new AuditEntry
+        {
+            Id = r["id"] ?? "", ActorUserId = r.GetValueOrDefault("actor_user_id"), Action = r["action"] ?? "",
+            Target = r["target"] ?? "", Detail = r["detail"] ?? "", CreatedAt = DbValue.ToDateTime(r["created_at"]),
+        }).ToList();
+    }
+
     // ─── Änderungen ─────────────────────────────────────────────────────────
 
     /// <summary>Eigener Anzeigename — die einzige Profiländerung, die ein Benutzer selbst vornehmen darf.</summary>

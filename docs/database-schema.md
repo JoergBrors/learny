@@ -9,7 +9,8 @@ PostgreSQL ist die Referenz- und Produktionsdatenbank (Docker, Azure, IIS); SQLi
 
 - **Benutzerbezogen (privat):** `modules` und `cards` (Eigentümer `owner_user_id`), `user_preferences`, `user_card_states`, `chat_history`, `quiz_results` (je `user_sub`), `mcp_links`.
 - **Benutzerverwaltung:** `users`, `user_identities`, `user_roles`, `audit_log`.
-- **Global geteilt:** nichts — es gibt keinen gemeinsamen Kartenbestand. Unzugeordneter Altbestand (`owner_user_id IS NULL`) ist nur für Administratoren sichtbar.
+- **Explizit geteilt ([ADR 0015](adr/0015-freigaben-globale-lernmodule.md)):** `module_shares` (persönliche, widerrufbare Freigaben) und globale Module (`modules.scope = 'global'`, ohne Eigentümer, aus einer geprüften Einreichung `module_submissions`).
+  Private Bestände bleiben isoliert; einen frei zugänglichen gemeinsamen Kartenbestand gibt es nicht. Unzugeordneter Altbestand (`owner_user_id IS NULL` **und** `scope = 'private'`) ist nur für Administratoren sichtbar.
 - Bewertung der Trennung: [Prüfbericht](reviews/2026-10-24-mehrbenutzer-pruefbericht.md).
 
 ## Konventionen
@@ -33,6 +34,10 @@ erDiagram
     users |o--o{ modules : "owner_user_id (SET NULL)"
     users |o--o{ cards : "owner_user_id (SET NULL)"
     modules ||--o{ cards : "module_id (CASCADE)"
+    modules ||--o{ module_shares : "module_id (CASCADE)"
+    users ||--o{ module_shares : "recipient_user_id (CASCADE)"
+    modules |o--o{ module_submissions : "source/staged (SET NULL)"
+    modules |o--o{ modules : "source_module_id (SET NULL)"
     modules ||--o{ quiz_results : "module_id (CASCADE)"
     cards ||--o{ user_card_states : "card_id (CASCADE)"
     cards ||--o{ chat_history : "card_id (CASCADE)"
@@ -72,6 +77,40 @@ Index: `ix_user_identities_user (user_id)`.
 | role | TEXT NOT NULL | `user`, `admin` oder `auditor` — Teil des PK |
 | granted_by | TEXT NULL | Benutzer-ID des Vergebenden, `bootstrap` (ADMIN_SUBJECTS) oder `idp` (Entra-App-Rolle, [ADR 0012](adr/0012-rollen-aus-entra-app-roles.md)) |
 | granted_at | TEXT NOT NULL | |
+
+### module_shares
+Persönliche Modulfreigaben ([ADR 0015](adr/0015-freigaben-globale-lernmodule.md)).
+
+| Spalte | Typ | Hinweis |
+|---|---|---|
+| id | UUID PK | |
+| module_id | UUID NOT NULL | FK → modules, `CASCADE` |
+| recipient_user_id | UUID NOT NULL | FK → users, `CASCADE`; Index `ix_module_shares_recipient` |
+| shared_by_user_id | TEXT NOT NULL | Eigentümer, der freigegeben hat |
+| created_at | TEXT NOT NULL | |
+| revoked_at | TEXT NULL | gesetzt = Freigabe widerrufen (Zugriff endet, Ergebnisse bleiben) |
+
+`UNIQUE (module_id, recipient_user_id)`.
+
+### module_submissions
+Einreichungen zur globalen Veröffentlichung.
+
+| Spalte | Typ | Hinweis |
+|---|---|---|
+| id | UUID PK | |
+| publication_id | UUID NOT NULL | Veröffentlichung (neu oder bestehend) |
+| kind | TEXT NOT NULL | `new` oder `update` |
+| source_module_id | UUID NULL | FK → modules, `SET NULL`: privates Original |
+| staged_module_id | UUID NULL | FK → modules, `SET NULL`: eingefrorene Kopie (`global_status = 'staged'`) |
+| submitter_user_id | UUID NULL | FK → users, `SET NULL` |
+| submitter_name, module_name | TEXT NOT NULL | Snapshot |
+| card_count, version | INTEGER NOT NULL | |
+| status | TEXT NOT NULL | `pending`, `approved`, `rejected` |
+| reason | TEXT NOT NULL | Begründung der Ablehnung |
+| submitted_at, decided_at | TEXT | |
+| decided_by | TEXT NULL | Administrator-ID |
+
+Index: `ix_module_submissions_status (status, submitted_at)`.
 
 ### mcp_links
 Benutzergebundene MCP-Zugänge ([ADR 0013](adr/0013-mcp-benutzergebundene-anmeldung.md)). Das Token selbst wird nie gespeichert.
@@ -118,8 +157,18 @@ Protokoll administrativer Aktionen (Rollen, Sperren, Zuweisung, Benutzeranlage).
 | description | TEXT NOT NULL | Default `''` |
 | icon | TEXT NOT NULL | Default `📚` |
 | color | TEXT NOT NULL | Default `#2AA79B` |
-| owner_user_id | UUID NULL | FK → users, `SET NULL`; NULL = unzugeordneter Altbestand |
+| owner_user_id | UUID NULL | FK → users, `SET NULL`; NULL = unzugeordneter Altbestand oder globales Modul |
+| scope | TEXT NOT NULL | `private` (Standard) oder `global` |
+| publication_id | UUID NULL | stabile Identität einer globalen Veröffentlichung über alle Versionen |
+| global_version | INTEGER NULL | Version innerhalb der Veröffentlichung |
+| global_status | TEXT NULL | `staged` (eingereicht), `active`, `superseded`, `deactivated` |
+| source_module_id | UUID NULL | FK → modules, `SET NULL`: privates Original der Kopie (Herkunft) |
+| source_owner_user_id | UUID NULL | FK → users, `SET NULL`: ursprünglicher Eigentümer |
+| source_owner_name | TEXT NULL | Anzeigename des Autors zum Zeitpunkt der Einreichung (Snapshot) |
+| published_at, published_by | TEXT NULL | Veröffentlichungszeitpunkt bzw. Administrator-ID |
 | created_at, updated_at | TEXT NOT NULL | ISO-8601 |
+
+Nur `scope = 'global'` **und** `global_status = 'active'` ist für Benutzer lernbar. Globale Versionen werden nie gelöscht (Ergebnisse hängen an ihnen). Indizes: `ix_modules_scope (scope, global_status)`, `ix_modules_publication`.
 
 `name` ist nur pro Eigentümer eindeutig (Index `ux_modules_owner_name (owner_user_id, name)`), nicht mehr global. Index: `ix_modules_owner`.
 
@@ -137,11 +186,36 @@ Protokoll administrativer Aktionen (Rollen, Sperren, Zuweisung, Benutzeranlage).
 | slide_number | INTEGER NULL | Folienmodus ([ADR 0010](adr/0010-folienmodus-und-karten-quiz.md)) |
 | target_time_sec | INTEGER NULL | Zeitziel pro Folie |
 | quiz_json | TEXT NOT NULL | Default `'[]'` — statisches Karten-Quiz |
+| images_json | TEXT NOT NULL | Default `'[]'` — **Altbestand** (ADR 0016: Base64-JSON). Neue Karten schreiben `'[]'`; vorhandene Werte bleiben unverändert erhalten und werden beim Start nach `card_images` überführt |
+| images_migrated | INTEGER NOT NULL | Default 0 — 1 = Bilder dieser Karte liegen in `card_images` ([ADR 0017](adr/0017-konfigurierbare-bildspeicher.md)) |
 | archived | INTEGER NOT NULL | Default 0 — Soft-Delete |
 | sort_order | INTEGER NOT NULL | Default 0 |
 | created_at, updated_at | TEXT NOT NULL | |
 
 Indizes: `ix_cards_module (module_id)`, `ix_cards_category (module_id, category)`, `ix_cards_owner (owner_user_id)`.
+
+### card_images
+
+Bildmetadaten ([ADR 0017](adr/0017-konfigurierbare-bildspeicher.md)). Die Bytes liegen im Bildspeicher; Bilder erreichen Clients nur über `/api/images/{id}` ([ADR 0018](adr/0018-zentraler-image-proxy-und-storage-zugriff.md)).
+
+| Spalte | Typ | Hinweis |
+|---|---|---|
+| id | TEXT PK | `image_id` (GUID), in der API sichtbar |
+| card_id | TEXT NOT NULL | FK → `cards(id)` `ON DELETE CASCADE` |
+| provider | TEXT NOT NULL | `database`, `local`, `azureblob`, `s3`, `sharepoint` — wird nur von der Migration geändert |
+| storage_key | TEXT NOT NULL | serverseitig erzeugt (32 Hex); nie vom Client; mehrere Zeilen dürfen auf dasselbe Objekt zeigen (Deduplizierung, globale Kopie) |
+| mime_type | TEXT NOT NULL | `image/png`, `image/jpeg`, `image/webp` |
+| size_bytes | INTEGER NOT NULL | |
+| checksum | TEXT NOT NULL | SHA-256 (Hex); wird bei jedem Abruf aus dem Speicher geprüft |
+| alt_text, caption | TEXT NOT NULL | Default `''`, höchstens 300 Zeichen |
+| sort_order | INTEGER NOT NULL | Default 0 |
+| created_at | TEXT NOT NULL | |
+
+Indizes: `ix_card_images_card (card_id)`, `ix_card_images_blob (provider, storage_key)`. **Nie gespeichert:** SAS-Token, Signaturen, Zugangsdaten, Download-URLs.
+
+### image_blobs
+
+Nur für den Provider `database`: `storage_key` TEXT PK, `data_base64` TEXT NOT NULL (Base64, weil `IDatabase` textbasiert ist), `size_bytes` INTEGER NOT NULL, `created_at` TEXT NOT NULL. Ein Objekt wird entfernt, wenn keine `card_images`-Zeile mehr darauf verweist.
 
 ### user_preferences
 | Spalte | Typ | Hinweis |
@@ -187,9 +261,10 @@ Index: `ix_chat_history_user_card (user_sub, card_id, created_at)`.
 | feedback | TEXT NOT NULL | Default `''` |
 | answers_json | TEXT NOT NULL | Default `'[]'` |
 | stats_json | TEXT NOT NULL | Default `'{}'` |
+| context | TEXT NOT NULL | `private` (Standard), `shared` oder `global` — Lernkontext des Ergebnisses ([ADR 0015](adr/0015-freigaben-globale-lernmodule.md)) |
 | completed_at | TEXT NOT NULL | |
 
-Index: `ix_quiz_user (user_sub, completed_at)`.
+Index: `ix_quiz_user (user_sub, completed_at)`. Bei globalen Ergebnissen verweist `module_id` auf die konkrete globale Version.
 
 ## Schema-Initialisierung und Migrationen
 
@@ -200,6 +275,9 @@ Beim Start (`PostgresDatabase.InitAsync`, serialisiert über ein Gate):
 3. `MigrateCardContentColumnsAsync` — ergänzt fehlende Spalten `reference_answer`, `official_sources_json`, `slide_number`, `target_time_sec`, `quiz_json`.
 4. `MigrateQuizResultColumnsAsync` — ergänzt `quiz_results.card_id`, `stats_json`.
 5. `MigrateModuleDeleteCascadeAsync` — stellt `ON DELETE CASCADE` auf den Modul-Fremdschlüsseln sicher.
+8. `MigrateCardContentColumnsAsync` ergänzt auch `cards.images_json` (ADR 0016; Default `'[]'`, bestehende Karten bleiben ohne Bilder) und `cards.images_migrated` (ADR 0017; Default 0). `card_images`/`image_blobs` entstehen über `CREATE TABLE IF NOT EXISTS`.
+9. Beim Start überführt `CardImageService.MigrateLegacyInlineImagesAsync` Karten mit `images_json` idempotent nach `card_images` (Provider `database`); `images_json` bleibt unverändert erhalten.
+7. `MigrateSharingAsync` ([ADR 0015](adr/0015-freigaben-globale-lernmodule.md)) — ergänzt die Freigabe-/Veröffentlichungsspalten an `modules` und `quiz_results.context` (alle mit `DEFAULT`/`NULL`; bestehende Zeilen bleiben `private`) und legt danach `ix_modules_scope`/`ix_modules_publication` an. Die Tabellen `module_shares`/`module_submissions` entstehen über `CREATE TABLE IF NOT EXISTS`.
 6. `MigrateOwnershipAsync` ([ADR 0011](adr/0011-mehrbenutzerarchitektur.md)) — ergänzt `owner_user_id` an `modules`/`cards`, entfernt den Constraint
    `modules_name_key` und legt die Besitz-Indizes an (`Schema.OwnershipIndexStatements`, bewusst nach den Spaltenmigrationen).
 

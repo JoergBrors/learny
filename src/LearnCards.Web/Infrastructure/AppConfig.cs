@@ -44,6 +44,9 @@ public class AppConfig
     public bool OpenAiConfigured =>
         !string.IsNullOrWhiteSpace(OpenAiApiKey) && OpenAiApiKey != "sk-..." && !OpenAiApiKey.StartsWith("replace", StringComparison.OrdinalIgnoreCase);
 
+    // Bildspeicher (ADR 0017)
+    public ImageStorageSettings ImageStorage { get; set; } = new();
+
     // MCP
     public string McpApiKey { get; set; } = "";
     /// <summary>
@@ -104,6 +107,10 @@ public class AppConfig
                 if (external.Length > 0 && internalRole is "admin" or "auditor") cfg.RoleMap[external] = internalRole;
             }
         }
+
+        // ── Bildspeicher: Konfiguration laden und beim Start vollständig prüfen (ADR 0017) ──
+        cfg.ImageStorage = ImageStorageSettings.Load();
+        cfg.ImageStorage.EnsureValid();
 
         // ── Datenbank-Provider bestimmen ────────────────────────────────
         var provider = E("DB_PROVIDER", "auto").ToLowerInvariant();

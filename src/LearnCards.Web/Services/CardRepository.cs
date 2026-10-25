@@ -2,6 +2,7 @@ using System.Text.Json;
 using LearnCards.Web.Api;
 using LearnCards.Web.Data;
 using LearnCards.Web.Domain;
+using LearnCards.Web.Services.ImageStorage;
 
 namespace LearnCards.Web.Services;
 
@@ -10,9 +11,20 @@ public partial class CardRepository
 {
     public sealed record ImportProgress(int Processed, int Total, string Module, string Term);
 
-    private readonly IDatabase _db;
+    /// <summary>Ergebnis eines Imports; <see cref="Errors"/> nennt (höchstens 20) abgelehnte Karten mit Grund, z. B. fehlerhafte Bilder.</summary>
+    public sealed record ImportResult(int Created, int Updated, int Skipped, List<string> Errors)
+    {
+        public void Deconstruct(out int created, out int updated, out int skipped) { created = Created; updated = Updated; skipped = Skipped; }
+    }
 
-    public CardRepository(IDatabase db) => _db = db;
+    private readonly IDatabase _db;
+    private readonly CardImageService _images;
+
+    public CardRepository(IDatabase db, CardImageService images)
+    {
+        _db = db;
+        _images = images;
+    }
 
     // ─── Module ─────────────────────────────────────────────────────────────
     // Alle Zugriffe sind auf den Eigentümer (ownerId = interne Benutzer-ID) eingeschränkt (ADR 0011).
@@ -86,8 +98,11 @@ public partial class CardRepository
         if (await ForeignResultCountAsync("module_id", id, ownerId) > 0
             && (await GetModuleAsync(id, ownerId)) is not null)
             throw new InvalidOperationException("Das Modul kann nicht gelöscht werden: Andere Benutzer haben bereits Lernergebnisse darauf. Widerrufe die Freigaben und archiviere stattdessen die Karten.");
-        return await _db.ExecuteAsync("DELETE FROM modules WHERE id = @id AND owner_user_id = @owner",
+        var imageRefs = await _images.CollectForModuleAsync(id);   // vor dem Löschen sammeln (Zeilen verschwinden per Fremdschlüssel)
+        var deleted = await _db.ExecuteAsync("DELETE FROM modules WHERE id = @id AND owner_user_id = @owner",
             new (string, object?)[] { ("id", id), ("owner", ownerId) });
+        if (deleted > 0) await _images.CleanupOrphansAsync(imageRefs);   // Binärdaten ohne weitere Verweise entfernen (Kopien/Freigaben behalten ihre)
+        return deleted;
     }
 
     // ─── Karten ─────────────────────────────────────────────────────────────
@@ -103,7 +118,9 @@ public partial class CardRepository
         }
         if (!string.IsNullOrEmpty(category)) { sql += " AND category = @category"; args.Add(("category", category)); }
         sql += " ORDER BY category, sort_order, term";
-        return (await _db.QueryAsync(sql, args)).Select(MapCard).ToList();
+        var cards = (await _db.QueryAsync(sql, args)).Select(MapCard).ToList();
+        await _images.AttachAsync(cards);
+        return cards;
     }
 
     public async Task<List<Card>> ListSlideCardsAsync(string ownerId, string moduleId, string? category = null)
@@ -123,9 +140,11 @@ public partial class CardRepository
             args.Add(("category", category));
         }
 
-        return (await _db.QueryAsync(sql + " ORDER BY slide_number, sort_order, term", args))
+        var cards = (await _db.QueryAsync(sql + " ORDER BY slide_number, sort_order, term", args))
             .Select(MapCard)
             .ToList();
+        await _images.AttachAsync(cards);
+        return cards;
     }
 
     public async Task<List<string>> ListCategoriesAsync(string ownerId, string moduleId)
@@ -142,7 +161,10 @@ public partial class CardRepository
         if (!UserService.IsGuid(id)) return null;
         var rows = await _db.QueryAsync("SELECT * FROM cards WHERE id = @id AND owner_user_id = @owner",
             new (string, object?)[] { ("id", id), ("owner", ownerId) });
-        return rows.Count == 0 ? null : MapCard(rows[0]);
+        if (rows.Count == 0) return null;
+        var card = MapCard(rows[0]);
+        await _images.AttachAsync(new[] { card });
+        return card;
     }
 
     public async Task<Card> CreateCardAsync(CardJson data, string ownerId)
@@ -171,7 +193,18 @@ public partial class CardRepository
             Archived = data.Archived,
             SortOrder = data.SortOrder,
         };
+        if (data.Images is { Count: > 0 }) EnsureValidImages(data.Images);
         await InsertCardAsync(card);
+        if (data.Images is { Count: > 0 })
+        {
+            try { card.Images = await _images.ReplaceForCardAsync(card.Id, data.Images); }
+            catch
+            {
+                // Bildspeicher nicht erreichbar o. Ä.: Karte nicht halb angelegt zurücklassen
+                await _db.ExecuteAsync("DELETE FROM cards WHERE id = @id", new[] { ("id", (object?)card.Id) });
+                throw;
+            }
+        }
         return card;
     }
 
@@ -186,11 +219,11 @@ public partial class CardRepository
     private Task InsertCardAsync(Card c) => _db.ExecuteAsync("""
         INSERT INTO cards (id, module_id, owner_user_id, category, term, question, definition, how_it_works,
                            context, key_fact, reference_answer, chat_prompt, official_sources_json,
-                           slide_number, target_time_sec, quiz_json,
+                           slide_number, target_time_sec, quiz_json, images_json, images_migrated,
                            archived, sort_order, created_at, updated_at)
         VALUES (@id, @module_id, @owner_user_id, @category, @term, @question, @definition, @how_it_works,
                 @context, @key_fact, @reference_answer, @chat_prompt, @official_sources_json,
-                @slide_number, @target_time_sec, @quiz_json,
+                @slide_number, @target_time_sec, @quiz_json, @images_json, @images_migrated,
                 @archived, @sort_order, @created_at, @updated_at)
         """, CardArgs(c));
 
@@ -211,6 +244,11 @@ public partial class CardRepository
         card.SlideNumber = data.SlideNumber;
         card.TargetTimeSec = data.TargetTimeSec;
         card.Quiz = data.Quiz;
+        if (data.Images is not null)   // fehlendes images = bestehende Bilder behalten; [] = entfernen
+        {
+            EnsureValidImages(data.Images);
+            card.Images = await _images.ReplaceForCardAsync(card.Id, data.Images);
+        }
         card.Archived = data.Archived;
         card.SortOrder = data.SortOrder;
         card.UpdatedAt = DateTime.UtcNow;
@@ -239,51 +277,71 @@ public partial class CardRepository
         if (!UserService.IsGuid(id)) return 0;
         if (await ForeignResultCountAsync("card_id", id, ownerId) > 0 && (await GetCardAsync(id, ownerId)) is not null)
             throw new InvalidOperationException("Die Karte kann nicht gelöscht werden: Andere Benutzer haben bereits Lernergebnisse darauf. Archiviere sie stattdessen.");
-        return await _db.ExecuteAsync("DELETE FROM cards WHERE id = @id AND owner_user_id = @owner",
+        var imageRefs = await _images.CollectForCardAsync(id);
+        var deleted = await _db.ExecuteAsync("DELETE FROM cards WHERE id = @id AND owner_user_id = @owner",
             new (string, object?)[] { ("id", id), ("owner", ownerId) });
+        if (deleted > 0) await _images.CleanupOrphansAsync(imageRefs);
+        return deleted;
     }
 
     // ─── Import ─────────────────────────────────────────────────────────────
 
-    public async Task<(int Created, int Updated, int Skipped)> ImportAsync(
+    public async Task<ImportResult> ImportAsync(
         List<CardJson> cards,
         bool overwriteExisting,
         string ownerId,
         Func<ImportProgress, Task>? progress = null)
     {
         int created = 0, updated = 0, skipped = 0;
+        var errors = new List<string>();
 
         for (var i = 0; i < cards.Count; i++)
         {
             var data = cards[i];
-            var (ok, _) = data.Validate();
+            var (ok, validationError) = data.Validate();
             if (!ok)
             {
                 skipped++;
+                if (errors.Count < 20) errors.Add($"Karte {i + 1} ('{data.Term}'): {validationError}");
                 if (progress is not null)
                     await progress(new ImportProgress(i + 1, cards.Count, data.Module, data.Term));
                 continue;
             }
 
-            // Nur eigene Karten gelten als "vorhanden"; eine fremde ID führt zu einer neuen eigenen Karte.
-            var existing = string.IsNullOrWhiteSpace(data.Id) ? null : await GetCardAsync(data.Id!, ownerId);
+            try
+            {
+                // Nur eigene Karten gelten als "vorhanden"; eine fremde ID führt zu einer neuen eigenen Karte.
+                var existing = string.IsNullOrWhiteSpace(data.Id) ? null : await GetCardAsync(data.Id!, ownerId);
 
-            if (existing is not null && !overwriteExisting) { skipped++; }
-            else if (existing is not null)
-            {
-                await UpdateCardAsync(existing.Id, data, ownerId);
-                updated++;
+                if (existing is not null && !overwriteExisting) { skipped++; }
+                else if (existing is not null)
+                {
+                    await UpdateCardAsync(existing.Id, data, ownerId);
+                    updated++;
+                }
+                else
+                {
+                    await CreateCardAsync(data, ownerId);
+                    created++;
+                }
             }
-            else
+            catch (Exception e) when (e is ArgumentException or ImageStorageException)
             {
-                await CreateCardAsync(data, ownerId);
-                created++;
+                skipped++;
+                if (errors.Count < 20) errors.Add($"Karte {i + 1} ('{data.Term}'): {e.Message}");
             }
 
             if (progress is not null)
                 await progress(new ImportProgress(i + 1, cards.Count, data.Module, data.Term));
         }
-        return (created, updated, skipped);
+        return new ImportResult(created, updated, skipped, errors);
+    }
+
+    /// <summary>Letzte Verteidigungslinie für alle Schreibpfade: Bilder müssen den Limits aus <see cref="CardImageLimits"/> entsprechen.</summary>
+    private static void EnsureValidImages(List<CardImage> images)
+    {
+        var (ok, error) = CardImageValidator.ValidateAndNormalize(images);
+        if (!ok) throw new ArgumentException(error);
     }
 
     // ─── Besitz / Administration (Aufrufer müssen die Admin-Rolle vorab über UserService prüfen) ───
@@ -556,7 +614,7 @@ public partial class CardRepository
         ("question", c.Question), ("definition", c.Definition), ("how_it_works", c.HowItWorks),
         ("context", c.Context), ("key_fact", c.KeyFact), ("reference_answer", c.ReferenceAnswer),
         ("chat_prompt", c.ChatPrompt), ("official_sources_json", JsonSerializer.Serialize(c.OfficialSources, AppJson.Options)),
-        ("slide_number", c.SlideNumber), ("target_time_sec", c.TargetTimeSec), ("quiz_json", JsonSerializer.Serialize(c.Quiz, AppJson.Options)),
+        ("slide_number", c.SlideNumber), ("target_time_sec", c.TargetTimeSec), ("quiz_json", JsonSerializer.Serialize(c.Quiz, AppJson.Options)), ("images_json", "[]"), ("images_migrated", 1),
         ("archived", c.Archived), ("sort_order", c.SortOrder), ("created_at", c.CreatedAt), ("updated_at", c.UpdatedAt),
     };
 

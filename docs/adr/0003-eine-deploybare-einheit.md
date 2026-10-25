@@ -2,7 +2,7 @@
 
 - **Status:** Akzeptiert
 - **Datum:** 2026-10-24
-- **Ergänzt durch:** [0011](0011-mehrbenutzerarchitektur.md) (Benutzerkontext in Komponenten und API), [Prüfbericht](../reviews/2026-10-24-mehrbenutzer-pruefbericht.md)
+- **Ergänzt durch:** [0011](0011-mehrbenutzerarchitektur.md) (Benutzerkontext in Komponenten und API), [Prüfbericht](../reviews/2026-10-24-mehrbenutzer-pruefbericht.md), [0015](0015-freigaben-globale-lernmodule.md) (Freigabe-/Veröffentlichungslogik in `SharingService`, UI und API nur als Zugangsschichten)
 
 ## Kontext
 

@@ -1,0 +1,21 @@
+{
+  "cards": [
+    {
+      "module": "Mein Lernmodul",
+      "category": "Architektur",
+      "term": "Beispiel mit Diagramm",
+      "question": "Was zeigt das Diagramm?",
+      "definition": "Kurze Antwort, die sich auf das Bild bezieht.",
+      "images": [
+        {
+          "mime_type": "image/png",
+          "data_base64": "iVBORw0KGgoAAAANSUhEUgAAACAAAAAQCAIAAAD4YuoOAAAAI0lEQVR42mPg94mhKWIAYq3ls2mERi0YtWDUglELRpIFNEUAOleXE3NVou0AAAAASUVORK5CYII=",
+          "alt_text": "Farbige Beispielfläche als Platzhalter für ein Diagramm",
+          "caption": "Platzhalter — data_base64 durch das eigene Bild ersetzen (PNG, JPEG oder WebP, höchstens 2 MiB, ohne data:-Präfix)"
+        }
+      ],
+      "archived": false,
+      "sort_order": 1
+    }
+  ]
+}

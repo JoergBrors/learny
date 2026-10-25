@@ -3,6 +3,7 @@
 @rendermode InteractiveServer
 @inject CardRepository Repo
 @inject NavigationManager Nav
+@inject SharingService Sharing
 @inject AuthenticationStateProvider AuthState
 
 <PageTitle>@(_module?.Name ?? "Modul") — LearnCards</PageTitle>
@@ -29,8 +30,16 @@
                 <div class="module-head">
                     <span class="module-icon-lg" style="background:@(_module.Color)22" aria-hidden="true">@_module.Icon</span>
                     <div>
-                        <h1>@_module.Name</h1>
+                        <h1>@_module.Name <span class="badge badge-@_context">@ContextLabel</span></h1>
                         <p class="muted">@(_cards.Count) aktive Karten @(string.IsNullOrEmpty(_module.Description) ? "" : "· " + _module.Description)</p>
+                        @if (!_canEdit)
+                        {
+                            <p class="muted context-note">
+                                @(_context == "shared"
+                                    ? $"Freigegeben von {_module.OwnerName} — du kannst lernen und Quizze machen, das Original aber nicht ändern."
+                                    : $"Globales Modul (Version {_module.GlobalVersion}, Herkunft: {_module.OwnerName}) — zum Lernen, nicht zum Bearbeiten.")
+                            </p>
+                        }
                     </div>
                 </div>
                 <div class="page-head-actions">
@@ -41,10 +50,23 @@
                             @(_slideMode ? "🃏 Kartenmodus" : "📑 Folienmodus")
                         </button>
                     }
-                    <button class="btn btn-ghost" @onclick="ToggleArchive">@(_showArchive ? "← Aktive Karten" : $"🗂 Archiv ({_archivedCount})")</button>
+                    @if (_canEdit)
+                    {
+                        <button class="btn btn-ghost" @onclick="ToggleArchive">@(_showArchive ? "← Aktive Karten" : $"🗂 Archiv ({_archivedCount})")</button>
+                        <button class="btn btn-ghost" @onclick="() => _shareOpen = !_shareOpen">🔗 Modul freigeben</button>
+                    }
+                    @if (_context == "global" && _isAdmin)
+                    {
+                        <a class="btn btn-ghost" href="/admin">🛠 In der Administration verwalten</a>
+                    }
                 </div>
             </div>
         </section>
+
+        @if (_canEdit && _shareOpen)
+        {
+            <SharePanel ModuleId="@ModuleId" OnClose="() => { _shareOpen = false; return Task.CompletedTask; }" />
+        }
 
         @* Kategorien-Filter *@
         @if (_categories.Count > 1)
@@ -105,6 +127,7 @@
                            OnQuizCard="OpenCardQuiz"
                            OnPageQuizCard="OpenPageQuiz"
                            OnArchive="ArchiveAsync"
+                           CanEdit="_canEdit"
                            OnMarkKnown="ToggleCheckedAsync" OnMarkReview="ToggleReviewAsync" />
 
             <div class="session-stats" aria-live="polite">
@@ -151,6 +174,11 @@
     private readonly HashSet<string> _checked = new();
     private readonly HashSet<string> _review = new();
     private string _userSub = "";
+    private string _context = "private";
+    private bool _canEdit;
+    private bool _isAdmin;
+    private bool _shareOpen;
+    private string ContextLabel => _context switch { "shared" => "Freigegeben", "global" => "Global", _ => "Privat" };
     private List<Card> ActiveCards => _slideMode ? _slideCards : _cards;
     private int CurrentIndex => _slideMode ? _slideIndex : _index;
     private Card CurrentCard => ActiveCards[CurrentIndex];
@@ -162,13 +190,18 @@
         _loading = true;
         var auth = await AuthState.GetAuthenticationStateAsync();
         _userSub = auth.User.GetUserId() ?? throw new UnauthorizedAccessException();
-        _module = await Repo.GetModuleAsync(ModuleId, _userSub);
+        // Ein einziger Zugriffsentscheid: eigen (bearbeitbar), freigegeben oder global (nur lernen) — sonst „nicht gefunden“ (ADR 0015)
+        var access = await Repo.ResolveModuleAccessAsync(_userSub, ModuleId);
+        _module = access?.Module;
+        _context = access?.Context ?? "private";
+        _canEdit = access?.CanEdit ?? false;
+        _isAdmin = auth.User.IsInRole(Roles.Admin);
         if (_module is not null)
         {
-            _categories = await Repo.ListCategoriesAsync(_userSub, ModuleId);
-            _cards = await Repo.ListCardsAsync(_userSub, ModuleId, _category, archived: false);
-            _slideCards = await Repo.ListSlideCardsAsync(_userSub, ModuleId, _category);
-            _archivedCards = await Repo.ListCardsAsync(_userSub, ModuleId, null, archived: true);
+            _categories = await Repo.ListReadableCategoriesAsync(_userSub, ModuleId);
+            _cards = await Repo.ListReadableCardsAsync(_userSub, ModuleId, _category);
+            _slideCards = await Repo.ListReadableCardsAsync(_userSub, ModuleId, _category, slideOnly: true);
+            _archivedCards = _canEdit ? await Repo.ListCardsAsync(_userSub, ModuleId, null, archived: true) : new List<Card>();
             _archivedCount = _archivedCards.Count;
             _hasSlideMode = _slideCards.Count > 0;
             _slideMax = _slideCards.Count == 0 ? 0 : _slideCards.Max(c => c.SlideNumber ?? 0);
@@ -233,6 +266,7 @@
 
     private async Task ArchiveAsync(string id)
     {
+        if (!_canEdit) return;   // zusätzlich zur serverseitigen Eigentümerprüfung im Repository
         await Repo.SetArchivedAsync(id, true, _userSub);
         await ReloadAsync();
     }
@@ -245,6 +279,7 @@
 
     private async Task ToggleArchive()
     {
+        if (!_canEdit) return;
         _showArchive = !_showArchive;
         await ReloadAsync();
     }

@@ -112,6 +112,8 @@ Der Workflow ersetzt in `deploy/iis/web.env` nur die vorhandenen Platzhalter; `.
 - `MCP_PUBLIC_URL` — öffentliche URL des MCP-Servers (Allowlist für die OAuth-Rückleitung); ohne sie ist die OAuth-Anmeldung am MCP-Server nicht möglich
 - optional `OIDC_ROLE_MAP`, `MCP_TOKEN_DAYS`
 - am MCP-Server: `LEARNCARDS_WEB_PUBLIC_URL` (öffentliche Web-URL für die Browser-Anmeldung), für stdio-Clients `LEARNCARDS_MCP_TOKEN`
+- **Bildspeicher** ([ADR 0017](adr/0017-konfigurierbare-bildspeicher.md)/[0018](adr/0018-zentraler-image-proxy-und-storage-zugriff.md)): Standard `database` (keine Aktion nötig). Für `local`: `IMAGE_STORAGE_PROVIDER=local` und `IMAGE_LOCAL_PATH` auf ein Verzeichnis **außerhalb** des Deploy-Ordners (`IIS_PHYSICAL_PATH` wird bei jedem Deploy ersetzt) mit Schreibrecht nur für die Identität des Anwendungspools (z. B. `IIS AppPool\LearnCards`).
+  Für Azure Blob/S3/SharePoint die `IMAGE_*`-Variablen als IIS-Umgebungsvariablen oder über eine Secret-Verwaltung setzen (siehe `.env.example`); `IMAGE_CACHE_PATH` ebenfalls außerhalb des Deploy-Ordners. Ausgehender HTTPS-Zugriff auf den Speicher-Endpunkt muss die Firewall erlauben.
 
 ## GitHub Secrets
 

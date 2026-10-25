@@ -1,0 +1,190 @@
+@inject SharingService Sharing
+@inject AuthenticationStateProvider AuthState
+
+@* Freigabedialog für ein eigenes Modul: persönliche Freigaben und Einreichung zur globalen Veröffentlichung (ADR 0015) *@
+<div class="card panel share-panel">
+    <div class="share-head">
+        <h2 class="panel-title">Modul freigeben</h2>
+        <button class="btn btn-ghost btn-sm" @onclick="() => OnClose.InvokeAsync()" aria-label="Freigabe schließen">✕ Schließen</button>
+    </div>
+
+    @if (_message is not null)
+    {
+        <div class="alert @(_messageOk ? "alert-ok" : "alert-error")" role="status">@_message</div>
+    }
+
+    <h3>Persönliche Freigabe</h3>
+    <p class="muted">
+        Empfänger dürfen die Karten lesen, lernen und Quizze machen — sie können das Original nicht ändern.
+        Lernstatus, Chat-Verläufe und Ergebnisse der Empfänger bleiben bei ihnen und werden dir nicht angezeigt.
+    </p>
+
+    <div class="form-row">
+        <input class="input" placeholder="Benutzer suchen (Name oder E-Mail, mindestens 3 Zeichen)" @bind="_query" @bind:event="oninput" @onkeydown="OnSearchKey" />
+        <button class="btn btn-primary" @onclick="SearchAsync" disabled="@(_query.Trim().Length < 3)">Suchen</button>
+    </div>
+
+    @if (_searched && _results.Count == 0)
+    {
+        <p class="muted">Keine passenden aktiven Benutzer gefunden.</p>
+    }
+    @if (_results.Count > 0)
+    {
+        <ul class="plain-list share-results">
+            @foreach (var u in _results)
+            {
+                <li>
+                    <span><strong>@u.DisplayName</strong> <span class="muted">@u.Email</span></span>
+                    @if (_shares.Any(s => s.RecipientUserId == u.Id))
+                    {
+                        <span class="badge badge-shared">bereits freigegeben</span>
+                    }
+                    else
+                    {
+                        <button class="btn btn-ghost btn-sm" @onclick="() => GrantAsync(u)">Freigeben</button>
+                    }
+                </li>
+            }
+        </ul>
+    }
+
+    <h4>Freigegeben für</h4>
+    @if (_shares.Count == 0)
+    {
+        <p class="muted">Dieses Modul ist noch für niemanden freigegeben (privat).</p>
+    }
+    else
+    {
+        <ul class="plain-list share-results">
+            @foreach (var s in _shares)
+            {
+                <li>
+                    <span><strong>@s.RecipientName</strong> <span class="muted">@s.RecipientEmail · seit @s.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy")</span></span>
+                    <button class="btn btn-ghost btn-sm" @onclick="() => RevokeAsync(s)">Widerrufen</button>
+                </li>
+            }
+        </ul>
+        <p class="muted">Ein Widerruf beendet nur den Zugriff. Bereits erzielte Ergebnisse der Empfänger bleiben bei ihnen erhalten.</p>
+    }
+
+    <hr class="share-sep" />
+    <h3>Globale Veröffentlichung</h3>
+    <p class="muted">
+        Du kannst eine <strong>Kopie</strong> dieses Moduls einem Administrator zur Veröffentlichung für alle Benutzer vorschlagen.
+        Dein Original bleibt privat und unverändert; spätere Änderungen erscheinen global erst, wenn du eine Aktualisierung einreichst und sie freigegeben wird.
+    </p>
+
+    @if (_submissions.Count > 0)
+    {
+        <ul class="plain-list share-results">
+            @foreach (var s in _submissions)
+            {
+                <li>
+                    <span>
+                        Version @s.Version (@(s.Kind == "update" ? "Aktualisierung" : "Erstveröffentlichung")) · eingereicht @s.SubmittedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
+                        @if (!string.IsNullOrWhiteSpace(s.Reason)) { <span class="muted"> — @s.Reason</span> }
+                    </span>
+                    <span class="badge @StatusBadge(s.Status)">@StatusLabel(s.Status)</span>
+                </li>
+            }
+        </ul>
+    }
+
+    <button class="btn btn-primary" @onclick="SubmitAsync" disabled="@(_busy || _submissions.Any(s => s.Status == "pending"))">
+        @(_submissions.Any(s => s.Status == "approved") ? "Aktualisierung zur Veröffentlichung einreichen" : "Zur globalen Veröffentlichung einreichen")
+    </button>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string ModuleId { get; set; } = "";
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private string _userId = "";
+    private string _query = "";
+    private bool _searched;
+    private bool _busy;
+    private List<UserSearchResult> _results = new();
+    private List<ShareInfo> _shares = new();
+    private List<SubmissionInfo> _submissions = new();
+    private string? _message;
+    private bool _messageOk;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _userId = auth.User.GetUserId() ?? throw new UnauthorizedAccessException();
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        try
+        {
+            _shares = await Sharing.ListSharesAsync(_userId, ModuleId);
+            _submissions = await Sharing.ListOwnSubmissionsAsync(_userId, ModuleId);
+        }
+        catch (KeyNotFoundException e) { Fail(e.Message); }
+    }
+
+    private async Task OnSearchKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await SearchAsync();
+    }
+
+    private async Task SearchAsync()
+    {
+        _results = await Sharing.SearchRecipientsAsync(_userId, _query);
+        _searched = true;
+    }
+
+    private Task GrantAsync(UserSearchResult u) => Run(async () =>
+    {
+        await Sharing.GrantShareAsync(_userId, ModuleId, u.Id);
+        return $"Modul für {u.DisplayName} freigegeben.";
+    });
+
+    private Task RevokeAsync(ShareInfo s) => Run(async () =>
+    {
+        await Sharing.RevokeShareAsync(_userId, ModuleId, s.RecipientUserId);
+        return $"Freigabe für {s.RecipientName} widerrufen.";
+    });
+
+    private Task SubmitAsync() => Run(async () =>
+    {
+        await Sharing.SubmitAsync(_userId, ModuleId);
+        return "Das Modul wurde zur Veröffentlichung eingereicht. Ein Administrator prüft es.";
+    });
+
+    private async Task Run(Func<Task<string>> action)
+    {
+        _busy = true;
+        try
+        {
+            var text = await action();
+            _message = "✅ " + text;
+            _messageOk = true;
+            await ReloadAsync();
+        }
+        catch (Exception e) when (e is ArgumentException or InvalidOperationException or KeyNotFoundException)
+        {
+            Fail(e.Message);
+        }
+        finally { _busy = false; }
+    }
+
+    private void Fail(string m) { _message = "❌ " + m; _messageOk = false; }
+
+    private static string StatusLabel(string status) => status switch
+    {
+        "approved" => "veröffentlicht",
+        "rejected" => "abgelehnt",
+        _ => "wartet auf Prüfung",
+    };
+
+    private static string StatusBadge(string status) => status switch
+    {
+        "approved" => "badge-global",
+        "rejected" => "badge-admin",
+        _ => "badge-shared",
+    };
+}

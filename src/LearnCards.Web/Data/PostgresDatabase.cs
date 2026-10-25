@@ -139,6 +139,8 @@ public sealed class PostgresDatabase : IDatabase
         await EnsureCardColumnAsync("slide_number", "INTEGER NULL", ct);
         await EnsureCardColumnAsync("target_time_sec", "INTEGER NULL", ct);
         await EnsureCardColumnAsync("quiz_json", "TEXT NOT NULL DEFAULT '[]'", ct);
+        await EnsureCardColumnAsync("images_json", "TEXT NOT NULL DEFAULT '[]'", ct);   // ADR 0016 (seit ADR 0017 nur noch Altbestand)
+        await EnsureCardColumnAsync("images_migrated", "INTEGER NOT NULL DEFAULT 0", ct);   // ADR 0017: 1 = Bilder liegen in card_images
     }
 
     private async Task MigrateQuizResultColumnsAsync(CancellationToken ct)

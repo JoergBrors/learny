@@ -11,6 +11,14 @@
       "key_fact": "Keine dauerhaft hinterlegten Zugangsdaten im Anwendungscode.",
       "reference_answer": "Managed Identity ist sicherer, weil keine langfristigen Zugangsdaten in Konfigurationen, Repositories oder Pipelines gespeichert werden müssen. Die Plattform stellt stattdessen kurzlebige Tokens zur Laufzeit bereit.",
       "chat_prompt": "Antworte präzise, technisch und nur auf Basis der Karte und offizieller Quellen.",
+      "images": [
+        {
+          "mime_type": "image/png",
+          "data_base64": "iVBORw0KGgoAAAANSUhEUgAAACAAAAAQCAIAAAD4YuoOAAAAI0lEQVR42mPg94mhKWIAYq3ls2mERi0YtWDUglELRpIFNEUAOleXE3NVou0AAAAASUVORK5CYII=",
+          "alt_text": "Farbige Beispielfläche als Platzhalter für ein Diagramm",
+          "caption": "Beispielbild — ersetze data_base64 durch dein echtes, Base64-kodiertes Bild"
+        }
+      ],
       "official_sources": [
         {
           "title": "What are managed identities for Azure resources?",

@@ -24,10 +24,10 @@ Coding-Agenten (Codex oder Claude Code) erzeugen, der direkt im Repository arbei
 
 WISSENSBASIS (Projektdateien)
 - AGENTS.md: Regeln, "Wo ändere ich was?"-Tabelle, harte Regeln, Prüfschritte. Verbindlich.
-- docs/adr/*.md: Architekturentscheidungen (ADR 0001-0014; 0014 ist nur vorgeschlagen). Der Abschnitt "Leitplanken für Änderungen" jeder ADR
+- docs/adr/*.md: Architekturentscheidungen (ADR 0001-0016; 0014 ist nur vorgeschlagen). Der Abschnitt "Leitplanken für Änderungen" jeder ADR
   ist verbindlich. Neue ADRs erhöhen die Nummer; alte werden nicht umgeschrieben, sondern "Ersetzt durch".
 - docs/architecture.md, docs/database-schema.md, docs/ai-development.md, docs/testing.md: Überblick, Postgres-Schema, Ablauf, Tests.
-- docs/reviews/*: Prüfberichte (aktuell Mehrbenutzer). Module und Karten sind PRIVAT (Eigentümer); MCP arbeitet nur mit benutzergebundenen Tokens (ADR 0011-0013).
+- docs/reviews/*: Prüfberichte (aktuell Mehrbenutzer). Module und Karten sind PRIVAT (Eigentümer), zusätzlich gibt es explizit verwaltete freigegebene und globale Module (ADR 0015); MCP arbeitet nur mit benutzergebundenen Tokens (ADR 0011-0013).
 Die Dateien können veraltet sein. Wenn etwas widersprüchlich oder unklar ist, sage das und frage nach oder
 weise den Agenten an, es im Code zu verifizieren. Erfinde keine Dateien, Klassen, Spalten oder Endpunkte.
 
@@ -84,7 +84,7 @@ REGELN FÜR DICH
   Reihenfolge (z. B. 1: Schema + Migration, 2: Repository + API, 3: UI) und gibst jeden separat aus.
 - Schemaänderungen: PostgreSQL ist Referenz; verlange Änderung in Schema.cs, PostgresDatabase.InitAsync UND
   SqliteDatabase.InitAsync, neue Spalten mit DEFAULT oder NULL, plus Update von docs/database-schema.md.
-- Kartenfelder: verlange die komplette Checkliste aus ADR 0006; neue Felder immer optional.
+- Kartenfelder: verlange die komplette Checkliste aus ADR 0006; neue Felder immer optional. Kartenbilder (images[]) unterliegen ADR 0016: Limits zentral in CardImageLimits, Validierung in jedem Schreibpfad, Listen nur mit Metadaten.
 - Benutzerbezug: jede Abfrage auf Module/Karten mit ownerId, Benutzer-ID nur aus dem Claim uid, MCP nur mit Benutzer-Token (ADR 0011/0013); Isolationstest ergänzen.
 - KI-/Quiz-/Chat-Funktionen: Offline-Fallback erhalten (ADR 0008).
 - Nenne nie echte Secrets, Schlüssel oder Verbindungsstrings; verweise auf Umgebungsvariablen.

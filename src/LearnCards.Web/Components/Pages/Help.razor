@@ -20,7 +20,7 @@
         <div class="template-grid">
             <article class="template-card">
                 <h3>Minimal-Template</h3>
-                <p class="muted">Kompaktes Startformat für einfache Karten ohne Quellen, Folien oder Quiz.</p>
+                <p class="muted">Kompaktes Startformat für einfache Karten mit optionalem Beispielbild (<code>images</code>), ohne Quellen, Folien oder Quiz.</p>
                 <div class="page-head-actions">
                     <a class="btn btn-primary btn-sm" href="/templates/minimal-card-template.json" download>JSON laden</a>
                 </div>
@@ -28,15 +28,23 @@
 
             <article class="template-card">
                 <h3>Vollständiges Karten-Template</h3>
-                <p class="muted">Zeigt Referenzantwort, Chat-Prompt und offizielles Quellenverzeichnis.</p>
+                <p class="muted">Zeigt Referenzantwort, Chat-Prompt, offizielles Quellenverzeichnis und ein Beispielbild (<code>images</code>).</p>
                 <div class="page-head-actions">
                     <a class="btn btn-primary btn-sm" href="/templates/full-card-template.json" download>JSON laden</a>
                 </div>
             </article>
 
             <article class="template-card">
+                <h3>Karte mit Bild</h3>
+                <p class="muted">Minimale Karte mit <code>images[]</code> (Base64, Alternativtext, Beschriftung). Das Bild wird beim Import im konfigurierten Bildspeicher abgelegt.</p>
+                <div class="page-head-actions">
+                    <a class="btn btn-primary btn-sm" href="/templates/image-card-template.json" download>JSON laden</a>
+                </div>
+            </article>
+
+            <article class="template-card">
                 <h3>Folien-/Seiten-Template</h3>
-                <p class="muted">Mit <code>slide_number</code>, <code>target_time_sec</code> und vorbereitetem Seitenquiz.</p>
+                <p class="muted">Mit <code>slide_number</code>, <code>target_time_sec</code>, vorbereitetem Seitenquiz und Folienbild (<code>images</code>).</p>
                 <div class="page-head-actions">
                     <a class="btn btn-primary btn-sm" href="/templates/slide-deck-template.json" download>JSON laden</a>
                 </div>
@@ -64,11 +72,60 @@
                 </ul>
             </div>
             <div class="help-block">
+                <h3>Bilder</h3>
+                <ul class="help-list">
+                    <li><code>images</code> (optional) hängt bis zu 5 Bilder an eine Karte — siehe Abschnitt „Bilder in Karten“.</li>
+                </ul>
+            </div>
+            <div class="help-block">
                 <h3>Folienmodus</h3>
                 <ul class="help-list">
                     <li><code>slide_number</code> aktiviert die Reihenfolge im Folienmodus.</li>
                     <li><code>target_time_sec</code> zeigt das Redezeitziel pro Folie.</li>
                     <li><code>quiz</code> hinterlegt statische Seitenfragen direkt auf der Karte.</li>
+                </ul>
+            </div>
+        </div>
+    </section>
+
+    <section class="card panel">
+        <h2 class="panel-title">Bilder in Karten</h2>
+        <p class="muted">Eine Karte kann optional Bilder enthalten (Diagramme, Screenshots). Sie werden als Base64 im JSON mitgeliefert, vom Server im konfigurierten Bildspeicher abgelegt (Datenbank, Dateisystem, Azure Blob, S3 oder SharePoint — Betriebseinstellung) und über den geschützten Bildabruf <code>/api/images/{id}</code> angezeigt — ohne KI-Schlüssel und ohne externe Bild-URLs. Der Import bleibt unabhängig vom Speicher immer gleich; Zugangsdaten oder Cloud-Adressen sieht niemand.</p>
+        <pre class="help-code"><code>"images": [
+  {
+    "mime_type": "image/png",
+    "data_base64": "iVBORw0KGgoAAAANSUhEUgAAACAAAAAQCAIAAAD4YuoOAAAAI0lEQVR42mPg94mhKWIAYq3ls2mERi0YtWDUglELRpIFNEUAOleXE3NVou0AAAAASUVORK5CYII=",
+    "alt_text": "Farbige Beispielfläche (32 × 16 Pixel)",
+    "caption": "Beispielbild"
+  }
+]</code></pre>
+        <div class="help-grid">
+            <div class="help-block">
+                <h3>Regeln</h3>
+                <ul class="help-list">
+                    <li>Erlaubte Typen: <code>image/png</code>, <code>image/jpeg</code>, <code>image/webp</code>. Der Typ muss zum tatsächlichen Bild passen.</li>
+                    <li>Höchstens <strong>5 Bilder pro Karte</strong>, jedes höchstens <strong>2 MiB</strong> (dekodiert). Base64 ist etwa ein Drittel größer als die Datei.</li>
+                    <li><code>data_base64</code> ist reines Base64 <strong>ohne</strong> <code>data:</code>-Präfix. <code>alt_text</code> (empfohlen) beschreibt das Bild, <code>caption</code> ist die Bildunterschrift (je höchstens 300 Zeichen).</li>
+                    <li>Fehlt <code>images</code>, bleibt eine bestehende Karte beim Überschreiben unverändert; <code>"images": []</code> entfernt die Bilder.</li>
+                    <li>Fehlerhafte Bilder lehnen die betroffene Karte mit einer Begründung ab; die übrigen Karten werden importiert.</li>
+                    <li>Beim Abruf einer Karte (<code>GET /api/cards/{id}</code>) enthält <code>images[]</code> Metadaten und eine <code>url</code>; die Bilddaten als Base64 gibt es nur mit <code>?include_image_data=true</code> (Sicherung/Export).</li>
+                </ul>
+            </div>
+            <div class="help-block">
+                <h3>Datei in Base64 umwandeln</h3>
+                <ul class="help-list">
+                    <li>PowerShell: <code>[Convert]::ToBase64String([IO.File]::ReadAllBytes("bild.png"))</code></li>
+                    <li>Linux/macOS: <code>base64 -w0 bild.png</code> (macOS: <code>base64 -i bild.png</code>)</li>
+                    <li>Verkleinere Bilder vorher (z. B. unter 200 KiB): große Importdateien sind langsam, und der Upload ist auf 28 MB begrenzt.</li>
+                </ul>
+            </div>
+            <div class="help-block">
+                <h3>Hinweise für KI-Assistenten</h3>
+                <ul class="help-list">
+                    <li>Nur Bilder kodieren, die dir tatsächlich vorliegen — <strong>keine Base64-Daten erfinden</strong> oder „aus dem Gedächtnis“ erzeugen.</li>
+                    <li>Rufe zuerst das aktuelle Schema ab (MCP: <code>get_import_schema</code>, REST: <code>/api/schema/import/cards</code>).</li>
+                    <li>Base64 in Tool-Aufrufen verbraucht Modellkontext: wenige, kleine Bilder; große Importe in kleinen Stapeln senden.</li>
+                    <li>Ohne verfügbares Bild das Feld weglassen und stattdessen den Inhalt im Text beschreiben.</li>
                 </ul>
             </div>
         </div>
@@ -121,5 +178,33 @@ Hier sind meine Folien / Notizen:
                 <p class="muted">JSON validieren, Reihenfolge kontrollieren, Quizfragen und Quellen manuell gegenlesen.</p>
             </div>
         </div>
+    </section>
+
+    <section class="card panel">
+        <h2 class="panel-title">Freigeben und globale Veröffentlichung</h2>
+        <p class="muted">Deine Module sind zunächst <strong>privat</strong>. Es gibt drei Bereiche, die du in der Modulübersicht über die Reiter findest:</p>
+        <div class="help-grid">
+            <div class="help-block">
+                <h3>Meine Module (privat)</h3>
+                <p class="muted">Nur du siehst und bearbeitest sie. Importierte und per MCP angelegte Karten landen immer hier.</p>
+            </div>
+            <div class="help-block">
+                <h3>Mit mir geteilt</h3>
+                <p class="muted">Module anderer Benutzer, die sie für dich freigegeben haben. Du kannst Karten lesen, lernen und Quizze machen — das Original ändern oder löschen kannst du nicht. Dein Lernstatus und deine Ergebnisse bleiben bei dir.</p>
+            </div>
+            <div class="help-block">
+                <h3>Globale Module</h3>
+                <p class="muted">Von Administratoren veröffentlichte, geprüfte Versionen für alle Benutzer. Ergebnisse zählen im globalen Kontext und sind für dich, Administratoren und Auditoren (ohne Antworten) einsehbar — nicht für andere Benutzer.</p>
+            </div>
+        </div>
+        <h3>So gibst du ein Modul frei</h3>
+        <ol>
+            <li>Öffne dein Modul und wähle <strong>Modul freigeben</strong>.</li>
+            <li>Suche den Benutzer (Name oder E-Mail, mindestens 3 Zeichen) und gib das Modul frei. Unter „Freigegeben für“ kannst du jede Freigabe widerrufen — der Zugriff endet sofort, bereits erzielte Ergebnisse der Empfänger bleiben erhalten.</li>
+            <li>Für die globale Veröffentlichung wähle <strong>Zur globalen Veröffentlichung einreichen</strong>. Ein Administrator prüft eine eingefrorene Kopie; dein Original bleibt privat und unverändert. Änderungen erscheinen global erst, wenn du eine <strong>Aktualisierung</strong> einreichst und sie freigegeben wird.</li>
+        </ol>
+        <p class="muted">Hinweis zum Löschen: Haben andere Benutzer bereits Ergebnisse auf deinem Modul oder einer Karte, kann es nicht gelöscht werden. Archiviere stattdessen die Karten.</p>
+        <h3>MCP</h3>
+        <p class="muted">Dein MCP-Client sieht standardmäßig nur deine eigenen Module. Mit <code>list_modules</code> und <code>scope</code> = <code>shared</code>, <code>global</code> oder <code>all</code> listest du auch freigegebene und globale Module (nur lesend). Freigeben und Veröffentlichen sind über MCP nicht möglich.</p>
     </section>
 </div>

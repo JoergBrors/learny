@@ -1,17 +1,25 @@
 @page "/admin"
-@attribute [Authorize(Roles = Roles.Admin)]
+@attribute [Authorize(Roles = "admin,auditor")]
 @rendermode InteractiveServer
 @inject UserService Users
 @inject CardRepository Repo
+@inject SharingService Sharing
 @inject AuthenticationStateProvider AuthState
 
-<PageTitle>Administration — LearnCards</PageTitle>
+<PageTitle>@(_isAdmin ? "Administration" : "Globale Inhalte") — LearnCards</PageTitle>
 
 <div class="container">
     <div class="page-head">
         <div>
-            <h1>Administration</h1>
-            <p class="muted">Benutzer, Rollen und unzugeordneter Altbestand. Über Entra-ID-App-Rollen vergebene Rollen (z. B. Admin.All) werden bei der nächsten Anmeldung wieder gesetzt; manuell vergebene bleiben bestehen.</p>
+            <h1>@(_isAdmin ? "Administration" : "Globale Inhalte (Auditor)")</h1>
+            @if (_isAdmin)
+            {
+                <p class="muted">Benutzer, Rollen, globale Lernmodule und unzugeordneter Altbestand. Über Entra-ID-App-Rollen vergebene Rollen (z. B. Admin.All) werden bei der nächsten Anmeldung wieder gesetzt; manuell vergebene bleiben bestehen.</p>
+            }
+            else
+            {
+                <p class="muted">Lesende Einsicht in globale Veröffentlichungen, aggregierte globale Ergebnisse und das Veröffentlichungsprotokoll. Änderungen sind dieser Rolle nicht erlaubt.</p>
+            }
         </div>
         <div class="page-head-actions">
             <a class="btn btn-ghost" href="/profile">← Mein Profil</a>
@@ -29,68 +37,264 @@
     }
     else
     {
-        <div class="card panel">
-            <h2 class="panel-title">Benutzer</h2>
-            <table class="table">
-                <thead><tr><th>Name</th><th>E-Mail</th><th>Rollen</th><th>Status</th><th>Aktionen</th></tr></thead>
-                <tbody>
-                    @foreach (var u in _users)
-                    {
-                        <tr>
-                            <td>@u.DisplayName<br /><small class="muted"><code>@u.Id</code></small></td>
-                            <td>@u.Email</td>
-                            <td>
-                                @foreach (var r in u.Roles) { <span class="badge badge-@r">@r</span> }
-                            </td>
-                            <td>@(u.IsActive ? "aktiv" : "gesperrt")</td>
-                            <td class="actions">
-                                <button class="btn btn-ghost btn-sm" @onclick="() => ToggleRole(u, Roles.Admin)">Admin @(u.IsAdmin ? "entziehen" : "vergeben")</button>
-                                <button class="btn btn-ghost btn-sm" @onclick="() => ToggleRole(u, Roles.Auditor)">Auditor @(u.IsAuditor ? "entziehen" : "vergeben")</button>
-                                <button class="btn btn-ghost btn-sm" @onclick="() => ToggleStatus(u)">@(u.IsActive ? "Sperren" : "Entsperren")</button>
-                            </td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
-        </div>
+        @if (_isAdmin)
+        {
+            <div class="card panel">
+                <h2 class="panel-title">Benutzer</h2>
+                <table class="table">
+                    <thead><tr><th>Name</th><th>E-Mail</th><th>Rollen</th><th>Status</th><th>Aktionen</th></tr></thead>
+                    <tbody>
+                        @foreach (var u in _users)
+                        {
+                            <tr>
+                                <td>@u.DisplayName<br /><small class="muted"><code>@u.Id</code></small></td>
+                                <td>@u.Email</td>
+                                <td>
+                                    @foreach (var r in u.Roles) { <span class="badge badge-@r">@r</span> }
+                                </td>
+                                <td>@(u.IsActive ? "aktiv" : "gesperrt")</td>
+                                <td class="actions">
+                                    <button class="btn btn-ghost btn-sm" @onclick="() => ToggleRole(u, Roles.Admin)">Admin @(u.IsAdmin ? "entziehen" : "vergeben")</button>
+                                    <button class="btn btn-ghost btn-sm" @onclick="() => ToggleRole(u, Roles.Auditor)">Auditor @(u.IsAuditor ? "entziehen" : "vergeben")</button>
+                                    <button class="btn btn-ghost btn-sm" @onclick="() => ToggleStatus(u)">@(u.IsActive ? "Sperren" : "Entsperren")</button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="card panel">
+                <h2 class="panel-title">Veröffentlichungsvorschläge</h2>
+                <p class="muted">
+                    Benutzer reichen eine <strong>eingefrorene Kopie</strong> ihres Moduls ein. Du siehst nur diese Kopie, nie das private Original. Veröffentlichen macht sie für alle Benutzer lernbar;
+                    ablehnen verwirft die Kopie, das Original bleibt unverändert.
+                </p>
+                @if (_submissions.Count == 0)
+                {
+                    <p>Keine Einreichungen vorhanden.</p>
+                }
+                else
+                {
+                    <table class="table">
+                        <thead><tr><th>Modul</th><th>Eingereicht von</th><th>Karten</th><th>Version</th><th>Zeitpunkt</th><th>Status</th><th>Aktionen</th></tr></thead>
+                        <tbody>
+                            @foreach (var s in _submissions)
+                            {
+                                <tr>
+                                    <td>@s.ModuleName<br /><small class="muted">@(s.Kind == "update" ? "Aktualisierung" : "Erstveröffentlichung")</small></td>
+                                    <td>@s.SubmitterName</td>
+                                    <td>@s.CardCount</td>
+                                    <td>@s.Version</td>
+                                    <td>@s.SubmittedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                                    <td>
+                                        <span class="badge @SubmissionBadge(s.Status)">@SubmissionLabel(s.Status)</span>
+                                        @if (!string.IsNullOrWhiteSpace(s.Reason)) { <br /><small class="muted">@s.Reason</small> }
+                                    </td>
+                                    <td class="actions">
+                                        @if (s.Status == "pending")
+                                        {
+                                            <button class="btn btn-ghost btn-sm" @onclick="() => TogglePreview(s.Id)">@(_previewId == s.Id ? "Vorschau schließen" : "Vorschau")</button>
+                                            <select class="input" title="Welche Veröffentlichung soll ersetzt werden?" value="@_replaceTargets.GetValueOrDefault(s.Id, "")" @onchange="e => _replaceTargets[s.Id] = e.Value?.ToString() ?? string.Empty">
+                                                <option value="">@(s.Kind == "update" ? "Frühere Version ersetzen (Standard)" : "Als neue Veröffentlichung (Standard)")</option>
+                                                <option value="new">Als eigenständig neu veröffentlichen</option>
+                                                @foreach (var p in PublicationChoices())
+                                                {
+                                                    <option value="@p.PublicationId">Ersetzt: @p.Name (v@(p.GlobalVersion), @GlobalLabel(p.GlobalStatus))</option>
+                                                }
+                                            </select>
+                                            <button class="btn btn-primary btn-sm" @onclick="() => Approve(s.Id)">Veröffentlichen</button>
+                                            <button class="btn btn-ghost btn-sm" @onclick="() => _rejectId = (_rejectId == s.Id ? null : s.Id)">Ablehnen</button>
+                                        }
+                                    </td>
+                                </tr>
+                                @if (_previewId == s.Id && _previewModule is not null)
+                                {
+                                    <tr>
+                                        <td colspan="7">
+                                            <strong>@_previewModule.Icon @_previewModule.Name</strong> — @_previewCards.Count Karten (eingefrorene Kopie)
+                                            <ul class="preview-cards">
+                                                @foreach (var c in _previewCards)
+                                                {
+                                                    <li><span class="pill pill-muted">@c.Category</span> <strong>@c.Term</strong> — @c.Question@(c.Quiz.Count > 0 ? $" ({c.Quiz.Count} Quizfrage(n))" : "")@(c.Images.Count > 0 ? $" 🖼 {c.Images.Count} Bild(er)" : "")</li>
+                                                }
+                                            </ul>
+                                        </td>
+                                    </tr>
+                                }
+                                @if (_rejectId == s.Id)
+                                {
+                                    <tr>
+                                        <td colspan="7">
+                                            <div class="form-row">
+                                                <input class="input" maxlength="500" placeholder="Begründung (optional, sichtbar für den Einreicher)" @bind="_rejectReason" />
+                                                <button class="btn btn-danger btn-sm" @onclick="() => Reject(s.Id)">Ablehnung bestätigen</button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                }
+            </div>
+        }
 
         <div class="card panel">
-            <h2 class="panel-title">Unzugeordnete Module (Altbestand)</h2>
-            <p class="muted">Diese Module stammen aus der Zeit vor der Mehrbenutzerfähigkeit und haben keinen Eigentümer.
-                Sie sind für normale Benutzer unsichtbar, bis du sie einem Benutzer zuweist. Es erfolgt keine automatische Zuordnung.</p>
-            @if (_unowned.Count == 0)
+            <h2 class="panel-title">Globale Lernmodule</h2>
+            @if (_globalModules.Count == 0)
             {
-                <p>Keine unzugeordneten Module vorhanden.</p>
+                <p>Es wurde noch kein Modul global veröffentlicht.</p>
             }
             else
             {
                 <table class="table">
-                    <thead><tr><th>Modul</th><th>Karten</th><th>Zuweisen an</th></tr></thead>
+                    <thead><tr><th>Modul</th><th>Autor / Herkunft</th><th>Version</th><th>Veröffentlicht</th><th>Karten</th><th>Status</th><th>Aktionen</th></tr></thead>
                     <tbody>
-                        @foreach (var m in _unowned)
+                        @foreach (var m in _globalModules)
                         {
                             <tr>
                                 <td>@m.Icon @m.Name</td>
-                                <td>@m.CardCount</td>
+                                <td>@m.SourceOwnerName</td>
+                                <td>@m.GlobalVersion</td>
+                                <td>@(m.PublishedAt is null ? "—" : m.PublishedAt.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm"))</td>
+                                <td>@m.ActiveCount</td>
+                                <td><span class="badge @GlobalBadge(m.GlobalStatus)">@GlobalLabel(m.GlobalStatus)</span></td>
                                 <td class="actions">
-                                    <select class="input" @onchange="e => _assignTargets[m.Id] = e.Value?.ToString() ?? string.Empty">
-                                        <option value="">— Benutzer wählen —</option>
-                                        @foreach (var u in _users.Where(x => x.IsActive))
+                                    @if (m.GlobalStatus == "active")
+                                    {
+                                        <a class="btn btn-ghost btn-sm" href="/module/@m.Id">Öffnen</a>
+                                    }
+                                    @if (_isAdmin && m.GlobalStatus == "active")
+                                    {
+                                        <button class="btn btn-ghost btn-sm" @onclick="() => SetPublication(m, false)">Deaktivieren</button>
+                                    }
+                                    @if (_isAdmin && m.GlobalStatus == "deactivated" && IsLatestVersion(m))
+                                    {
+                                        <button class="btn btn-ghost btn-sm" @onclick="() => SetPublication(m, true)">Aktivieren</button>
+                                    }
+                                    @if (_isAdmin)
+                                    {
+                                        @if (_deleteId == m.Id)
                                         {
-                                            <option value="@u.Id">@u.DisplayName (@u.Email)</option>
+                                            <span class="muted">Version samt Karten, Bildern und Lernergebnissen endgültig löschen?</span>
+                                            <button class="btn btn-danger btn-sm" @onclick="() => DeleteVersion(m)">Ja, löschen</button>
+                                            <button class="btn btn-ghost btn-sm" @onclick="() => _deleteId = null">Abbrechen</button>
                                         }
-                                    </select>
-                                    <button class="btn btn-primary btn-sm" @onclick="() => Assign(m.Id)">Zuweisen</button>
+                                        else
+                                        {
+                                            <button class="btn btn-ghost btn-sm" @onclick="() => _deleteId = m.Id">Löschen</button>
+                                        }
+                                    }
                                 </td>
                             </tr>
+                        }
+                    </tbody>
+                </table>
+                @if (_isAdmin)
+                {
+                    <p class="muted">Eine Aktualisierung entsteht, indem der Autor das Modul erneut einreicht und du die neue Version veröffentlichst (siehe Vorschläge). Frühere Versionen und ihre Ergebnisse bleiben erhalten.</p>
+                }
+            }
+        </div>
+
+        <div class="card panel">
+            <h2 class="panel-title">Globale Lernergebnisse</h2>
+            <p class="muted">
+                Aggregierte Ergebnisse je globaler Version. Die Detailansicht zeigt Lernende, Punkte und Zeitpunkt — keine Antworten oder Feedbacktexte — und wird protokolliert.
+                Private und persönlich freigegebene Ergebnisse sind hier nie enthalten.
+            </p>
+            @if (_results.Count == 0)
+            {
+                <p>Noch keine globalen Ergebnisse.</p>
+            }
+            else
+            {
+                <table class="table">
+                    <thead><tr><th>Modul</th><th>Version</th><th>Versuche</th><th>Lernende</th><th>Ø Ergebnis</th><th></th></tr></thead>
+                    <tbody>
+                        @foreach (var r in _results)
+                        {
+                            <tr>
+                                <td>@r.Name</td>
+                                <td>@r.Version <span class="badge @GlobalBadge(r.Status)">@GlobalLabel(r.Status)</span></td>
+                                <td>@r.Attempts</td>
+                                <td>@r.Learners</td>
+                                <td>@(r.Attempts == 0 ? "—" : r.AveragePercent.ToString("0.#") + " %")</td>
+                                <td class="actions">
+                                    @if (r.Attempts > 0)
+                                    {
+                                        <button class="btn btn-ghost btn-sm" @onclick="() => ToggleDetails(r.ModuleId)">@(_detailModuleId == r.ModuleId ? "Details schließen" : "Details")</button>
+                                    }
+                                </td>
+                            </tr>
+                            @if (_detailModuleId == r.ModuleId)
+                            {
+                                <tr>
+                                    <td colspan="6">
+                                        <table class="table">
+                                            <thead><tr><th>Zeitpunkt</th><th>Lernende(r)</th><th>Kategorie</th><th>Punkte</th><th>Note</th></tr></thead>
+                                            <tbody>
+                                                @foreach (var row in _detailRows)
+                                                {
+                                                    <tr>
+                                                        <td>@row.CompletedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                                                        <td>@row.LearnerName</td>
+                                                        <td>@(string.IsNullOrEmpty(row.Category) ? "Alle" : row.Category)</td>
+                                                        <td>@row.Score.ToString("0.#") / @row.MaxScore.ToString("0.#")</td>
+                                                        <td>@row.Grade</td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </table>
+                                    </td>
+                                </tr>
+                            }
                         }
                     </tbody>
                 </table>
             }
         </div>
 
+        @if (_isAdmin)
+        {
+            <div class="card panel">
+                <h2 class="panel-title">Unzugeordnete Module (Altbestand)</h2>
+                <p class="muted">Diese Module stammen aus der Zeit vor der Mehrbenutzerfähigkeit und haben keinen Eigentümer. Sie sind für normale Benutzer unsichtbar, bis du sie einem Benutzer zuweist. Es erfolgt keine automatische Zuordnung.</p>
+                @if (_unowned.Count == 0)
+                {
+                    <p>Keine unzugeordneten Module vorhanden.</p>
+                }
+                else
+                {
+                    <table class="table">
+                        <thead><tr><th>Modul</th><th>Karten</th><th>Zuweisen an</th></tr></thead>
+                        <tbody>
+                            @foreach (var m in _unowned)
+                            {
+                                <tr>
+                                    <td>@m.Icon @m.Name</td>
+                                    <td>@m.CardCount</td>
+                                    <td class="actions">
+                                        <select class="input" @onchange="e => _assignTargets[m.Id] = e.Value?.ToString() ?? string.Empty">
+                                            <option value="">— Benutzer wählen —</option>
+                                            @foreach (var u in _users.Where(x => x.IsActive))
+                                            {
+                                                <option value="@u.Id">@u.DisplayName (@u.Email)</option>
+                                            }
+                                        </select>
+                                        <button class="btn btn-primary btn-sm" @onclick="() => Assign(m.Id)">Zuweisen</button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </div>
+        }
+
         <div class="card panel">
-            <h2 class="panel-title">Protokoll (letzte 25 Aktionen)</h2>
+            <h2 class="panel-title">@(_isAdmin ? "Protokoll (letzte 25 Aktionen)" : "Veröffentlichungsprotokoll (letzte 25 Einträge)")</h2>
             <table class="table">
                 <thead><tr><th>Zeit</th><th>Aktion</th><th>Ziel</th><th>Detail</th></tr></thead>
                 <tbody>
@@ -112,10 +316,31 @@
 @code {
     private string _actorId = "";
     private bool _ready;
+    private bool _isAdmin;
     private List<AppUser> _users = new();
     private List<ModuleInfo> _unowned = new();
     private List<AuditEntry> _audit = new();
+    private List<SubmissionInfo> _submissions = new();
+    private List<ModuleInfo> _globalModules = new();
+    private List<GlobalResultSummary> _results = new();
+    private List<GlobalResultRow> _detailRows = new();
+    private string? _detailModuleId;
+    private string? _previewId;
+    private ModuleInfo? _previewModule;
+    private List<Card> _previewCards = new();
+    private string? _rejectId;
+    private string _rejectReason = "";
     private readonly Dictionary<string, string> _assignTargets = new();
+    private readonly Dictionary<string, string> _replaceTargets = new();
+    private string? _deleteId;
+
+    /// <summary>Zuletzt veröffentlichte Version je Veröffentlichung — Auswahl für „ersetzen“.</summary>
+    private IEnumerable<ModuleInfo> PublicationChoices() =>
+        _globalModules.Where(m => !string.IsNullOrEmpty(m.PublicationId))
+            .GroupBy(m => m.PublicationId).Select(g => g.OrderByDescending(x => x.GlobalVersion ?? 0).First())
+            .OrderBy(m => m.Name);
+
+
     private string? _message;
     private bool _messageOk;
 
@@ -130,17 +355,28 @@
     {
         try
         {
-            // Serverseitige Rollenprüfung gegen die DB (nicht nur das Seitenattribut).
-            await Users.RequireRoleAsync(_actorId, Roles.Admin);
-            _users = await Users.ListAsync();
-            _unowned = await Repo.ListUnownedModulesAsync();
-            _audit = await Users.ListAuditAsync(_actorId, 25);
+            // Serverseitige Rollenprüfung gegen die DB (nicht nur das Seitenattribut): Administrator oder Auditor.
+            var actor = await Users.RequireAnyRoleAsync(_actorId, Roles.Admin, Roles.Auditor);
+            _isAdmin = actor.IsAdmin;
+            if (_isAdmin)
+            {
+                _users = await Users.ListAsync();
+                _unowned = await Repo.ListUnownedModulesAsync();
+                _submissions = (await Sharing.ListSubmissionsAsync(_actorId)).Take(50).ToList();
+                _audit = await Users.ListAuditAsync(_actorId, 25);
+            }
+            else
+            {
+                _audit = (await Users.ListPublicationAuditAsync(_actorId, 25));
+            }
+            _globalModules = await Sharing.ListGlobalModulesForReviewAsync(_actorId);
+            _results = await Sharing.GetGlobalResultSummariesAsync(_actorId);
             _ready = true;
         }
         catch (UnauthorizedAccessException)
         {
             _ready = false;
-            Fail("Administratorrechte erforderlich.");
+            Fail("Administrator- oder Auditorrechte erforderlich.");
         }
     }
 
@@ -175,6 +411,64 @@
         return "Modul zugewiesen.";
     });
 
+    private async Task TogglePreview(string submissionId)
+    {
+        if (_previewId == submissionId) { _previewId = null; return; }
+        try
+        {
+            var (_, module, cards) = await Sharing.PreviewSubmissionAsync(_actorId, submissionId);
+            _previewId = submissionId;
+            _previewModule = module;
+            _previewCards = cards;
+        }
+        catch (Exception e) when (e is KeyNotFoundException or UnauthorizedAccessException) { Fail(e.Message); }
+    }
+
+    private Task Approve(string submissionId) => Run(async () =>
+    {
+        var target = _replaceTargets.GetValueOrDefault(submissionId, "");
+        await Sharing.ApproveAsync(_actorId, submissionId, string.IsNullOrEmpty(target) ? null : target);
+        _replaceTargets.Remove(submissionId);
+        _previewId = null;
+        return "Modul global veröffentlicht.";
+    });
+
+    private Task DeleteVersion(ModuleInfo m) => Run(async () =>
+    {
+        await Sharing.DeleteGlobalVersionAsync(_actorId, m.Id);
+        _deleteId = null;
+        return "Globale Version gelöscht.";
+    });
+
+    private Task Reject(string submissionId) => Run(async () =>
+    {
+        await Sharing.RejectAsync(_actorId, submissionId, _rejectReason);
+        _rejectId = null;
+        _rejectReason = "";
+        _previewId = null;
+        return "Einreichung abgelehnt.";
+    });
+
+    private Task SetPublication(ModuleInfo m, bool active) => Run(async () =>
+    {
+        await Sharing.SetPublicationActiveAsync(_actorId, m.PublicationId ?? "", active);
+        return active ? "Veröffentlichung aktiviert." : "Veröffentlichung deaktiviert (Ergebnisse bleiben erhalten).";
+    });
+
+    private async Task ToggleDetails(string moduleId)
+    {
+        if (_detailModuleId == moduleId) { _detailModuleId = null; return; }
+        try
+        {
+            _detailRows = await Sharing.GetGlobalResultRowsAsync(_actorId, moduleId);
+            _detailModuleId = moduleId;
+        }
+        catch (Exception e) when (e is KeyNotFoundException or UnauthorizedAccessException) { Fail(e.Message); }
+    }
+
+    private bool IsLatestVersion(ModuleInfo m) =>
+        _globalModules.Where(x => x.PublicationId == m.PublicationId).All(x => (x.GlobalVersion ?? 0) <= (m.GlobalVersion ?? 0));
+
     private async Task Run(Func<Task<string>> action)
     {
         try
@@ -187,6 +481,11 @@
             Fail(e.Message);
         }
     }
+
+    private static string SubmissionLabel(string s) => s switch { "approved" => "veröffentlicht", "rejected" => "abgelehnt", _ => "wartet auf Prüfung" };
+    private static string SubmissionBadge(string s) => s switch { "approved" => "badge-global", "rejected" => "badge-admin", _ => "badge-shared" };
+    private static string GlobalLabel(string? s) => s switch { "active" => "aktiv", "superseded" => "ersetzt", "deactivated" => "deaktiviert", _ => s ?? "" };
+    private static string GlobalBadge(string? s) => s switch { "active" => "badge-global", "deactivated" => "badge-admin", _ => "badge-private" };
 
     private void Ok(string m) { _message = "✅ " + m; _messageOk = true; }
     private void Fail(string m) { _message = "❌ " + m; _messageOk = false; }

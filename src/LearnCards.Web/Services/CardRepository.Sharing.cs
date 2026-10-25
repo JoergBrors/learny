@@ -118,7 +118,9 @@ public partial class CardRepository
         if (!string.IsNullOrWhiteSpace(category)) { sql += " AND category = @c"; args.Add(("c", category)); }
         if (slideOnly) sql += " AND slide_number IS NOT NULL";
         sql += slideOnly ? " ORDER BY slide_number, sort_order, term" : " ORDER BY category, sort_order, term";
-        return (await _db.QueryAsync(sql, args)).Select(MapCard).ToList();
+        var cards = (await _db.QueryAsync(sql, args)).Select(MapCard).ToList();
+        await _images.AttachAsync(cards);
+        return cards;
     }
 
     public async Task<List<string>> ListReadableCategoriesAsync(string userId, string moduleId)
@@ -139,7 +141,34 @@ public partial class CardRepository
         var access = await ResolveModuleAccessAsync(userId, card.ModuleId);
         if (access is null) return null;
         if (card.Archived && !access.CanEdit) return null;
+        await _images.AttachAsync(new[] { card });
         return card;
+    }
+
+    /// <summary>
+    /// Bildmetadaten, sofern die Karte des Bildes für den Benutzer lesbar ist (eigenes, freigegebenes oder globales Modul; archivierte Karten nur für den Eigentümer).
+    /// Einziger Berechtigungspunkt für <c>GET /api/images/{id}</c>: unabhängig vom Bildspeicher und vom Cache.
+    /// </summary>
+    public async Task<CardImage?> GetReadableImageAsync(string imageId, string userId)
+    {
+        var meta = await _images.GetMetaAsync(imageId);
+        if (meta is null) return null;
+        var rows = await _db.QueryAsync("SELECT module_id, archived FROM cards WHERE id = @id", new[] { ("id", (object?)meta.CardId) });
+        if (rows.Count == 0) return null;
+        var access = await ResolveModuleAccessAsync(userId, rows[0]["module_id"] ?? "");
+        if (access is null) return null;
+        if (DbValue.ToBool(rows[0].GetValueOrDefault("archived")) && !access.CanEdit) return null;
+        return meta;
+    }
+
+    /// <summary>Alle Karten eines Moduls ohne Berechtigungsprüfung (nur Administration: Vorschau eingefrorener Einreichungen), inkl. Bildmetadaten.</summary>
+    public async Task<List<Card>> ListAllCardsOfModuleRawAsync(string moduleId)
+    {
+        if (!UserService.IsGuid(moduleId)) return new();
+        var cards = (await _db.QueryAsync("SELECT * FROM cards WHERE module_id = @m ORDER BY category, sort_order, term", new[] { ("m", (object?)moduleId) }))
+            .Select(MapCard).ToList();
+        await _images.AttachAsync(cards);
+        return cards;
     }
 
     // ─── Löschschutz (Schutz vorhandener Lernergebnisse) ────────────────────
@@ -181,23 +210,37 @@ public partial class CardRepository
 
         foreach (var c in sourceCards)
         {
-            await InsertCardAsync(new Card
+            var copyCard = new Card
             {
                 ModuleId = copy.Id, OwnerUserId = null, Category = c.Category, Term = c.Term, Question = c.Question, Definition = c.Definition,
                 HowItWorks = c.HowItWorks, Context = c.Context, KeyFact = c.KeyFact, ReferenceAnswer = c.ReferenceAnswer, ChatPrompt = c.ChatPrompt,
                 OfficialSources = c.OfficialSources, SlideNumber = c.SlideNumber, TargetTimeSec = c.TargetTimeSec, Quiz = c.Quiz,
                 Archived = false, SortOrder = c.SortOrder,
-            });
+            };
+            await InsertCardAsync(copyCard);
+            await _images.CopyForCardAsync(c.Id, copyCard.Id);   // gleiche Binärdaten, neue Bild-IDs (Referenzzählung schützt vor vorzeitigem Löschen)
         }
         return (copy, sourceCards.Count);
     }
 
     /// <summary>Löscht eine noch nicht veröffentlichte („staged“) Kopie (bei Ablehnung). Veröffentlichte Versionen werden nie gelöscht.</summary>
+    /// <summary>Löscht ein (nicht eingefrorenes) globales Modul samt Karten, Ergebnissen und nicht mehr referenzierten Bildern.</summary>
+    public async Task<int> DeleteGlobalModuleAsync(string moduleId)
+    {
+        var imageRefs = await _images.CollectForModuleAsync(moduleId);
+        var deleted = await _db.ExecuteAsync("DELETE FROM modules WHERE id = @id AND scope = 'global' AND global_status <> 'staged'",
+            new[] { ("id", (object?)moduleId) });
+        if (deleted > 0) await _images.CleanupOrphansAsync(imageRefs);
+        return deleted;
+    }
+
     public Task<int> DeleteStagedModuleAsync(string moduleId) =>
         _db.ExecuteAsync("DELETE FROM modules WHERE id = @id AND scope = 'global' AND global_status = 'staged'",
             new[] { ("id", (object?)moduleId) });
 
     // ─── Hilfen ─────────────────────────────────────────────────────────────
+
+    public static Card MapCardPublic(Dictionary<string, string?> r) => MapCard(r);
 
     public async Task<string> DisplayNameAsync(string? userId)
     {

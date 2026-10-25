@@ -23,6 +23,10 @@ Referenz dafür, *wie das System funktioniert und warum* — für Menschen und f
 | [0012](0012-rollen-aus-entra-app-roles.md) | Rollen aus Entra-ID-App-Rollen (`roles`-Claim) | Akzeptiert |
 | [0013](0013-mcp-benutzergebundene-anmeldung.md) | MCP: benutzergebundene Anmeldung per OAuth und persönliche Tokens | Akzeptiert |
 | [0014](0014-sitzungs-und-betriebsmodus-haertung.md) | Sitzungs- und Betriebsmodus-Härtung | **Vorgeschlagen** (nicht umgesetzt) |
+| [0015](0015-freigaben-globale-lernmodule.md) | Benutzerfreigaben, globale Lernmodule und Ergebniszuordnung | Akzeptiert |
+| [0016](0016-bilder-in-lernkarten.md) | Bilder als Bestandteil von Lernkarten (Base64) | Akzeptiert |
+| [0017](0017-konfigurierbare-bildspeicher.md) | Konfigurierbare Bildspeicherprovider, Bild-Cache, Migration | Akzeptiert |
+| [0018](0018-zentraler-image-proxy-und-storage-zugriff.md) | Zentraler Image-Proxy und Storage-Zugriffsdelegation (SAS-Broker) | Akzeptiert |
 
 Prüfberichte, die Anlass für ADRs sind, liegen unter [docs/reviews/](../reviews/) (aktuell: [Mehrbenutzer-Prüfbericht](../reviews/2026-10-24-mehrbenutzer-pruefbericht.md)).
 

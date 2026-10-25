@@ -46,6 +46,14 @@
           "explanation": "target_time_sec steuert die sichtbare Zeitvorgabe pro Folie im Folienmodus."
         }
       ],
+      "images": [
+        {
+          "mime_type": "image/png",
+          "data_base64": "iVBORw0KGgoAAAANSUhEUgAAACAAAAAQCAIAAAD4YuoOAAAAI0lEQVR42mPg94mhKWIAYq3ls2mERi0YtWDUglELRpIFNEUAOleXE3NVou0AAAAASUVORK5CYII=",
+          "alt_text": "Beschreibung des Bildes (empfohlen)",
+          "caption": "Optional: Bildunterschrift — data_base64 durch das eigene Bild ersetzen"
+        }
+      ],
       "archived": false,
       "sort_order": 1
     }

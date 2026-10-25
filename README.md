@@ -23,9 +23,11 @@ Details: [docs/architecture.md](docs/architecture.md).
 
 LearnCards ist mehrbenutzerfähig ([ADR 0011](docs/adr/0011-mehrbenutzerarchitektur.md)):
 
-- Jeder Benutzer hat eine eigene interne ID, ein Profil (`/profile`) und **private Module und Karten**; andere Benutzer sehen sie nicht (kein gemeinsamer Kartenbestand).
+- Jeder Benutzer hat eine eigene interne ID, ein Profil (`/profile`) und **private Module und Karten**; andere Benutzer sehen sie nicht.
   Persönliche Lerndaten (Lernstatus, Chat-Verlauf, Quiz-Ergebnisse, Theme) sind ebenfalls benutzerbezogen.
-- Rollen: `user`, `admin` (Benutzerverwaltung unter `/admin`), `auditor`. Sie lassen sich in der App oder über Entra-ID-App-Rollen vergeben
+- **Freigaben und globale Module** ([ADR 0015](docs/adr/0015-freigaben-globale-lernmodule.md)): Module lassen sich gezielt für einzelne Benutzer freigeben (nur Lernen, widerrufbar) und zur globalen Veröffentlichung einreichen;
+  Administratoren prüfen und veröffentlichen eine eingefrorene, versionierte Kopie. Die Modulübersicht trennt *Meine Module*, *Mit mir geteilt* und *Globale Module*. Ergebnisse gehören immer den Lernenden; Auditoren und Administratoren sehen globale Ergebnisse nur lesend.
+- Rollen: `user`, `admin` (Benutzerverwaltung und Veröffentlichung unter `/admin`), `auditor` (lesende Einsicht in globale Inhalte und Ergebnisse). Sie lassen sich in der App oder über Entra-ID-App-Rollen vergeben
   (`Admin.All` → `admin`, [ADR 0012](docs/adr/0012-rollen-aus-entra-app-roles.md)).
 - Über MCP arbeitet jeder Benutzer nur in seinem Bereich; Zugänge sind im Profil widerrufbar.
 - Ergebnisse der Sicherheitsprüfung: [Prüfbericht](docs/reviews/2026-10-24-mehrbenutzer-pruefbericht.md) (u. a. Hinweis: für Produktion `AUTH_MODE=oidc` explizit setzen).
@@ -178,6 +180,24 @@ ein statisches `quiz` für den Folien-/Seitenmodus enthalten:
   ]
 }
 ```
+
+## Bilder in Karten
+
+Karten können optional bis zu 5 Bilder enthalten (PNG, JPEG oder WebP, je höchstens 2 MiB dekodiert). Die Bilder stehen als Base64 im Feld `images` und werden direkt auf der Karte angezeigt — ohne KI-Schlüssel, ohne externen Speicher:
+
+```json
+"images": [
+  {
+    "mime_type": "image/png",
+    "data_base64": "iVBORw0KGgoAAAANSUhEUgAAACAAAAAQCAIAAAD4YuoOAAAAI0lEQVR42mPg94mhKWIAYq3ls2mERi0YtWDUglELRpIFNEUAOleXE3NVou0AAAAASUVORK5CYII=",
+    "alt_text": "Farbige Beispielfläche (32 × 16 Pixel)",
+    "caption": "Beispielbild"
+  }
+]
+```
+
+`data_base64` ist reines Base64 ohne `data:`-Präfix (PowerShell: `[Convert]::ToBase64String([IO.File]::ReadAllBytes("bild.png"))`). Fehlendes `images` bedeutet keine Bilder; beim Überschreiben bleiben vorhandene Bilder erhalten, `"images": []` entfernt sie.
+Fehlerhafte Bilder lehnen die betroffene Karte mit einer Begründung ab. Details, Limits und Hinweise für KI-Assistenten: Hilfe-Seite der Anwendung und [ADR 0016](docs/adr/0016-bilder-in-lernkarten.md).
 
 ## Demo-Dateien
 

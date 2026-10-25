@@ -144,10 +144,42 @@ public static class Schema
                 slide_number INTEGER NULL,
                 target_time_sec INTEGER NULL,
                 quiz_json     TEXT NOT NULL DEFAULT '[]',
+                images_json   TEXT NOT NULL DEFAULT '[]',
+                images_migrated INTEGER NOT NULL DEFAULT 0,
                 archived     INTEGER NOT NULL DEFAULT 0,
                 sort_order   INTEGER NOT NULL DEFAULT 0,
                 created_at   TEXT NOT NULL,
                 updated_at   TEXT NOT NULL
+            )
+            """;
+
+        // ─── Bilder: Metadaten + Datenbank-Speicher (ADR 0017) ───
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS card_images (
+                id          {id} PRIMARY KEY,
+                card_id     {id} NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+                provider    TEXT NOT NULL,
+                storage_key TEXT NOT NULL,
+                mime_type   TEXT NOT NULL,
+                size_bytes  INTEGER NOT NULL,
+                checksum    TEXT NOT NULL DEFAULT '',
+                alt_text    TEXT NOT NULL DEFAULT '',
+                caption     TEXT NOT NULL DEFAULT '',
+                sort_order  INTEGER NOT NULL DEFAULT 0,
+                created_at  TEXT NOT NULL
+            )
+            """;
+
+        yield return "CREATE INDEX IF NOT EXISTS ix_card_images_card ON card_images(card_id, sort_order)";
+        yield return "CREATE INDEX IF NOT EXISTS ix_card_images_blob ON card_images(provider, storage_key)";
+
+        // Binärdaten des Database-Providers als Base64-Text (IDatabase überträgt Werte textbasiert, siehe ADR 0017)
+        yield return """
+            CREATE TABLE IF NOT EXISTS image_blobs (
+                storage_key TEXT PRIMARY KEY,
+                data_base64 TEXT NOT NULL,
+                size_bytes  INTEGER NOT NULL,
+                created_at  TEXT NOT NULL
             )
             """;
 

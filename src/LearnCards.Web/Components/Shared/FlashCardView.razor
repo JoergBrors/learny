@@ -27,6 +27,21 @@
                     <span class="pill pill-brand">@Card.Category</span>
                     <h2 class="card-term">@Card.Term</h2>
                     <p class="card-question">@Card.Question</p>
+                    @if (Images.Count > 0)
+                    {
+                        <div class="card-figures" aria-label="Abbildungen zur Karte">
+                            @foreach (var img in Images)
+                            {
+                                <figure class="card-figure">
+                                    <img src="@DataUri(img)" alt="@img.AltText" loading="lazy" decoding="async" />
+                                    @if (!string.IsNullOrWhiteSpace(img.Caption))
+                                    {
+                                        <figcaption>@img.Caption</figcaption>
+                                    }
+                                </figure>
+                            }
+                        </div>
+                    }
                 </div>
                 <p class="flip-hint">Klicken oder <kbd>Space</kbd> zum Umdrehen</p>
             </div>
@@ -52,6 +67,24 @@
                         <section aria-label="Kontext">
                             <h4>🧭 Kontext</h4>
                             <p>@Card.Context</p>
+                        </section>
+                    }
+                    @if (_flipped && Images.Count > 0)
+                    {
+                        <section aria-label="Abbildungen">
+                            <h4>🖼 Abbildungen</h4>
+                            <div class="card-figures">
+                                @foreach (var img in Images)
+                                {
+                                    <figure class="card-figure">
+                                        <img src="@DataUri(img)" alt="@img.AltText" loading="lazy" decoding="async" />
+                                        @if (!string.IsNullOrWhiteSpace(img.Caption))
+                                        {
+                                            <figcaption>@img.Caption</figcaption>
+                                        }
+                                    </figure>
+                                }
+                            </div>
                         </section>
                     }
                     @if (!string.IsNullOrEmpty(Card.KeyFact))
@@ -95,7 +128,10 @@
                     aria-pressed="@MarkedKnown" aria-label="Als geprüft markieren">✔ Check</button>
             <button class="btn btn-sm @(MarkedReview ? "btn-review-active" : "btn-review")" @onclick="() => OnMarkReview.InvokeAsync(Card.Id)"
                     aria-pressed="@MarkedReview" aria-label="Zur Wiederholung markieren">↻ Wiederholen</button>
-            <button class="btn btn-ghost btn-sm" @onclick="() => OnArchive.InvokeAsync(Card.Id)" aria-label="Karte archivieren">🗂 Archivieren</button>
+            @if (CanEdit)
+            {
+                <button class="btn btn-ghost btn-sm" @onclick="() => OnArchive.InvokeAsync(Card.Id)" aria-label="Karte archivieren">🗂 Archivieren</button>
+            }
         </div>
     </div>
 
@@ -116,6 +152,18 @@
     [Parameter] public EventCallback OnNext { get; set; }
     [Parameter] public EventCallback OnPrev { get; set; }
     [Parameter] public EventCallback<string> OnArchive { get; set; }
+    /// <summary>Nur der Eigentümer darf archivieren; bei freigegebenen/globalen Modulen ausgeblendet (ADR 0015).</summary>
+    [Parameter] public bool CanEdit { get; set; } = true;
+
+    /// <summary>
+    /// Darstellbare Bilder (ADR 0017): Der Browser lädt jedes Bild erst bei Bedarf über <c>/api/images/{id}</c> (Berechtigung wie die Karte, unabhängig vom Bildspeicher);
+    /// die Karte selbst trägt nur Metadaten. Es werden nie externe URLs geladen; zusätzlich wird hier erneut gegen die MIME-Allowlist geprüft (Defense in depth).
+    /// </summary>
+    private List<CardImage> Images => Card.Images
+        .Where(i => CardImageLimits.IsAllowedMimeType(i.MimeType) && Guid.TryParse(i.ImageId, out _))
+        .ToList();
+
+    private static string DataUri(CardImage img) => "/api/images/" + img.ImageId;
     [Parameter] public EventCallback<string> OnQuizCard { get; set; }
     [Parameter] public EventCallback<string> OnPageQuizCard { get; set; }
     [Parameter] public EventCallback<string> OnMarkKnown { get; set; }

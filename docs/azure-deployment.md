@@ -99,6 +99,9 @@ Wichtig:
 - **`ADMIN_SUBJECTS`** — Entra-`sub` (nicht E-Mail) des ersten Administrators; weitere Rollen über die App-Rolle `Admin.All` in Entra ([ADR 0012](adr/0012-rollen-aus-entra-app-roles.md), optional `OIDC_ROLE_MAP`).
   Bestehende Module/Karten aus der Zeit vor der Mehrbenutzerfähigkeit sind unzugeordnet und werden in `/admin` einem Benutzer zugewiesen ([ADR 0011](adr/0011-mehrbenutzerarchitektur.md)).
 - **`MCP_PUBLIC_URL`** — öffentliche URL des MCP-Servers; nur dorthin darf die OAuth-Anmeldung zurückleiten ([ADR 0013](adr/0013-mcp-benutzergebundene-anmeldung.md)). Optional `MCP_TOKEN_DAYS`.
+- **Bildspeicher** ([ADR 0017](adr/0017-konfigurierbare-bildspeicher.md)/[0018](adr/0018-zentraler-image-proxy-und-storage-zugriff.md)): `IMAGE_STORAGE_PROVIDER=azureblob`, `IMAGE_AZUREBLOB_ACCOUNT`, `IMAGE_AZUREBLOB_CONTAINER`, `IMAGE_AZUREBLOB_AUTH=managedidentity`, optional `IMAGE_AZURE_SAS_TTL_SECONDS` (Standard 60).
+  Der Web App eine **Managed Identity** zuweisen und ihr auf dem Speicherkonto bzw. Container die Rollen *Storage Blob Data Contributor* (Schreiben/Löschen) und *Storage Blob Delegator* (User-Delegation-Schlüssel für die Lese-SAS) geben; Container privat lassen, kein anonymer Zugriff, Kontoschlüssel-Zugriff möglichst deaktivieren.
+  Mit Private Endpoint zusätzlich `IMAGE_AZUREBLOB_ALLOW_PRIVATE_NETWORK=true`. Der Provider `local` ist auf App Service nur mit eingehängtem persistentem Speicher sinnvoll. Secrets als App Settings bzw. Key-Vault-Referenzen.
 - **`ASPNETCORE_FORWARDEDHEADERS_ENABLED`** — App Service terminiert TLS vor der App; die App
   muss `X-Forwarded-Proto` auswerten, damit OIDC-Redirect-URIs korrekt auf `https://` lauten
   (bereits in `Program.cs` über `UseForwardedHeaders` vorbereitet).

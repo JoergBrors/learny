@@ -38,6 +38,8 @@ public sealed class SqliteDatabase : IDatabase
             EnsureColumn("cards", "slide_number", "INTEGER NULL");
             EnsureColumn("cards", "target_time_sec", "INTEGER NULL");
             EnsureColumn("cards", "quiz_json", "TEXT NOT NULL DEFAULT '[]'");
+            EnsureColumn("cards", "images_json", "TEXT NOT NULL DEFAULT '[]'");   // ADR 0016 (seit ADR 0017 nur noch Altbestand)
+            EnsureColumn("cards", "images_migrated", "INTEGER NOT NULL DEFAULT 0");   // ADR 0017: 1 = Bilder liegen in card_images
             EnsureColumn("quiz_results", "card_id", "TEXT NULL");
             EnsureColumn("quiz_results", "stats_json", "TEXT NOT NULL DEFAULT '{}'");
             MigrateOwnership();

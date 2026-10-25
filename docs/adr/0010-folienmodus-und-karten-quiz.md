@@ -2,7 +2,7 @@
 
 - **Status:** Akzeptiert
 - **Datum:** 2026-10-24
-- **Ergänzt durch:** [0011](0011-mehrbenutzerarchitektur.md) (Karten und ihr statisches Quiz gehören dem Eigentümer der Karte)
+- **Ergänzt durch:** [0016](0016-bilder-in-lernkarten.md) (Bilder erscheinen auch im Folienmodus), [0011](0011-mehrbenutzerarchitektur.md) (Karten und ihr statisches Quiz gehören dem Eigentümer der Karte), [0015](0015-freigaben-globale-lernmodule.md) (Folienmodus und Karten-Quiz funktionieren auch in freigegebenen und globalen Modulen)
 
 ## Kontext
 

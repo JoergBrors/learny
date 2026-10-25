@@ -2,6 +2,7 @@
 
 - **Status:** Akzeptiert
 - **Datum:** 2026-10-24
+- **Ergänzt durch:** [0015](0015-freigaben-globale-lernmodule.md) (`list_modules` mit `scope`, lesender Zugriff auf freigegebene/globale Module; Freigaben/Veröffentlichung bleiben für Tokens gesperrt)
 - **Ersetzt teilweise:** [0011](0011-mehrbenutzerarchitektur.md) (Abschnitt „API und MCP-Schlüssel“: `MCP_LINKED_USER_ID` entfällt), [0007](0007-mcp-server.md) (Authentifizierung des MCP-Servers)
 
 ## Kontext

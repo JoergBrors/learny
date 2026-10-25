@@ -4,7 +4,7 @@
 <div class="modal-backdrop" @onclick="CloseIfIdle">
     <div class="modal" role="dialog" aria-modal="true" aria-label="Seitenquiz" @onclick:stopPropagation>
         <div class="modal-head">
-            <h2>📝 Quiz für diese Seite@TitleSuffix</h2>
+            <h2>📝 Quiz für diese Seite@(TitleSuffix)</h2>
             <button class="icon-btn" @onclick="() => OnClose.InvokeAsync()" aria-label="Quiz schließen">✕</button>
         </div>
 

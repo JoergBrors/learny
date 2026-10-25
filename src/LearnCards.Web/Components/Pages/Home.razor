@@ -88,22 +88,41 @@
         </div>
     }
 
+    <div class="tab-row" role="tablist" aria-label="Modulbereich wählen">
+        <button class="chip @(_tab == "private" ? "chip-active" : "")" role="tab" aria-selected="@(_tab == "private")" @onclick='() => _tab = "private"'>Meine Module (@_modules.Count)</button>
+        <button class="chip @(_tab == "shared" ? "chip-active" : "")" role="tab" aria-selected="@(_tab == "shared")" @onclick='() => _tab = "shared"'>Mit mir geteilt (@_shared.Count)</button>
+        <button class="chip @(_tab == "global" ? "chip-active" : "")" role="tab" aria-selected="@(_tab == "global")" @onclick='() => _tab = "global"'>Globale Module (@_global.Count)</button>
+    </div>
+
     @if (_loading)
     {
         <div class="spinner-wrap" aria-busy="true"><div class="spinner" role="status"></div></div>
     }
-    else if (_modules.Count == 0)
+    else if (Current.Count == 0)
     {
         <div class="empty-state">
             <div class="empty-icon" aria-hidden="true">📚</div>
-            <p class="empty-title">Noch keine Module vorhanden.</p>
-            <p class="muted">Importiere Karten via JSON oder MCP, um loszulegen.</p>
+            @if (_tab == "private")
+            {
+                <p class="empty-title">Noch keine eigenen Module vorhanden.</p>
+                <p class="muted">Importiere Karten via JSON oder MCP, um loszulegen. Deine Module sind privat, bis du sie freigibst.</p>
+            }
+            else if (_tab == "shared")
+            {
+                <p class="empty-title">Noch nichts mit dir geteilt.</p>
+                <p class="muted">Sobald ein anderer Benutzer ein Modul für dich freigibt, erscheint es hier — zum Lernen, ohne es ändern zu können.</p>
+            }
+            else
+            {
+                <p class="empty-title">Noch keine globalen Module veröffentlicht.</p>
+                <p class="muted">Globale Module werden von Administratoren aus eingereichten Modulen veröffentlicht. Reiche eines deiner Module im Dialog „Modul freigeben“ ein.</p>
+            }
         </div>
     }
     else
     {
         <div class="module-grid">
-            @foreach (var mod in _modules)
+            @foreach (var mod in Current)
             {
                 <article class="module-card" tabindex="0" role="link"
                          aria-label="@($"Modul {mod.Name}: {mod.ActiveCount} aktive Karten")"
@@ -112,7 +131,11 @@
                     <div class="module-stripe" style="background:@mod.Color" aria-hidden="true"></div>
                     <div class="module-body">
                         <div class="module-actions">
-                            @if (_pendingDeleteModuleId == mod.Id)
+                            @if (_tab != "private")
+                            {
+                                <span class="badge badge-@mod.Context">@(mod.Context == "shared" ? "Freigegeben" : "Global")</span>
+                            }
+                            else if (_pendingDeleteModuleId == mod.Id)
                             {
                                 <button class="btn btn-danger btn-sm" @onclick:stopPropagation="true" @onclick="() => ConfirmDeleteModule(mod.Id)">Löschen</button>
                                 <button class="btn btn-ghost btn-sm" @onclick:stopPropagation="true" @onclick="CancelDeleteModule">Abbrechen</button>
@@ -130,6 +153,14 @@
                             <span class="pill">@mod.ActiveCount Karten</span>
                         </div>
                         <h2>@mod.Name</h2>
+                        @if (_tab == "shared")
+                        {
+                            <p class="module-origin">von @mod.OwnerName · nur lernen</p>
+                        }
+                        else if (_tab == "global")
+                        {
+                            <p class="module-origin">Version @mod.GlobalVersion · Herkunft: @mod.OwnerName</p>
+                        }
                         @if (!string.IsNullOrEmpty(mod.Description))
                         {
                             <p class="module-desc">@mod.Description</p>
@@ -148,6 +179,10 @@
 
 @code {
     private List<ModuleInfo> _modules = new();
+    private List<ModuleInfo> _shared = new();
+    private List<ModuleInfo> _global = new();
+    private string _tab = "private";
+    private List<ModuleInfo> Current => _tab switch { "shared" => _shared, "global" => _global, _ => _modules };
     private bool _loading = true;
     private bool _importing;
     private string? _message;
@@ -180,6 +215,8 @@
     {
         _loading = true;
         _modules = await Repo.ListModulesAsync(_userId);
+        _shared = await Repo.ListSharedWithMeAsync(_userId);
+        _global = await Repo.ListGlobalModulesAsync();
         _loading = false;
     }
 
@@ -201,7 +238,7 @@
         _message = null;
         try
         {
-            using var stream = e.File.OpenReadStream(maxAllowedSize: 20 * 1024 * 1024);
+            using var stream = e.File.OpenReadStream(maxAllowedSize: 28 * 1024 * 1024);
             using var reader = new StreamReader(stream);
             var content = await reader.ReadToEndAsync();
             var cards = Api.ApiEndpoints.ParseCardsJson(content);
@@ -267,10 +304,18 @@
 
     private async Task ConfirmDeleteModule(string id)
     {
-        var deleted = await Repo.DeleteModuleAsync(id, _userId);
         _pendingDeleteModuleId = null;
-        _message = deleted == 0 ? "❌ Modul wurde nicht gefunden." : "✅ Modul wurde gelöscht.";
-        _messageOk = deleted > 0;
+        try
+        {
+            var deleted = await Repo.DeleteModuleAsync(id, _userId);
+            _message = deleted == 0 ? "❌ Modul wurde nicht gefunden." : "✅ Modul wurde gelöscht.";
+            _messageOk = deleted > 0;
+        }
+        catch (InvalidOperationException e)
+        {
+            _message = "❌ " + e.Message;
+            _messageOk = false;
+        }
         await ReloadAsync();
     }
 

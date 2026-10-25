@@ -2,7 +2,7 @@
 
 - **Status:** Akzeptiert
 - **Datum:** 2026-10-24
-- **Ergänzt durch:** [0011](0011-mehrbenutzerarchitektur.md) (Chat-Verlauf und Quiz-Ergebnisse gehören dem Benutzer; Quiz/Chat arbeiten nur mit eigenen Karten)
+- **Ergänzt durch:** [0016](0016-bilder-in-lernkarten.md) (Kartenbilder werden nie in Prompts übernommen; Bilder sind ohne LLM/API-Schlüssel nutzbar), [0011](0011-mehrbenutzerarchitektur.md) (Chat-Verlauf und Quiz-Ergebnisse gehören dem Benutzer), [0015](0015-freigaben-globale-lernmodule.md) (Quiz/Chat arbeiten mit eigenen, freigegebenen und globalen Karten; Offline-Fallback unverändert; Ergebnisse tragen den Kontext private/shared/global)
 
 ## Kontext
 

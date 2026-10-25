@@ -4,6 +4,7 @@ using System.Text.Json;
 using LearnCards.Web.Domain;
 using LearnCards.Web.Infrastructure;
 using LearnCards.Web.Services;
+using LearnCards.Web.Services.ImageStorage;
 
 namespace LearnCards.Web.Api;
 
@@ -20,7 +21,7 @@ public static class ApiEndpoints
 
     /// <summary>Routen, die ein MCP-Token nutzen darf (Karten-/Modulverwaltung und Schema, kein Profil, keine Administration).</summary>
     private static readonly string[] TokenAllowedPrefixes =
-        { "/api/modules", "/api/cards", "/api/import", "/api/schema", "/api/mcp/whoami" };
+        { "/api/modules", "/api/cards", "/api/images", "/api/import", "/api/schema", "/api/mcp/whoami" };
 
     public static void MapLearnCardsApi(this WebApplication app)
     {
@@ -127,10 +128,23 @@ public static class ApiEndpoints
         });
 
         MapAdminEndpoints(secured);
+        MapSharingEndpoints(secured);
+        MapGlobalReviewEndpoints(secured);
 
         // ─── Module ─────────────────────────────────────────────────────────
-        secured.MapGet("/modules/", async (CardRepository repo, HttpContext http) => Results.Ok(
-            (await repo.ListModulesAsync(Uid(http))).Select(ModuleDto)));
+        // scope: private (Standard, kompatibel) | shared (mir freigegeben) | global (veröffentlicht) | all — ADR 0015
+        secured.MapGet("/modules/", async (CardRepository repo, HttpContext http, string? scope) =>
+        {
+            var uid = Uid(http);
+            var s = (scope ?? "private").Trim().ToLowerInvariant();
+            if (s is not ("private" or "shared" or "global" or "all"))
+                return Results.Json(new { detail = "scope muss private, shared, global oder all sein." }, statusCode: 400);
+            var list = new List<ModuleInfo>();
+            if (s is "private" or "all") list.AddRange(await repo.ListModulesAsync(uid));
+            if (s is "shared" or "all") list.AddRange(await repo.ListSharedWithMeAsync(uid));
+            if (s is "global" or "all") list.AddRange(await repo.ListGlobalModulesAsync());
+            return Results.Ok(list.Select(ModuleDto));
+        });
 
         secured.MapPost("/modules/", async (ModuleCreateRequest req, CardRepository repo, HttpContext http) =>
         {
@@ -141,31 +155,94 @@ public static class ApiEndpoints
         });
 
         secured.MapDelete("/modules/{moduleId}", async (string moduleId, CardRepository repo, HttpContext http) =>
-            await repo.DeleteModuleAsync(moduleId, Uid(http)) == 0
-                ? Results.Json(new { detail = "Module not found" }, statusCode: 404)
-                : Results.NoContent());
+        {
+            try
+            {
+                return await repo.DeleteModuleAsync(moduleId, Uid(http)) == 0
+                    ? Results.Json(new { detail = "Module not found" }, statusCode: 404)
+                    : Results.NoContent();
+            }
+            catch (InvalidOperationException e) { return Results.Json(new { detail = e.Message }, statusCode: 409); }
+        });
 
         // ─── Karten ─────────────────────────────────────────────────────────
+        // Mit module_id: Karten eines lesbaren Moduls (eigen, freigegeben, global); ohne module_id bzw. mit archived=true: nur eigene Karten.
         secured.MapGet("/cards/", async (CardRepository repo, HttpContext http, string? module_id, string? category, bool archived = false) =>
-            Results.Ok((await repo.ListCardsAsync(Uid(http), module_id, category, archived)).Select(CardDto)));
+        {
+            var uid = Uid(http);
+            if (!string.IsNullOrEmpty(module_id) && !archived)
+                return Results.Ok((await repo.ListReadableCardsAsync(uid, module_id, category)).Select(CardDto));
+            return Results.Ok((await repo.ListCardsAsync(uid, module_id, category, archived)).Select(CardDto));
+        });
 
-        secured.MapGet("/cards/{cardId}", async (string cardId, CardRepository repo, HttpContext http) =>
-            await repo.GetCardAsync(cardId, Uid(http)) is { } card
-                ? Results.Ok(CardDto(card))
-                : Results.Json(new { detail = "Card not found" }, statusCode: 404));
+        // Standard: Bild-Metadaten mit URL (/api/images/{id}); mit include_image_data=true zusätzlich die Bilddaten als Base64 (Export/Sicherung).
+        secured.MapGet("/cards/{cardId}", async (string cardId, CardRepository repo, CardImageService images, HttpContext http, bool include_image_data = false) =>
+        {
+            if (await repo.GetReadableCardAsync(cardId, Uid(http)) is not { } card)
+                return Results.Json(new { detail = "Card not found" }, statusCode: 404);
+            if (!include_image_data) return Results.Ok(CardDto(card));
+            try
+            {
+                var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var img in card.Images)
+                    data[img.ImageId] = Convert.ToBase64String((await images.GetContentAsync(img, http.RequestAborted)).Data);
+                return Results.Ok(CardDto(card, data));
+            }
+            catch (ImageStorageException e) { return ImageError(e); }
+        });
+
+        // Bildinhalt — unabhängig vom konfigurierten Bildspeicher immer dieselbe Antwort (ADR 0017).
+        // Berechtigung: wie die Karte (eigen, freigegeben, global); der Cache liegt dahinter und umgeht sie nie.
+        secured.MapGet("/images/{imageId}", async (string imageId, CardRepository repo, CardImageService images, HttpContext http) =>
+        {
+            if (!cfg.ImageStorage.ProxyEnabled)
+                return Results.Json(new { detail = "Der Bild-Proxy ist deaktiviert (IMAGE_PROXY_ENABLED=false).", code = "proxy_disabled" }, statusCode: 503);
+            var meta = await repo.GetReadableImageAsync(imageId, Uid(http));
+            if (meta is null) return Results.Json(new { detail = "Image not found" }, statusCode: 404);
+
+            var etag = $"\"{meta.Checksum}\"";
+            http.Response.Headers.CacheControl = "private, max-age=3600";   // nie von gemeinsamen Caches/Proxys speichern lassen
+            http.Response.Headers["X-Content-Type-Options"] = "nosniff";
+            http.Response.Headers.ETag = etag;
+            if (http.Request.Headers.IfNoneMatch.ToString().Contains(etag, StringComparison.Ordinal))
+                return Results.StatusCode(304);   // Berechtigung ist geprüft; kein Providerzugriff nötig
+            try
+            {
+                var content = await images.GetContentAsync(meta, http.RequestAborted);
+                return Results.Bytes(content.Data, meta.MimeType);
+            }
+            catch (ImageStorageException e)
+            {
+                http.Response.Headers.Remove("ETag");
+                http.Response.Headers.CacheControl = "no-store";
+                return ImageError(e);
+            }
+        });
 
         secured.MapPost("/cards/", async (CardJson data, CardRepository repo, HttpContext http) =>
         {
             var (ok, error) = data.Validate();
             if (!ok) return Results.Json(new { detail = error }, statusCode: 400);
-            var card = await repo.CreateCardAsync(data, Uid(http));
-            return Results.Json(CardDto(card), statusCode: 201);
+            try
+            {
+                var card = await repo.CreateCardAsync(data, Uid(http));
+                return Results.Json(CardDto(card), statusCode: 201);
+            }
+            catch (ArgumentException e) { return Results.Json(new { detail = e.Message }, statusCode: 400); }
+            catch (ImageStorageException e) { return ImageError(e); }
         });
 
         secured.MapPut("/cards/{cardId}", async (string cardId, CardJson data, CardRepository repo, HttpContext http) =>
-            await repo.UpdateCardAsync(cardId, data, Uid(http)) is { } card
-                ? Results.Ok(CardDto(card))
-                : Results.Json(new { detail = "Card not found" }, statusCode: 404));
+        {
+            try
+            {
+                return await repo.UpdateCardAsync(cardId, data, Uid(http)) is { } card
+                    ? Results.Ok(CardDto(card))
+                    : Results.Json(new { detail = "Card not found" }, statusCode: 404);
+            }
+            catch (ArgumentException e) { return Results.Json(new { detail = e.Message }, statusCode: 400); }
+            catch (ImageStorageException e) { return ImageError(e); }
+        });
 
         secured.MapPatch("/cards/{cardId}/archive", async (string cardId, CardRepository repo, HttpContext http) =>
             await repo.SetArchivedAsync(cardId, true, Uid(http)) is { } card
@@ -178,15 +255,21 @@ public static class ApiEndpoints
                 : Results.Json(new { detail = "Card not found" }, statusCode: 404));
 
         secured.MapDelete("/cards/{cardId}", async (string cardId, CardRepository repo, HttpContext http) =>
-            await repo.DeleteCardAsync(cardId, Uid(http)) == 0
-                ? Results.Json(new { detail = "Card not found" }, statusCode: 404)
-                : Results.NoContent());
+        {
+            try
+            {
+                return await repo.DeleteCardAsync(cardId, Uid(http)) == 0
+                    ? Results.Json(new { detail = "Card not found" }, statusCode: 404)
+                    : Results.NoContent();
+            }
+            catch (InvalidOperationException e) { return Results.Json(new { detail = e.Message }, statusCode: 409); }
+        });
 
         // ─── Import ─────────────────────────────────────────────────────────
         secured.MapPost("/import/cards", async (CardImportBatch batch, CardRepository repo, HttpContext http) =>
         {
-            var (created, updated, skipped) = await repo.ImportAsync(batch.Cards, batch.OverwriteExisting, Uid(http));
-            return Results.Ok(new { created, updated, skipped });
+            var result = await repo.ImportAsync(batch.Cards, batch.OverwriteExisting, Uid(http));
+            return Results.Ok(new { created = result.Created, updated = result.Updated, skipped = result.Skipped, errors = result.Errors });
         });
 
         secured.MapPost("/import/cards/file", async (HttpRequest request, HttpContext http, CardRepository repo, bool overwrite_existing = false) =>
@@ -206,8 +289,8 @@ public static class ApiEndpoints
             catch (JsonException e) { return Results.Json(new { detail = $"Invalid JSON: {e.Message}" }, statusCode: 400); }
             catch (InvalidOperationException e) { return Results.Json(new { detail = e.Message }, statusCode: 400); }
 
-            var (created, updated, skipped) = await repo.ImportAsync(cards, overwrite_existing, Uid(http));
-            return Results.Ok(new { created, updated, skipped });
+            var result = await repo.ImportAsync(cards, overwrite_existing, Uid(http));
+            return Results.Ok(new { created = result.Created, updated = result.Updated, skipped = result.Skipped, errors = result.Errors });
         }).DisableAntiforgery();
 
         secured.MapPost("/cards/{cardId}/quiz", async (string cardId, QuizService quiz, HttpContext http) =>
@@ -264,7 +347,7 @@ public static class ApiEndpoints
         secured.MapGet("/cards/{cardId}/state", async (string cardId, CardRepository repo, HttpContext http) =>
         {
             var sub = Uid(http);
-            if (await repo.GetCardAsync(cardId, sub) is null)
+            if (await repo.GetReadableCardAsync(cardId, sub) is null)
                 return Results.Json(new { detail = "Card not found" }, statusCode: 404);
             var state = await repo.GetUserCardStateAsync(sub, cardId) ?? new UserCardState { UserSub = sub, CardId = cardId };
             return Results.Ok(new { is_checked = state.IsChecked, marked_review = state.MarkedReview, updated_at = state.UpdatedAt });
@@ -273,7 +356,7 @@ public static class ApiEndpoints
         secured.MapPut("/cards/{cardId}/state", async (string cardId, CardStateUpdateRequest req, CardRepository repo, HttpContext http) =>
         {
             var sub = Uid(http);
-            if (await repo.GetCardAsync(cardId, sub) is null)
+            if (await repo.GetReadableCardAsync(cardId, sub) is null)
                 return Results.Json(new { detail = "Card not found" }, statusCode: 404);
             await repo.SaveUserCardStateAsync(new UserCardState
             {
@@ -311,6 +394,63 @@ public static class ApiEndpoints
             }
             await http.Response.WriteAsync("data: [DONE]\n\n", http.RequestAborted);
         });
+    }
+
+    /// <summary>
+    /// Persönliche Freigaben und Einreichung zur globalen Veröffentlichung (ADR 0015). Nur per Browser-Anmeldung: der Pfad
+    /// <c>/api/sharing</c> steht nicht in <see cref="TokenAllowedPrefixes"/>, MCP-Tokens erhalten dort 403.
+    /// </summary>
+    private static void MapSharingEndpoints(RouteGroupBuilder secured)
+    {
+        var sh = secured.MapGroup("/sharing");
+
+        sh.MapGet("/users", async (string? q, HttpContext http, SharingService sharing) =>
+            Results.Ok((await sharing.SearchRecipientsAsync(Uid(http), q)).Select(u => new { id = u.Id, display_name = u.DisplayName, email = u.Email })));
+
+        sh.MapGet("/outgoing", async (HttpContext http, SharingService sharing) =>
+            Results.Ok((await sharing.ListOutgoingSharesAsync(Uid(http))).Select(ShareDto)));
+
+        sh.MapGet("/modules/{moduleId}/shares", (string moduleId, HttpContext http, SharingService sharing) =>
+            Guard(async () => Results.Ok((await sharing.ListSharesAsync(Uid(http), moduleId)).Select(ShareDto))));
+
+        sh.MapPost("/modules/{moduleId}/shares", (string moduleId, ShareCreateRequest req, HttpContext http, SharingService sharing) =>
+            Guard(async () => { await sharing.GrantShareAsync(Uid(http), moduleId, req.RecipientUserId); return Results.NoContent(); }));
+
+        sh.MapDelete("/modules/{moduleId}/shares/{recipientId}", (string moduleId, string recipientId, HttpContext http, SharingService sharing) =>
+            Guard(async () => await sharing.RevokeShareAsync(Uid(http), moduleId, recipientId)
+                ? Results.NoContent()
+                : Results.Json(new { detail = "Freigabe nicht gefunden." }, statusCode: 404)));
+
+        sh.MapGet("/modules/{moduleId}/submissions", (string moduleId, HttpContext http, SharingService sharing) =>
+            Guard(async () => Results.Ok((await sharing.ListOwnSubmissionsAsync(Uid(http), moduleId)).Select(SubmissionDto))));
+
+        sh.MapPost("/modules/{moduleId}/submissions", (string moduleId, HttpContext http, SharingService sharing) =>
+            Guard(async () => Results.Json(SubmissionDto(await sharing.SubmitAsync(Uid(http), moduleId)), statusCode: 201)));
+    }
+
+    /// <summary>Lesende Einsicht in globale Module und Ergebnisse für Administrator und Auditor (nur Browser-Anmeldung; Rolle wird im Service gegen die DB geprüft).</summary>
+    private static void MapGlobalReviewEndpoints(RouteGroupBuilder secured)
+    {
+        var g = secured.MapGroup("/global");
+
+        g.MapGet("/modules", (HttpContext http, SharingService sharing) =>
+            Guard(async () => Results.Ok((await sharing.ListGlobalModulesForReviewAsync(Uid(http))).Select(ModuleDto))));
+
+        g.MapGet("/results", (HttpContext http, SharingService sharing, string? publication_id) =>
+            Guard(async () => Results.Ok((await sharing.GetGlobalResultSummariesAsync(Uid(http), publication_id)).Select(r => new
+            {
+                module_id = r.ModuleId, publication_id = r.PublicationId, name = r.Name, version = r.Version, status = r.Status,
+                attempts = r.Attempts, learners = r.Learners, average_percent = r.AveragePercent,
+            }))));
+
+        g.MapGet("/results/{moduleId}", (string moduleId, HttpContext http, SharingService sharing) =>
+            Guard(async () => Results.Ok((await sharing.GetGlobalResultRowsAsync(Uid(http), moduleId)).Select(r => new
+            {
+                id = r.ResultId, learner = r.LearnerName, category = r.Category, score = r.Score, max_score = r.MaxScore, grade = r.Grade, completed_at = r.CompletedAt,
+            }))));
+
+        g.MapGet("/audit", (HttpContext http, UserService users, int limit = 100) =>
+            Guard(async () => Results.Ok(await users.ListPublicationAuditAsync(Uid(http), limit))));
     }
 
     /// <summary>Verwaltung eigener MCP-Zugänge — nur per Browser-Anmeldung (ein MCP-Token kann keine weiteren Zugänge erzeugen).</summary>
@@ -397,6 +537,27 @@ public static class ApiEndpoints
                 return Results.NoContent();
             }));
 
+        // Bildspeicher: Status und ausdrücklich gestartete Migration (ADR 0017) — nie automatisch, die Quelle wird nie gelöscht.
+        admin.MapGet("/images/storage", async (CardImageService images, ImageMigrationService migration, AppConfig config, HttpContext http) =>
+        {
+            var providers = new List<object>();
+            foreach (var name in images.Registry.ConfiguredNames.OrderBy(n => n))
+            {
+                var h = await images.Registry.Get(name).CheckHealthAsync(http.RequestAborted);
+                providers.Add(new { name, primary = name == images.Registry.PrimaryName, ok = h.Ok, message = h.Message, latency_ms = (long)h.Latency.TotalMilliseconds });
+            }
+            return Results.Ok(new { primary = images.Registry.PrimaryName, proxy_enabled = config.ImageStorage.ProxyEnabled, providers, image_counts = await migration.CountByProviderAsync(), cache = images.Cache.Stats });
+        });
+
+        admin.MapPost("/images/migrate", (ImageMigrateRequest req, HttpContext http, ImageMigrationService migration, UserService users) =>
+            Guard(async () =>
+            {
+                var result = await migration.MigrateAsync(req.Source, req.Target, req.Limit, req.Cursor, req.DryRun, http.RequestAborted);
+                if (!req.DryRun)
+                    await users.WriteAuditAsync(Uid(http), "images.migrate", "", $"{req.Source}->{req.Target} migriert={result.Migrated} fehler={result.Failed}");
+                return Results.Ok(result);
+            }));
+
         admin.MapGet("/unowned-modules", async (CardRepository repo) =>
             Results.Ok((await repo.ListUnownedModulesAsync()).Select(ModuleDto)));
 
@@ -414,6 +575,34 @@ public static class ApiEndpoints
                 await users.WriteAuditAsync(Uid(http), "module.assign-owner", moduleId, $"owner={target.Id}");
                 return Results.NoContent();
             }));
+
+        // ─── Veröffentlichung (ADR 0015) ───
+        admin.MapGet("/submissions", (HttpContext http, SharingService sharing, string? status) =>
+            Guard(async () => Results.Ok((await sharing.ListSubmissionsAsync(Uid(http), status)).Select(SubmissionDto))));
+
+        admin.MapGet("/submissions/{id}/preview", (string id, HttpContext http, SharingService sharing) =>
+            Guard(async () =>
+            {
+                var (sub, module, cards) = await sharing.PreviewSubmissionAsync(Uid(http), id);
+                return Results.Ok(new { submission = SubmissionDto(sub), module = ModuleDto(module), cards = cards.Select(CardDto) });
+            }));
+
+        // Optionaler Body {"replace_publication_id": "<Veröffentlichungs-ID>" | "new"}: welche Veröffentlichung ersetzt wird (ohne Body: Standardverhalten)
+        admin.MapPost("/submissions/{id}/approve", (string id, ApproveRequest? req, HttpContext http, SharingService sharing) =>
+            Guard(async () => { await sharing.ApproveAsync(Uid(http), id, string.IsNullOrWhiteSpace(req?.ReplacePublicationId) ? null : req!.ReplacePublicationId); return Results.NoContent(); }));
+
+        // Löscht eine globale Modulversion endgültig (inkl. Ergebnissen); Audit "publication.delete"
+        admin.MapDelete("/global-modules/{moduleId}", (string moduleId, HttpContext http, SharingService sharing) =>
+            Guard(async () => { await sharing.DeleteGlobalVersionAsync(Uid(http), moduleId); return Results.NoContent(); }));
+
+        admin.MapPost("/submissions/{id}/reject", (string id, SubmissionRejectRequest req, HttpContext http, SharingService sharing) =>
+            Guard(async () => { await sharing.RejectAsync(Uid(http), id, req.Reason); return Results.NoContent(); }));
+
+        admin.MapPost("/publications/{publicationId}/deactivate", (string publicationId, HttpContext http, SharingService sharing) =>
+            Guard(async () => { await sharing.SetPublicationActiveAsync(Uid(http), publicationId, false); return Results.NoContent(); }));
+
+        admin.MapPost("/publications/{publicationId}/activate", (string publicationId, HttpContext http, SharingService sharing) =>
+            Guard(async () => { await sharing.SetPublicationActiveAsync(Uid(http), publicationId, true); return Results.NoContent(); }));
 
         admin.MapGet("/audit", async (HttpContext http, UserService users, int limit = 100) =>
             Results.Ok(await users.ListAuditAsync(Uid(http), limit)));
@@ -461,23 +650,65 @@ public static class ApiEndpoints
     {
         id = m.Id, name = m.Name, description = m.Description, icon = m.Icon, color = m.Color,
         card_count = m.CardCount, active_count = m.ActiveCount, created_at = m.CreatedAt,
+        context = m.Context, scope = m.Scope, owner_name = m.OwnerName,
+        publication_id = m.PublicationId, global_version = m.GlobalVersion, global_status = m.GlobalStatus,
+        source_owner_name = m.SourceOwnerName, published_at = m.PublishedAt,
     };
 
-    private static object CardDto(Card c) => new
+    private static object ShareDto(ShareInfo s) => new
+    {
+        module_id = s.ModuleId, module_name = s.ModuleName, recipient_user_id = s.RecipientUserId,
+        recipient_name = s.RecipientName, recipient_email = s.RecipientEmail, created_at = s.CreatedAt,
+    };
+
+    private static object SubmissionDto(SubmissionInfo s) => new
+    {
+        id = s.Id, publication_id = s.PublicationId, kind = s.Kind, source_module_id = s.SourceModuleId, staged_module_id = s.StagedModuleId,
+        submitter = s.SubmitterName, module_name = s.ModuleName, card_count = s.CardCount, version = s.Version,
+        status = s.Status, reason = s.Reason, submitted_at = s.SubmittedAt, decided_at = s.DecidedAt,
+    };
+
+    /// <summary>
+    /// Einheitliche Abbildung von Speicherfehlern auf HTTP-Antworten (provider-unabhängig, ADR 0017): 404 nicht vorhanden, 502 Speicher/Integrität/Berechtigung,
+    /// 503 nicht konfiguriert/nicht erreichbar, 504 Zeitüberschreitung. Der Text nennt den Provider, aber keine Schlüssel oder Zugangsdaten.
+    /// </summary>
+    private static IResult ImageError(ImageStorageException e) => e.Kind switch
+    {
+        ImageStorageError.NotFound => Results.Json(new { detail = e.Message, code = "image_not_found" }, statusCode: 404),
+        ImageStorageError.Timeout => Results.Json(new { detail = $"Zeitüberschreitung beim Bildspeicher '{e.Provider}'.", code = "image_storage_timeout" }, statusCode: 504),
+        ImageStorageError.NotConfigured => Results.Json(new { detail = e.Message, code = "image_storage_not_configured" }, statusCode: 503),
+        ImageStorageError.Unavailable => Results.Json(new { detail = $"Der Bildspeicher '{e.Provider}' ist nicht erreichbar oder überlastet.", code = "image_storage_unavailable" }, statusCode: 503),
+        ImageStorageError.Unauthorized => Results.Json(new { detail = $"Der Bildspeicher '{e.Provider}' hat den Zugriff der Anwendung abgelehnt (Konfiguration/Berechtigung prüfen).", code = "image_storage_unauthorized" }, statusCode: 502),
+        ImageStorageError.IntegrityFailed => Results.Json(new { detail = e.Message, code = "image_integrity_failed" }, statusCode: 502),
+        _ => Results.Json(new { detail = "Ungültige Bildspeicher-Anfrage.", code = "image_storage_invalid" }, statusCode: 400),
+    };
+
+    /// <summary>Karte mit Bild-<b>Metadaten</b> und URL (ohne Bilddaten) — für Listen und Schreibantworten.</summary>
+    private static object CardDto(Card c) => CardDto(c, null);
+
+    /// <summary>Wie oben; mit <paramref name="base64ByImageId"/> zusätzlich <c>data_base64</c> je Bild (nur Einzelabruf mit include_image_data=true).</summary>
+    private static object CardDto(Card c, Dictionary<string, string>? base64ByImageId) => new
     {
         id = c.Id, module_id = c.ModuleId, category = c.Category, term = c.Term,
         question = c.Question, definition = c.Definition, how_it_works = c.HowItWorks,
         context = c.Context, key_fact = c.KeyFact, reference_answer = c.ReferenceAnswer,
         chat_prompt = c.ChatPrompt, official_sources = c.OfficialSources,
         slide_number = c.SlideNumber, target_time_sec = c.TargetTimeSec, quiz = c.Quiz,
+        images = c.Images.Select(i => base64ByImageId is not null && base64ByImageId.TryGetValue(i.ImageId, out var b64)
+            ? (object)new { image_id = i.ImageId, url = "/api/images/" + i.ImageId, mime_type = i.MimeType, size_bytes = i.SizeBytes, checksum = i.Checksum, alt_text = i.AltText, caption = i.Caption, sort_order = i.SortOrder, data_base64 = b64 }
+            : new { image_id = i.ImageId, url = "/api/images/" + i.ImageId, mime_type = i.MimeType, size_bytes = i.SizeBytes, checksum = i.Checksum, alt_text = i.AltText, caption = i.Caption, sort_order = i.SortOrder }),
         archived = c.Archived, sort_order = c.SortOrder, created_at = c.CreatedAt, updated_at = c.UpdatedAt,
     };
 }
 
+public class ApproveRequest { public string? ReplacePublicationId { get; set; } }
+public class ImageMigrateRequest { public string Source { get; set; } = ""; public string Target { get; set; } = ""; public int Limit { get; set; } = 200; public string? Cursor { get; set; } public bool DryRun { get; set; } }
 public class DisplayNameUpdateRequest { public string DisplayName { get; set; } = ""; }
 public class RolesUpdateRequest { public List<string> Roles { get; set; } = new(); }
 public class StatusUpdateRequest { public bool Active { get; set; } }
 public class OwnerAssignRequest { public string OwnerUserId { get; set; } = ""; }
+public class ShareCreateRequest { public string RecipientUserId { get; set; } = ""; }
+public class SubmissionRejectRequest { public string Reason { get; set; } = ""; }
 public class McpCodeExchangeRequest { public string Code { get; set; } = ""; }
 public class McpLinkCreateRequest { public string Name { get; set; } = ""; public int Days { get; set; } = 90; }
 public class McpConsentRequest
