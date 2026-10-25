@@ -71,6 +71,11 @@ public static class DockerConfigTests
         var uses = Regex.Matches(workflow, @"uses:\s*(\S+)").Select(m => m.Groups[1].Value).ToList();
         check(uses.Count >= 8 && uses.All(u => Regex.IsMatch(u, @"^[\w./-]+@[0-9a-f]{40}$")), "Docker-Workflow: alle externen Actions sind auf Commit-SHAs gepinnt");
         check(workflow.Contains("secrets.DOCKERHUB_USERNAME") && workflow.Contains("secrets.DOCKERHUB_TOKEN") && !Regex.IsMatch(workflow, @"dckr_pat_\w+"), "Docker-Workflow: Anmeldung nur über Repository-Secrets");
+        // Keine Repository-Variablen/-Secrets außer den Docker-Hub-Zugangsdaten: Images und Paket enthalten nie individuelle Einstellungen aus der Pipeline
+        var secretRefs = Regex.Matches(workflow, @"secrets\.(\w+)").Select(m => m.Groups[1].Value).Distinct().ToList();
+        check(!workflow.Contains("${{ vars.") && !workflow.Contains("environment:") && secretRefs.All(x => x is "DOCKERHUB_USERNAME" or "DOCKERHUB_TOKEN"), "Docker-Workflow: nutzt keine Repository-Variablen und nur die Docker-Hub-Secrets (keine individuellen Einstellungen im Image oder Paket)");
+        check(Regex.Matches(workflow, @"build-args:\s*\|([\s\S]*?)
+\s*cache-from").All(m => Regex.Matches(m.Groups[1].Value, @"^\s*(\w+)=", RegexOptions.Multiline).All(x => x.Groups[1].Value is "VERSION" or "REVISION" or "CREATED")), "Docker-Workflow: Build-Argumente nur VERSION/REVISION/CREATED");
         check(workflow.Contains("joergb23/learny-web") && workflow.Contains("joergb23/learny-mcp") && workflow.Contains("release:") && workflow.Contains("types: [published]"), "Docker-Workflow: Images joergb23/learny-web und -mcp, Auslöser Release");
         check(!Regex.IsMatch(workflow, @"git (tag|push)") && !workflow.Contains("deploy-iis"), "Docker-Workflow: erzeugt keine Git-Tags und löst kein IIS-Deployment aus");
         check(workflow.Contains("STABLE") && workflow.Contains("latest") && workflow.Contains("case \"$version\" in *-*) stable=false"), "Docker-Workflow: Prereleases überschreiben latest nicht");
