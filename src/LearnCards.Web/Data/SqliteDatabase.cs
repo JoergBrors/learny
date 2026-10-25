@@ -40,8 +40,13 @@ public sealed class SqliteDatabase : IDatabase
             EnsureColumn("cards", "quiz_json", "TEXT NOT NULL DEFAULT '[]'");
             EnsureColumn("cards", "images_json", "TEXT NOT NULL DEFAULT '[]'");   // ADR 0016 (seit ADR 0017 nur noch Altbestand)
             EnsureColumn("cards", "images_migrated", "INTEGER NOT NULL DEFAULT 0");   // ADR 0017: 1 = Bilder liegen in card_images
+            EnsureColumn("cards", "quiz_synced", "INTEGER NOT NULL DEFAULT 0");   // ADR 0019: 1 = quiz[] ist in den Fragenpool übernommen
             EnsureColumn("quiz_results", "card_id", "TEXT NULL");
             EnsureColumn("quiz_results", "stats_json", "TEXT NOT NULL DEFAULT '{}'");
+            EnsureColumn("quiz_results", "session_id", "TEXT NULL");   // ADR 0019
+            EnsureColumn("quiz_results", "passed", "INTEGER NULL");
+            EnsureColumn("quiz_results", "pass_percent", "INTEGER NULL");
+            EnsureColumn("quiz_results", "module_version", "INTEGER NULL");
             MigrateOwnership();
             MigrateSharing();
         }

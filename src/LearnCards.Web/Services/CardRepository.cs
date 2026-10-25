@@ -19,11 +19,13 @@ public partial class CardRepository
 
     private readonly IDatabase _db;
     private readonly CardImageService _images;
+    private readonly QuizPoolService _quizPool;
 
-    public CardRepository(IDatabase db, CardImageService images)
+    public CardRepository(IDatabase db, CardImageService images, QuizPoolService quizPool)
     {
         _db = db;
         _images = images;
+        _quizPool = quizPool;
     }
 
     // ─── Module ─────────────────────────────────────────────────────────────
@@ -195,6 +197,7 @@ public partial class CardRepository
         };
         if (data.Images is { Count: > 0 }) EnsureValidImages(data.Images);
         await InsertCardAsync(card);
+        await _quizPool.SyncCardQuizAsync(card);   // quiz[] → Fragenpool (ADR 0019)
         if (data.Images is { Count: > 0 })
         {
             try { card.Images = await _images.ReplaceForCardAsync(card.Id, data.Images); }
@@ -260,6 +263,7 @@ public partial class CardRepository
                 archived=@archived, sort_order=@sort_order, updated_at=@updated_at
             WHERE id=@id AND owner_user_id=@owner_user_id
             """, CardArgs(card));
+        await _quizPool.SyncCardQuizAsync(card);   // quiz[] → Fragenpool (ADR 0019)
         return card;
     }
 
@@ -393,13 +397,17 @@ public partial class CardRepository
     // ─── Quiz-Ergebnisse ────────────────────────────────────────────────────
 
     public Task SaveQuizResultAsync(QuizResultRecord r) => _db.ExecuteAsync("""
-        INSERT INTO quiz_results (id, module_id, card_id, user_sub, category, score, max_score, grade, feedback, answers_json, stats_json, context, completed_at)
-        VALUES (@id, @module_id, @card_id, @user_sub, @category, @score, @max_score, @grade, @feedback, @answers_json, @stats_json, @context, @completed_at)
+        INSERT INTO quiz_results (id, module_id, card_id, user_sub, category, score, max_score, grade, feedback, answers_json, stats_json, context,
+                                  session_id, passed, pass_percent, module_version, completed_at)
+        VALUES (@id, @module_id, @card_id, @user_sub, @category, @score, @max_score, @grade, @feedback, @answers_json, @stats_json, @context,
+                @session_id, @passed, @pass_percent, @module_version, @completed_at)
         """, new (string, object?)[]
     {
         ("id", r.Id), ("module_id", r.ModuleId), ("card_id", string.IsNullOrWhiteSpace(r.CardId) ? null : r.CardId), ("user_sub", r.UserSub), ("category", r.Category),
         ("score", r.Score), ("max_score", r.MaxScore), ("grade", r.Grade), ("feedback", r.Feedback),
-        ("answers_json", r.AnswersJson), ("stats_json", r.StatsJson), ("context", r.Context), ("completed_at", r.CompletedAt),
+        ("answers_json", r.AnswersJson), ("stats_json", r.StatsJson), ("context", r.Context),
+        ("session_id", string.IsNullOrWhiteSpace(r.SessionId) ? null : r.SessionId), ("passed", r.Passed is null ? null : (r.Passed.Value ? 1 : 0)),
+        ("pass_percent", r.PassPercent), ("module_version", r.ModuleVersion), ("completed_at", r.CompletedAt),
     });
 
     public async Task<List<QuizResultRecord>> QuizHistoryAsync(string userSub, string? moduleId = null, string? cardId = null, int limit = 50)
@@ -585,6 +593,10 @@ public partial class CardRepository
         AnswersJson = r.GetValueOrDefault("answers_json") ?? "[]",
         StatsJson = r.GetValueOrDefault("stats_json") ?? "{}",
         Context = r.GetValueOrDefault("context") ?? "private",
+        SessionId = r.GetValueOrDefault("session_id"),
+        Passed = r.GetValueOrDefault("passed") is { Length: > 0 } pv ? DbValue.ToInt(pv) != 0 : null,
+        PassPercent = r.GetValueOrDefault("pass_percent") is { Length: > 0 } pp ? DbValue.ToInt(pp) : null,
+        ModuleVersion = r.GetValueOrDefault("module_version") is { Length: > 0 } mv ? DbValue.ToInt(mv) : null,
         CompletedAt = DbValue.ToDateTime(r.GetValueOrDefault("completed_at")),
     };
 

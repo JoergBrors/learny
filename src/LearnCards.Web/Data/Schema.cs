@@ -146,6 +146,7 @@ public static class Schema
                 quiz_json     TEXT NOT NULL DEFAULT '[]',
                 images_json   TEXT NOT NULL DEFAULT '[]',
                 images_migrated INTEGER NOT NULL DEFAULT 0,
+                quiz_synced INTEGER NOT NULL DEFAULT 0,
                 archived     INTEGER NOT NULL DEFAULT 0,
                 sort_order   INTEGER NOT NULL DEFAULT 0,
                 created_at   TEXT NOT NULL,
@@ -235,11 +236,68 @@ public static class Schema
                 answers_json TEXT NOT NULL DEFAULT '[]',
                 stats_json   TEXT NOT NULL DEFAULT {emptyJsonObject},
                 context      TEXT NOT NULL DEFAULT 'private',
+                session_id   TEXT NULL,
+                passed       INTEGER NULL,
+                pass_percent INTEGER NULL,
+                module_version INTEGER NULL,
                 completed_at TEXT NOT NULL
             )
             """;
 
         yield return "CREATE INDEX IF NOT EXISTS ix_quiz_user ON quiz_results(user_sub, completed_at)";
+
+        // ─── Einheitliches Quizsystem (ADR 0019) ───
+        // Persistenter Fragenpool je Modul (bzw. globaler Modulversion); eine Frage hat genau eine Quelle (source).
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS quiz_questions (
+                id             {id} PRIMARY KEY,
+                module_id      {id} NOT NULL REFERENCES modules(id) ON DELETE CASCADE,
+                card_id        {id} NULL REFERENCES cards(id) ON DELETE CASCADE,
+                type           TEXT NOT NULL,
+                question       TEXT NOT NULL,
+                options_json   TEXT NOT NULL DEFAULT '[]',
+                correct_json   TEXT NOT NULL DEFAULT '[]',
+                explanation    TEXT NOT NULL DEFAULT '',
+                origin         TEXT NOT NULL,
+                source         TEXT NOT NULL,
+                active         INTEGER NOT NULL DEFAULT 1,
+                module_version INTEGER NULL,
+                fingerprint    TEXT NOT NULL,
+                created_at     TEXT NOT NULL,
+                updated_at     TEXT NOT NULL
+            )
+            """;
+
+        yield return "CREATE UNIQUE INDEX IF NOT EXISTS ux_quiz_questions_fp ON quiz_questions(module_id, fingerprint)";
+        yield return "CREATE INDEX IF NOT EXISTS ix_quiz_questions_card ON quiz_questions(card_id)";
+
+        // Quizkonfiguration: genau eine je Modul (als JSON, damit neue Einstellungen ohne Schemaänderung möglich sind)
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS quiz_configs (
+                module_id   {id} PRIMARY KEY REFERENCES modules(id) ON DELETE CASCADE,
+                config_json TEXT NOT NULL,
+                updated_at  TEXT NOT NULL
+            )
+            """;
+
+        // Serverseitige Quizsitzungen (enthalten die Lösungen; Grundlage der verifizierten Bewertung)
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS quiz_sessions (
+                id             {id} PRIMARY KEY,
+                user_sub       TEXT NOT NULL,
+                module_id      {id} NOT NULL REFERENCES modules(id) ON DELETE CASCADE,
+                card_id        {id} NULL REFERENCES cards(id) ON DELETE CASCADE,
+                category       TEXT NOT NULL DEFAULT '',
+                context        TEXT NOT NULL DEFAULT 'private',
+                module_version INTEGER NULL,
+                config_json    TEXT NOT NULL,
+                questions_json TEXT NOT NULL,
+                status         TEXT NOT NULL DEFAULT 'open',
+                created_at     TEXT NOT NULL
+            )
+            """;
+
+        yield return "CREATE INDEX IF NOT EXISTS ix_quiz_sessions_user ON quiz_sessions(user_sub, created_at)";
     }
 
     /// <summary>

@@ -62,7 +62,8 @@ static void RegisterCoreTools(McpServerEngine engine, LearnCardsApiClient api, M
 
     engine.RegisterTool(
         new ToolDefinition("add_card",
-            "Create a single learning card in the LearnCards platform. Use only source-grounded facts and preserve the canonical import structure. Optional images[]: each entry needs mime_type (image/png, image/jpeg or image/webp) and data_base64 (plain standard Base64 of the real image file, no 'data:' prefix); alt_text and caption are optional. Limits: max 5 images per card, max 2 MiB per decoded image; prefer small images (< 200 KiB) because Base64 inside tool arguments consumes model context. Only include images you were actually given; never invent Base64 data. Call get_import_schema for the exact, current rules.",
+            "Create a single learning card in the LearnCards platform. Use only source-grounded facts and preserve the canonical import structure. Optional images[]: each entry needs mime_type (image/png, image/jpeg or image/webp) and data_base64 (plain standard Base64 of the real image file, no 'data:' prefix); alt_text and caption are optional. Limits: max 5 images per card, max 2 MiB per decoded image; prefer small images (< 200 KiB) because Base64 inside tool arguments consumes model context. Only include images you were actually given; never invent Base64 data. Call get_import_schema for the exact, current rules."+
+            " Optional quiz[]: fixed quiz questions of the card. type single_choice (default; exactly 4 options + 0-based correct_index), multiple_response (3-6 options + correct_indexes = all correct 0-based indexes) or free_text (no options; explanation = model answer); every entry needs question and explanation. Omit quiz or send [] for none; AI-generated questions are managed by the server, never send them here.",
             CardUpsertSchema()),
         async (args, ct) =>
         {
@@ -78,7 +79,8 @@ static void RegisterCoreTools(McpServerEngine engine, LearnCardsApiClient api, M
 
     engine.RegisterTool(
         new ToolDefinition("import_cards",
-            "Import multiple learning cards at once. Always consult get_import_schema first and keep answers grounded in the provided official sources. Cards may contain images[] (mime_type, data_base64, alt_text, caption) as described in the schema: real files only, standard Base64 without a 'data:' prefix, max 5 images per card and 2 MiB per decoded image. Many or large images make the request very large — import such cards in small batches; the server reports rejected cards with a reason in the result. With overwrite_existing=true an omitted images field keeps existing images, [] removes them.",
+            "Import multiple learning cards at once. Always consult get_import_schema first and keep answers grounded in the provided official sources. Cards may contain images[] (mime_type, data_base64, alt_text, caption) as described in the schema: real files only, standard Base64 without a 'data:' prefix, max 5 images per card and 2 MiB per decoded image. Many or large images make the request very large — import such cards in small batches; the server reports rejected cards with a reason in the result. With overwrite_existing=true an omitted images field keeps existing images, [] removes them."+
+            " Optional quiz[]: fixed quiz questions of the card. type single_choice (default; exactly 4 options + 0-based correct_index), multiple_response (3-6 options + correct_indexes = all correct 0-based indexes) or free_text (no options; explanation = model answer); every entry needs question and explanation. Omit quiz or send [] for none; AI-generated questions are managed by the server, never send them here.",
             """
             {
               "type": "object",
@@ -608,6 +610,24 @@ static string CardUpsertSchema() =>
           }
         },
         "chat_prompt": {"type": "string", "description": "System prompt for the AI chatbot on this card."},
+        "slide_number": {"type": "integer", "minimum": 1, "description": "Optional order in slide mode"},
+        "target_time_sec": {"type": "integer", "minimum": 1, "description": "Optional target speaking time in seconds (slide mode)"},
+        "quiz": {
+          "type": "array",
+          "description": "Optional fixed quiz questions of this card. Default type is single_choice. Same rules as get_import_schema.",
+          "items": {
+            "type": "object",
+            "required": ["question", "explanation"],
+            "properties": {
+              "type": {"type": "string", "enum": ["single_choice", "multiple_response", "free_text"], "default": "single_choice"},
+              "question": {"type": "string"},
+              "options": {"type": "array", "maxItems": 6, "items": {"type": "string"}, "description": "single_choice: exactly 4. multiple_response: 3 to 6. free_text: omit."},
+              "correct_index": {"type": "integer", "minimum": 0, "maximum": 3, "description": "single_choice only (0-based)"},
+              "correct_indexes": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 5}, "description": "multiple_response only: all correct options (0-based, unique)"},
+              "explanation": {"type": "string", "description": "Explanation shown after answering; for free_text the model answer"}
+            }
+          }
+        },
         "images": {
           "type": "array",
           "maxItems": 5,

@@ -50,6 +50,7 @@
                             @(_slideMode ? "🃏 Kartenmodus" : "📑 Folienmodus")
                         </button>
                     }
+                    <button class="btn btn-ghost" @onclick="() => _quizConfigOpen = !_quizConfigOpen">⚙ Quiz-Einstellungen</button>
                     @if (_canEdit)
                     {
                         <button class="btn btn-ghost" @onclick="ToggleArchive">@(_showArchive ? "← Aktive Karten" : $"🗂 Archiv ({_archivedCount})")</button>
@@ -62,6 +63,11 @@
                 </div>
             </div>
         </section>
+
+        @if (_quizConfigOpen)
+        {
+            <QuizConfigPanel ModuleId="@ModuleId" OnClose="() => { _quizConfigOpen = false; return Task.CompletedTask; }" />
+        }
 
         @if (_canEdit && _shareOpen)
         {
@@ -161,6 +167,7 @@
     private bool _quizOpen;
     private string _quizCardId = "";
     private string _quizCardTerm = "";
+    private bool _quizConfigOpen;
     private bool _pageQuizOpen;
     private string _pageQuizCardId = "";
     private string _pageQuizCardTerm = "";

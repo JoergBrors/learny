@@ -1,0 +1,141 @@
+@* Einfache Quizkonfiguration je Modul (ADR 0019): anzeigen, ändern, speichern, Validierungsfehler anzeigen. Kein Frageneditor (Auftrag 2). *@
+@inject QuizService Quiz
+@inject AuthenticationStateProvider AuthState
+
+<section class="card panel" aria-labelledby="quiz-config-title">
+    <div class="panel-head">
+        <h2 class="panel-title" id="quiz-config-title">⚙ Quiz-Einstellungen</h2>
+        <button class="icon-btn" @onclick="() => OnClose.InvokeAsync()" aria-label="Quiz-Einstellungen schließen">✕</button>
+    </div>
+
+    @if (_view is null)
+    {
+        <p class="muted">@(_error ?? "Wird geladen…")</p>
+    }
+    else
+    {
+        var ro = !_view.CanEdit;
+        @if (ro)
+        {
+            <p class="muted">Diese Einstellungen gehören dem Modul-Eigentümer@(_view.ModuleVersion is null ? "" : $" (eingefrorene Version {_view.ModuleVersion})"). Du kannst sie ansehen, aber nicht ändern.</p>
+        }
+        @if (!_view.AiAvailable)
+        {
+            <p class="muted">KI ist nicht konfiguriert: Es werden keine neuen Fragen generiert; gespeicherte Fragen und (bei Freitext) aus den Karten abgeleitete Fragen bleiben nutzbar.</p>
+        }
+        @foreach (var e in _errors) { <div class="alert alert-error" role="alert">@e</div> }
+        @if (_saved) { <div class="alert alert-ok" role="status">Einstellungen gespeichert.</div> }
+
+        <div class="form-grid">
+            <label class="check"><input type="checkbox" @bind="_cfg.Enabled" disabled="@ro" /> Quiz aktivieren</label>
+            <label class="check"><input type="checkbox" checked="@_cfg.AllowMultipleChoice" disabled="@ro" @onchange="e => SetMultipleChoice((bool)(e.Value ?? false))" /> Multiple Choice erlauben</label>
+
+            <fieldset>
+                <legend>Zulässige Frageformate</legend>
+                <label class="check"><input type="checkbox" @bind="_cfg.SingleChoice" disabled="@(ro || !_cfg.AllowMultipleChoice)" /> Single Choice (eine richtige Antwort)</label>
+                <label class="check"><input type="checkbox" @bind="_cfg.MultipleResponse" disabled="@(ro || !_cfg.AllowMultipleChoice)" /> Multiple Response (mehrere richtige Antworten)</label>
+                <label class="check"><input type="checkbox" @bind="_cfg.FreeText" disabled="@ro" /> Freitext</label>
+            </fieldset>
+
+            <label>Herkunft der Fragen
+                <select class="input" value="@_cfg.Origin" disabled="@ro" @onchange="e => SetOrigin(e.Value?.ToString() ?? QuizConfig.OriginMixed)">
+                    <option value="fixed">Nur fest hinterlegte Fragen</option>
+                    <option value="ai">Nur KI-generierte Fragen</option>
+                    <option value="mixed">Feste und KI-generierte Fragen mischen</option>
+                </select>
+            </label>
+
+            <label>Generierungsstrategie
+                <select class="input" @bind="_cfg.Strategy" disabled="@(ro || _cfg.Origin == QuizConfig.OriginFixed)">
+                    <option value="none">Keine neuen Fragen generieren</option>
+                    <option value="on_demand">Neue Fragen bei Bedarf generieren</option>
+                    <option value="prefer_stored">Gespeicherte Fragen bevorzugen</option>
+                    <option value="mix">Gespeicherte und neue Fragen mischen</option>
+                </select>
+            </label>
+
+            <label>Quizumfang (Fragen)
+                <input class="input" type="number" min="1" max="20" @bind="_cfg.QuestionCount" disabled="@ro" />
+            </label>
+            <label>Quiz starten von
+                <select class="input" @bind="_cfg.Scope" disabled="@ro">
+                    <option value="both">Karte und Modul</option>
+                    <option value="card">Nur kartenbezogen</option>
+                    <option value="module">Nur modulweit</option>
+                </select>
+            </label>
+            <label class="check"><input type="checkbox" @bind="_cfg.ShuffleQuestions" disabled="@ro" /> Fragen in zufälliger Reihenfolge</label>
+            <label class="check"><input type="checkbox" @bind="_cfg.ShuffleAnswers" disabled="@ro" /> Antworten mischen</label>
+
+            <label>Bestehensgrenze (%)
+                <input class="input" type="number" min="1" max="100" @bind="_cfg.PassPercent" disabled="@ro" />
+            </label>
+            <label class="check"><input type="checkbox" @bind="_cfg.AllowRetry" disabled="@ro" /> Wiederholungsversuche zulassen</label>
+            <label class="check"><input type="checkbox" @bind="_cfg.ShowCorrectAnswers" disabled="@ro" /> Richtige Antworten nach Abgabe anzeigen</label>
+        </div>
+
+        @if (!ro)
+        {
+            <div class="modal-actions">
+                <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_busy">@(_busy ? "Speichert…" : "Speichern")</button>
+            </div>
+        }
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public string ModuleId { get; set; } = "";
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private QuizConfigView? _view;
+    private QuizConfig _cfg = new();
+    private readonly List<string> _errors = new();
+    private string? _error;
+    private bool _busy, _saved;
+    private string _loaded = "";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loaded == ModuleId) return;
+        _loaded = ModuleId;
+        try
+        {
+            var auth = await AuthState.GetAuthenticationStateAsync();
+            _view = await Quiz.GetConfigViewAsync(ModuleId, auth.User.GetUserId() ?? throw new UnauthorizedAccessException());
+            _cfg = _view.Config.Clone();
+        }
+        catch (Exception e) { _error = e.Message; }
+    }
+
+    /// <summary>Multiple Choice aus ⇒ beide Auswahlformate aus (ungültige Kombination wird gar nicht erst möglich).</summary>
+    private void SetMultipleChoice(bool on)
+    {
+        _cfg.AllowMultipleChoice = on;
+        if (!on) { _cfg.SingleChoice = false; _cfg.MultipleResponse = false; _cfg.FreeText = true; }
+        else if (!_cfg.SingleChoice && !_cfg.MultipleResponse) { _cfg.SingleChoice = true; _cfg.MultipleResponse = true; }
+    }
+
+    /// <summary>Nur feste Fragen ⇒ nichts wird generiert.</summary>
+    private void SetOrigin(string origin)
+    {
+        _cfg.Origin = origin;
+        if (origin == QuizConfig.OriginFixed) _cfg.Strategy = QuizConfig.StrategyNone;
+        else if (_cfg.Strategy == QuizConfig.StrategyNone && _view?.Config.Strategy != QuizConfig.StrategyNone) _cfg.Strategy = _view!.Config.Strategy;
+        else if (_cfg.Strategy == QuizConfig.StrategyNone && origin != QuizConfig.OriginFixed && _view?.Config.Origin == QuizConfig.OriginFixed) _cfg.Strategy = QuizConfig.StrategyOnDemand;
+    }
+
+    private async Task SaveAsync()
+    {
+        _busy = true; _saved = false; _errors.Clear();
+        try
+        {
+            var auth = await AuthState.GetAuthenticationStateAsync();
+            _view = await Quiz.SaveConfigAsync(ModuleId, _cfg, auth.User.GetUserId() ?? throw new UnauthorizedAccessException());
+            _cfg = _view.Config.Clone();
+            _saved = true;
+        }
+        catch (ArgumentException e) { _errors.AddRange(e.Message.Split(". ", StringSplitOptions.RemoveEmptyEntries).Select(x => x.TrimEnd('.') + ".")); }
+        catch (Exception e) when (e is UnauthorizedAccessException or KeyNotFoundException) { _errors.Add(e.Message); }
+        finally { _busy = false; }
+    }
+}

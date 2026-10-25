@@ -1,6 +1,6 @@
 # 0010 — Folienmodus und statische Karten-Quizze
 
-- **Status:** Akzeptiert
+- **Status:** Akzeptiert — Quizlogik teilweise ersetzt durch [0019](0019-einheitliches-quizsystem.md) (Folienmodus und `quiz[]`-Felder gelten weiter)
 - **Datum:** 2026-10-24
 - **Ergänzt durch:** [0016](0016-bilder-in-lernkarten.md) (Bilder erscheinen auch im Folienmodus), [0011](0011-mehrbenutzerarchitektur.md) (Karten und ihr statisches Quiz gehören dem Eigentümer der Karte), [0015](0015-freigaben-globale-lernmodule.md) (Folienmodus und Karten-Quiz funktionieren auch in freigegebenen und globalen Modulen)
 
@@ -32,3 +32,8 @@ Folien zu unzuverlässig und brauchen einen API-Key.
 ## Betroffener Code
 
 - `Domain/Models.cs`, `Components/Shared/CardQuizPanel.razor`, `FlashCardView.razor`, `Api/CardImportSchema.cs`, `wwwroot/templates/slide-deck-template.json`
+
+## Nachtrag 2026-10-25
+
+Die in dieser ADR beschriebene Trennung von Karten-Quiz (statisch, clientseitig ausgewertet) und Modul-Quiz (KI, Freitext) ist durch die **einheitliche Quiz-Engine** ([ADR 0019](0019-einheitliches-quizsystem.md)) abgelöst: gemeinsame Sitzung, Bewertung, Konfiguration und Ergebnisspeicherung.
+`CardQuizPanel` bleibt als Einstiegskomponente erhalten. `quiz[]` bleibt der kanonische Import-/Export-Vertrag (jetzt optional auch `multiple_response` und `free_text`); die Fragen werden zusätzlich im Fragenpool geführt.

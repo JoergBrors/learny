@@ -27,7 +27,41 @@
         }
       ],
       "archived": false,
-      "sort_order": 1
+      "sort_order": 1,
+      "quiz": [
+        {
+          "type": "single_choice",
+          "question": "Welche Aussage beschreibt den Begriff am besten?",
+          "options": [
+            "Richtige Aussage",
+            "Falsche Aussage A",
+            "Falsche Aussage B",
+            "Falsche Aussage C"
+          ],
+          "correct_index": 0,
+          "explanation": "Kurze Erklärung, warum die erste Option stimmt."
+        },
+        {
+          "type": "multiple_response",
+          "question": "Welche Aussagen sind richtig? (mehrere möglich, 3–6 Optionen, correct_indexes)",
+          "options": [
+            "Richtig 1",
+            "Falsch",
+            "Richtig 2",
+            "Falsch"
+          ],
+          "correct_indexes": [
+            0,
+            2
+          ],
+          "explanation": "Option 1 und 3 sind korrekt."
+        },
+        {
+          "type": "free_text",
+          "question": "Erkläre den Begriff in eigenen Worten.",
+          "explanation": "Musterlösung: knappe, quellenbasierte Antwort (wird bei Freitext als Referenz zur Bewertung genutzt)."
+        }
+      ]
     }
   ]
 }

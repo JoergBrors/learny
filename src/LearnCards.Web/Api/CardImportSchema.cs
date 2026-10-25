@@ -6,13 +6,20 @@ public static class CardImportSchema
 {
     public static JsonObject Document() => new()
     {
-        ["schema_version"] = "2026-08-16",
+        ["schema_version"] = "2026-10-25",
         ["name"] = "learncards-import-batch",
         ["grounding_rules"] = new JsonArray(
             "Use only facts contained in the cards themselves and their official sources.",
             "Do not invent missing fields or unsupported facts.",
             "If a source-backed answer cannot be formed, ask for clarification instead of guessing.",
             "Only add images that were actually provided to you. Never invent, guess or fabricate Base64 image data."),
+        ["quiz_rules"] = new JsonArray(
+            "quiz[] holds the FIXED quiz questions of a card; it is optional (omit it or send [] for none). Old imports that only use single_choice stay valid.",
+            "single_choice (default type): exactly 4 non-empty options and a 0-based correct_index.",
+            "multiple_response: 3 to 6 non-empty options and correct_indexes (all correct options, 0-based, unique, at least one). A learner answer counts only if exactly this set is selected.",
+            "free_text: no options and no correct_index/correct_indexes; explanation is the model answer used for grading.",
+            "Every entry needs question and explanation. No other fields are accepted or required.",
+            "AI-generated questions and questions created in the editor are stored by the server in the module question pool; they are not part of this import format."),
         ["batch_schema"] = BatchSchema(),
         ["card_schema"] = CardSchema(),
         ["example"] = ExampleBatch(),
@@ -76,24 +83,24 @@ public static class CardImportSchema
             {
                 ["type"] = "array",
                 ["nullable"] = true,
-                ["description"] = "Optional page quiz shown directly on the card or slide.",
+                ["description"] = "Optional quiz questions of this card (fixed questions, stored in the module question pool). Default type is single_choice. multiple_response and free_text are optional additions.",
                 ["items"] = new JsonObject
                 {
                     ["type"] = "object",
-                    ["required"] = new JsonArray("type", "question", "options", "correct_index", "explanation"),
+                    ["required"] = new JsonArray("type", "question", "explanation"),
                     ["properties"] = new JsonObject
                     {
                         ["type"] = new JsonObject
                         {
                             ["type"] = "string",
-                            ["enum"] = new JsonArray("single_choice"),
+                            ["enum"] = new JsonArray("single_choice", "multiple_response", "free_text"),
                         },
                         ["question"] = Property("string", "Question text"),
                         ["options"] = new JsonObject
                         {
                             ["type"] = "array",
-                            ["minItems"] = 4,
-                            ["maxItems"] = 4,
+                            ["maxItems"] = 6,
+                            ["description"] = "single_choice: exactly 4 options. multiple_response: 3 to 6 options. free_text: omit.",
                             ["items"] = new JsonObject { ["type"] = "string" },
                         },
                         ["correct_index"] = new JsonObject
@@ -101,8 +108,15 @@ public static class CardImportSchema
                             ["type"] = "integer",
                             ["minimum"] = 0,
                             ["maximum"] = 3,
+                            ["description"] = "single_choice only: 0-based index of the correct option.",
                         },
-                        ["explanation"] = Property("string", "Short explanation shown after answering"),
+                        ["correct_indexes"] = new JsonObject
+                        {
+                            ["type"] = "array",
+                            ["description"] = "multiple_response only: 0-based indexes of all correct options (at least one, unique).",
+                            ["items"] = new JsonObject { ["type"] = "integer", ["minimum"] = 0, ["maximum"] = 5 },
+                        },
+                        ["explanation"] = Property("string", "Short explanation shown after answering (for free_text: the model answer)"),
                     },
                 },
             },
@@ -203,18 +217,37 @@ public static class CardImportSchema
             ["reference_answer"] = "In Produktion sollte kein beweglicher Tag wie :latest verwendet werden, weil sich der referenzierte Inhalt ändern kann. Stattdessen wird das Image per SHA-Digest gepinnt, damit Deployments reproduzierbar, nachvollziehbar und sicher bleiben.",
             ["slide_number"] = 3,
             ["target_time_sec"] = 90,
-            ["quiz"] = new JsonArray(new JsonObject
-            {
-                ["type"] = "single_choice",
-                ["question"] = "Warum ist ein SHA-Digest in CI/CD stabiler als :latest?",
-                ["options"] = new JsonArray(
-                    "Weil :latest nur lokal funktioniert",
-                    "Weil ein Digest exakt denselben Image-Inhalt referenziert",
-                    "Weil Digests automatisch gepatcht werden",
-                    "Weil Digests keine Registry benötigen"),
-                ["correct_index"] = 1,
-                ["explanation"] = "Ein Digest referenziert ein unveränderliches Artefakt und macht Deployments reproduzierbar.",
-            }),
+            ["quiz"] = new JsonArray(
+                new JsonObject
+                {
+                    ["type"] = "single_choice",
+                    ["question"] = "Warum ist ein SHA-Digest in CI/CD stabiler als :latest?",
+                    ["options"] = new JsonArray(
+                        "Weil :latest nur lokal funktioniert",
+                        "Weil ein Digest exakt denselben Image-Inhalt referenziert",
+                        "Weil Digests automatisch gepatcht werden",
+                        "Weil Digests keine Registry benötigen"),
+                    ["correct_index"] = 1,
+                    ["explanation"] = "Ein Digest referenziert ein unveränderliches Artefakt und macht Deployments reproduzierbar.",
+                },
+                new JsonObject
+                {
+                    ["type"] = "multiple_response",
+                    ["question"] = "Welche Aussagen zu Image-Referenzen sind richtig?",
+                    ["options"] = new JsonArray(
+                        "Ein Digest ist unveränderlich",
+                        "Ein Tag kann auf ein anderes Image zeigen",
+                        "Ein Digest wird bei jedem Push neu vergeben, ohne dass sich der Inhalt ändert",
+                        "Ein Tag ist reproduzierbarer als ein Digest"),
+                    ["correct_indexes"] = new JsonArray(0, 1),
+                    ["explanation"] = "Digests sind inhaltsbasiert und unveränderlich; Tags sind bewegliche Verweise.",
+                },
+                new JsonObject
+                {
+                    ["type"] = "free_text",
+                    ["question"] = "Erkläre in zwei Sätzen, warum Produktion Images per Digest pinnen sollte.",
+                    ["explanation"] = "Musterlösung: Ein Digest referenziert genau einen Image-Inhalt. Deployments bleiben dadurch reproduzierbar und nachvollziehbar.",
+                }),
             ["images"] = new JsonArray(new JsonObject
             {
                 ["mime_type"] = "image/png",

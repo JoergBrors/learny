@@ -185,7 +185,8 @@ Nur `scope = 'global'` **und** `global_status = 'active'` ist für Benutzer lern
 | official_sources_json | TEXT NOT NULL | Default `'[]'` — Liste `{title,url,publisher}` |
 | slide_number | INTEGER NULL | Folienmodus ([ADR 0010](adr/0010-folienmodus-und-karten-quiz.md)) |
 | target_time_sec | INTEGER NULL | Zeitziel pro Folie |
-| quiz_json | TEXT NOT NULL | Default `'[]'` — statisches Karten-Quiz |
+| quiz_json | TEXT NOT NULL | Default `'[]'` — `quiz[]` der Karte (Import-/Export-Vertrag, Quelle der Wahrheit der `card_json`-Fragen; wird nie gelöscht) |
+| quiz_synced | INTEGER NOT NULL | Default 0 — 1 = `quiz[]` ist in den Fragenpool übernommen ([ADR 0019](adr/0019-einheitliches-quizsystem.md)) |
 | images_json | TEXT NOT NULL | Default `'[]'` — **Altbestand** (ADR 0016: Base64-JSON). Neue Karten schreiben `'[]'`; vorhandene Werte bleiben unverändert erhalten und werden beim Start nach `card_images` überführt |
 | images_migrated | INTEGER NOT NULL | Default 0 — 1 = Bilder dieser Karte liegen in `card_images` ([ADR 0017](adr/0017-konfigurierbare-bildspeicher.md)) |
 | archived | INTEGER NOT NULL | Default 0 — Soft-Delete |
@@ -262,9 +263,66 @@ Index: `ix_chat_history_user_card (user_sub, card_id, created_at)`.
 | answers_json | TEXT NOT NULL | Default `'[]'` |
 | stats_json | TEXT NOT NULL | Default `'{}'` |
 | context | TEXT NOT NULL | `private` (Standard), `shared` oder `global` — Lernkontext des Ergebnisses ([ADR 0015](adr/0015-freigaben-globale-lernmodule.md)) |
+| session_id | TEXT NULL | Quizsitzung, aus der das Ergebnis serverseitig berechnet wurde ([ADR 0019](adr/0019-einheitliches-quizsystem.md)); NULL bei Altdaten und älteren Clients ohne Sitzung |
+| passed | INTEGER NULL | 1/0 laut Bestehensgrenze zum Zeitpunkt des Versuchs; NULL bei Altdaten |
+| pass_percent | INTEGER NULL | Bestehensgrenze des Versuchs |
+| module_version | INTEGER NULL | globale Modulversion; NULL bei privaten Modulen |
 | completed_at | TEXT NOT NULL | |
 
 Index: `ix_quiz_user (user_sub, completed_at)`. Bei globalen Ergebnissen verweist `module_id` auf die konkrete globale Version.
+
+### quiz_configs
+
+Genau eine Quizkonfiguration je Modul bzw. eingefrorener Modulversion ([ADR 0019](adr/0019-einheitliches-quizsystem.md)). Fehlt die Zeile, gelten kompatible Standardwerte.
+
+| Spalte | Typ | Hinweis |
+|---|---|---|
+| module_id | UUID PK | FK → modules, `CASCADE` |
+| config_json | TEXT NOT NULL | snake_case: `enabled`, `allow_multiple_choice`, `origin`, `strategy`, `single_choice`, `multiple_response`, `free_text`, `question_count`, `shuffle_questions`, `shuffle_answers`, `scope`, `pass_percent`, `allow_retry`, `show_correct_answers` |
+| updated_at | TEXT NOT NULL | |
+
+### quiz_questions
+
+Persistenter Fragenpool je Modul (bzw. Modulversion), optional an eine Karte gebunden.
+
+| Spalte | Typ | Hinweis |
+|---|---|---|
+| id | UUID PK | |
+| module_id | UUID NOT NULL | FK → modules, `CASCADE` |
+| card_id | UUID NULL | FK → cards, `CASCADE` |
+| type | TEXT NOT NULL | `single_choice`, `multiple_response`, `free_text` |
+| question | TEXT NOT NULL | |
+| options_json | TEXT NOT NULL | JSON-Array der Optionen (Freitext: `[]`) |
+| correct_json | TEXT NOT NULL | JSON-Array der 0-basierten richtigen Indizes |
+| explanation | TEXT NOT NULL | Erklärung; bei Freitext die Musterlösung |
+| origin | TEXT NOT NULL | `manual` oder `ai` |
+| source | TEXT NOT NULL | Quelle der Wahrheit: `card_json` (Projektion von `quiz[]`), `ai`, `editor` |
+| active | INTEGER NOT NULL | Default 1; Deaktivieren löscht keine Ergebnisse |
+| module_version | INTEGER NULL | globale Version |
+| fingerprint | TEXT NOT NULL | Hash aus Karte, Typ, Text, Optionen, richtigen Optionen — verhindert Duplikate |
+| created_at, updated_at | TEXT NOT NULL | |
+
+Indizes: `ux_quiz_questions_fp (module_id, fingerprint)` (unique), `ix_quiz_questions_card (card_id)`.
+
+### quiz_sessions
+
+Serverseitige Quizsitzung mit Lösungen (Grundlage der verifizierten Bewertung; Lösungen verlassen den Server nicht vor der Abgabe). Gültig 4 Stunden (danach 410 bei der Abgabe); Sitzungen älter als 24 Stunden werden beim Start und höchstens alle 10 Minuten in begrenzten Stapeln gelöscht — `quiz_results` ist davon unabhängig (kein Fremdschlüssel auf Sitzungen).
+
+| Spalte | Typ | Hinweis |
+|---|---|---|
+| id | UUID PK | `session_id` |
+| user_sub | TEXT NOT NULL | Eigentümer der Sitzung (fremde Sitzungen → „nicht gefunden“) |
+| module_id | UUID NOT NULL | FK → modules, `CASCADE` |
+| card_id | UUID NULL | FK → cards, `CASCADE`; gesetzt beim Kartenquiz |
+| category | TEXT NOT NULL | |
+| context | TEXT NOT NULL | `private`/`shared`/`global` |
+| module_version | INTEGER NULL | |
+| config_json | TEXT NOT NULL | Konfigurations-Schnappschuss zum Start |
+| questions_json | TEXT NOT NULL | Fragen mit Lösungen (auch flüchtige) |
+| status | TEXT NOT NULL | `open` oder `submitted` (atomar, nur einmal abgebbar) |
+| created_at | TEXT NOT NULL | |
+
+Index: `ix_quiz_sessions_user (user_sub, created_at)`.
 
 ## Schema-Initialisierung und Migrationen
 
@@ -272,8 +330,8 @@ Beim Start (`PostgresDatabase.InitAsync`, serialisiert über ein Gate):
 
 1. `Schema.Statements("postgres")` — alle `CREATE TABLE/INDEX IF NOT EXISTS`.
 2. `MigrateLegacySchemaAsync` — `cards.archived` von `boolean` auf `INTEGER`.
-3. `MigrateCardContentColumnsAsync` — ergänzt fehlende Spalten `reference_answer`, `official_sources_json`, `slide_number`, `target_time_sec`, `quiz_json`.
-4. `MigrateQuizResultColumnsAsync` — ergänzt `quiz_results.card_id`, `stats_json`.
+3. `MigrateCardContentColumnsAsync` — ergänzt fehlende Spalten `reference_answer`, `official_sources_json`, `slide_number`, `target_time_sec`, `quiz_json` und `quiz_synced` (ADR 0019).
+4. `MigrateQuizResultColumnsAsync` — ergänzt `quiz_results.card_id`, `stats_json`, `session_id`, `passed`, `pass_percent`, `module_version` (ADR 0019; alle NULL-fähig). `quiz_configs`/`quiz_questions`/`quiz_sessions` entstehen über `CREATE TABLE IF NOT EXISTS`; beim Start überführt `CardRepository.SyncLegacyQuizAsync` vorhandenes `quiz[]` idempotent in den Pool.
 5. `MigrateModuleDeleteCascadeAsync` — stellt `ON DELETE CASCADE` auf den Modul-Fremdschlüsseln sicher.
 8. `MigrateCardContentColumnsAsync` ergänzt auch `cards.images_json` (ADR 0016; Default `'[]'`, bestehende Karten bleiben ohne Bilder) und `cards.images_migrated` (ADR 0017; Default 0). `card_images`/`image_blobs` entstehen über `CREATE TABLE IF NOT EXISTS`.
 9. Beim Start überführt `CardImageService.MigrateLegacyInlineImagesAsync` Karten mit `images_json` idempotent nach `card_images` (Provider `database`); `images_json` bleibt unverändert erhalten.

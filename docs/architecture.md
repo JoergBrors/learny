@@ -133,6 +133,20 @@ Browser / MCP ──► GET /api/images/{id} ──► Berechtigung (privat/frei
 Clients erhalten Bilder ausschließlich über `/api/images/{id}` ([ADR 0018](adr/0018-zentraler-image-proxy-und-storage-zugriff.md)); Karten-JSON enthält nur diese URL (nie Provider, Schlüssel, SAS oder Cloud-URLs). `FlashCardView` zeigt sie mit `loading="lazy"`.
 Listenendpunkte liefern nur Metadaten; Base64 gibt es nur mit `?include_image_data=true`. Die Migration zwischen Providern ist eine ausdrücklich gestartete Admin-Aktion (`/api/admin/images/migrate`), die Quelle bleibt erhalten.
 
+## Quiz-Engine
+
+Karten- und Modulquiz nutzen dieselbe Engine ([ADR 0019](adr/0019-einheitliches-quizsystem.md)). `QuizService.StartSessionAsync` wählt Fragen (gespeicherter Pool → ggf. KI-Generierung → Offline-Ableitung aus den Karten) nach der **Quizkonfiguration des Moduls**
+und legt eine serverseitige Sitzung (`quiz_sessions`, mit Lösungen) an; `SubmitQuizAsync` bewertet Auswahlfragen exakt lokal und Freitext per KI (Fallback Heuristik) und speichert das Ergebnis inkl. Bestanden-Status.
+
+```
+CardQuizPanel (Karte)  ┐                      ┌ Pool quiz_questions  (card_json = Projektion von quiz[] · ai · editor)
+QuizPanel (Modul)      ├─► QuizRunner ─► QuizService ─► KI (CompleteJsonAsync, optional) ─► Pool (nur Eigentümer)
+REST /api/quiz/*       ┘                      └ Sitzung quiz_sessions ─► Bewertung ─► quiz_results (+ session, passed, pass_percent, module_version)
+```
+
+Begriffe: **Quizkonfiguration** (`quiz_configs`, je Modul/Version) · **Fragenpool** (`quiz_questions`) · **Karten-JSON** (`quiz[]`, nur feste Fragen) · **Quizsitzung** (`quiz_sessions`, 4 h gültig, nach 24 h bereinigt) · **Quiz-Ergebnis** (`quiz_results`, bleibt dauerhaft).
+`quiz[]` im Karten-JSON bleibt der Import-/Export-Vertrag und ist Quelle der Wahrheit für die darin gepflegten Fragen; KI-Fragen leben nur im Pool. Globale Versionen frieren Konfiguration und aktive Fragen ein; Lernende ändern den Pool nie.
+
 ## KI-Integration
 
 `OpenAiClient` spricht die OpenAI-Chat-Completions-API (per HTTP, kompatibel zu Azure-OpenAI- oder

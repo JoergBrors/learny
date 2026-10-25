@@ -133,7 +133,7 @@ Schritt-für-Schritt-Anleitung inkl. App-Settings-Mapping: [docs/azure-deploymen
 Der JSON-Import akzeptiert weiterhin ein Array von Karten oder ein Objekt mit `cards`. Für
 Prüfungsmodus mit Musterlösung und offiziellen Quellen kann jede Karte zusätzlich
 `reference_answer`, `official_sources` sowie optional `slide_number`, `target_time_sec` und
-ein statisches `quiz` für den Folien-/Seitenmodus enthalten:
+ein `quiz[]` mit festen Quizfragen (Karten- und Modulquiz, siehe unten) enthalten:
 
 ```json
 {
@@ -199,15 +199,33 @@ Karten können optional bis zu 5 Bilder enthalten (PNG, JPEG oder WebP, je höch
 `data_base64` ist reines Base64 ohne `data:`-Präfix (PowerShell: `[Convert]::ToBase64String([IO.File]::ReadAllBytes("bild.png"))`). Fehlendes `images` bedeutet keine Bilder; beim Überschreiben bleiben vorhandene Bilder erhalten, `"images": []` entfernt sie.
 Fehlerhafte Bilder lehnen die betroffene Karte mit einer Begründung ab. Details, Limits und Hinweise für KI-Assistenten: Hilfe-Seite der Anwendung und [ADR 0016](docs/adr/0016-bilder-in-lernkarten.md).
 
+### Quizfragen (`quiz[]`)
+
+`quiz` ist optional (fehlt es oder ist es `[]`, hat die Karte keine festen Fragen); alte Dateien mit nur `single_choice` — auch ohne `type` — bleiben gültig. Pflicht je Eintrag: `question` und `explanation`.
+
+| `type` | Felder | Bewertung |
+|---|---|---|
+| `single_choice` (Standard) | genau 4 `options`, `correct_index` (0-basiert) | eine richtige Option |
+| `multiple_response` | 3–6 `options`, `correct_indexes` (alle richtigen, 0-basiert, eindeutig) | nur die exakt richtige Menge zählt |
+| `free_text` | keine `options`; `explanation` ist die Musterlösung | KI-Bewertung bzw. lokale Heuristik ohne KI |
+
+```json
+"quiz": [
+  { "type": "single_choice", "question": "Welche Antwort stimmt?", "options": ["A", "B", "C", "D"], "correct_index": 1, "explanation": "B stimmt." },
+  { "type": "multiple_response", "question": "Welche sind Primzahlen?", "options": ["2", "3", "4", "6"], "correct_indexes": [0, 1], "explanation": "2 und 3." },
+  { "type": "free_text", "question": "Erkläre den Begriff.", "explanation": "Musterlösung." }
+]
+```
+
+Das quiz[] enthält nur die **festen** Fragen. KI-generierte (und künftig im Editor erstellte) Fragen liegen im Fragenpool des Moduls ([ADR 0019](docs/adr/0019-einheitliches-quizsystem.md)) und gehören nicht zum Import-JSON. Das exakte, aktuelle Format liefert `GET /api/schema/import/cards` (MCP: `get_import_schema`); Vorlagen gibt es auf der Hilfeseite.
+
 ## Demo-Dateien
 
 Unter `demoodule/` liegen importierbare Beispiel-Workloads:
 
-- `kvno_seed_module.json` — großer Azure-L400-Datensatz mit Quellenverzeichnis pro Karte
-- `kvno_folien_lernkarten.json` — Foliendeck-Datensatz mit `slide_number`, Zeitziel und vorbereitetem Seitenquiz
-- `demo.json` — kompakter PRINCE2-Projektmanagement-Datensatz für Demo- und Testzwecke
+- `demo.json` — kompakter PRINCE2-Projektmanagement-Datensatz mit Beispielbildern und Quizfragen aller drei Typen (Demo- und Testzwecke)
 
-Beide Dateien lassen sich direkt über den JSON-Import in der Startseite laden.
+Die Datei lässt sich direkt über den JSON-Import in der Startseite laden. Weitere Vorlagen (Minimal, Vollständig, Folien, Karte mit Bild) stehen auf der Hilfeseite zum Download bereit (`src/LearnCards.Web/wwwroot/templates/`).
 
 ## Dokumentation
 

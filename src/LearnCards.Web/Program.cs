@@ -28,6 +28,7 @@ builder.Services.AddSingleton<IDatabase>(_ => cfg.DbProvider == DbProvider.Postg
 builder.Services.AddSingleton<ImageStorageRegistry>();
 builder.Services.AddSingleton<IImageCache>(sp => ImageCacheFactory.Create(cfg.ImageStorage, out FileImageCache? _));
 builder.Services.AddSingleton<CardImageService>();
+builder.Services.AddSingleton<QuizPoolService>();
 builder.Services.AddSingleton<ImageMigrationService>();
 builder.Services.AddSingleton<CardRepository>();
 builder.Services.AddSingleton<OpenAiClient>();
@@ -130,6 +131,9 @@ app.MapRazorComponents<App>()
 var db = app.Services.GetRequiredService<IDatabase>();
 await db.InitAsync();
 // Bilder aus der früheren Speicherung (images_json, ADR 0016) einmalig in card_images überführen — idempotent, ohne Datenverlust
+var syncedQuizCards = await app.Services.GetRequiredService<CardRepository>().SyncLegacyQuizAsync();   // quiz[] → Fragenpool (ADR 0019)
+if (syncedQuizCards > 0) app.Logger.LogInformation("Quiz: {Count} Karten in den Fragenpool übernommen.", syncedQuizCards);
+await app.Services.GetRequiredService<QuizService>().CleanupSessionsIfDueAsync(force: true);   // abgelaufene Quizsitzungen entfernen (ADR 0019)
 var imageService = app.Services.GetRequiredService<CardImageService>();
 var convertedImages = await imageService.MigrateLegacyInlineImagesAsync();
 if (convertedImages > 0) app.Logger.LogInformation("Bilder von {Count} Karten in den Bildspeicher überführt (images_json bleibt unverändert).", convertedImages);

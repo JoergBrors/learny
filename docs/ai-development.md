@@ -38,7 +38,7 @@ Abnahme: Build ok, Import von `demoodule/demo.json` weiterhin möglich, Feld im 
 ## Wann ist eine neue ADR nötig?
 
 - Neue Abhängigkeit, neuer Persistenz-/Auth-/Transport-Mechanismus
-- Änderung des Karten-JSON-Formats, der API-Verträge oder des Datenmodells
+- Änderung des Karten-JSON-Formats, der API-Verträge oder des Datenmodells (dann auch Live-Importschema, MCP-Beschreibungen, `wwwroot/templates/*.json`, `demoodule/*.json` und `Help.razor` im selben Auftrag aktualisieren; der Test „Beispiele, Templates, Schema, MCP, Hilfe“ schützt die Übereinstimmung)
 - Neue Deployment-Variante oder Änderung am Release-Prozess
 - Abweichung von einer bestehenden Leitplanke
 

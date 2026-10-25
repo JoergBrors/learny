@@ -1,126 +1,216 @@
+@* Gemeinsame Quiz-Oberfläche für Karten- und Modulquiz (ADR 0019): Fragen beantworten (Single Choice, Multiple Response, Freitext) → serverseitig bewerten → Ergebnis *@
+@inject QuizService Quiz
+@inject AuthenticationStateProvider AuthState
+
 <div class="card-quiz-runner">
-    @if (Questions.Count == 0)
+    @if (_error is not null)
+    {
+        <div class="alert alert-error" role="alert">@_error</div>
+    }
+    @foreach (var notice in _result is null ? Session.Notices : new List<string>())
+    {
+        <div class="alert alert-info" role="status">@notice</div>
+    }
+
+    @if (Session.Questions.Count == 0)
     {
         <div class="alert alert-error">Keine Quizfragen verfügbar.</div>
+        <div class="modal-actions"><button class="btn btn-primary" @onclick="() => OnClose.InvokeAsync()">Schließen</button></div>
     }
-    else
+    else if (_result is null)
     {
-        var question = Questions[_current];
-        <div class="quiz-progress muted">Frage @(_current + 1) von @Questions.Count</div>
+        var question = Session.Questions[_current];
+        var picked = _selected[_current];
+        <div class="quiz-progress muted">Frage @(_current + 1) von @Session.Questions.Count · @TypeLabel(question.Type)</div>
         <h3 class="quiz-question">@question.Question</h3>
 
-        <div class="card-quiz-options">
-            @for (var i = 0; i < question.Options.Count; i++)
-            {
-                var optionIndex = i;
-                var answered = _answers[_current] >= 0;
-                var selected = _answers[_current] == optionIndex;
-                var isCorrect = question.CorrectIndex == optionIndex;
-                var css = answered
-                    ? isCorrect ? "quiz-option quiz-option-correct"
-                    : selected ? "quiz-option quiz-option-wrong"
-                    : "quiz-option"
-                    : "quiz-option";
-
-                <button type="button" class="@css" disabled="@answered" @onclick="() => SelectAnswer(optionIndex)">
-                    <span class="quiz-option-label">@((char)('A' + optionIndex))</span>
-                    <span>@question.Options[optionIndex]</span>
-                </button>
-            }
-        </div>
-
-        @if (_answers[_current] >= 0)
+        @if (question.Type == QuizTypes.FreeText)
         {
-            <div class="graded-item card-quiz-feedback">
-                <div class="graded-label">@(_answers[_current] == question.CorrectIndex ? "Richtig" : "Nicht korrekt")</div>
-                <div class="graded-a muted">@question.Explanation</div>
-            </div>
+            <textarea class="input quiz-answer" rows="6" placeholder="Deine Antwort im Fließtext…"
+                      @bind="_texts[_current]" @bind:event="oninput" aria-label="Antwort"></textarea>
         }
-
-        @if (_finished)
+        else
         {
-            <div class="quiz-result-head card-quiz-result">
-                <span class="grade grade-@ScoreGrade.ToLowerInvariant()">@ScoreGrade</span>
-                <div>
-                    <div class="quiz-score">@_score / @Questions.Count richtig</div>
-                    <p class="muted">@ScorePercent% Trefferquote</p>
-                </div>
+            <div class="card-quiz-options" role="@(question.Type == QuizTypes.SingleChoice ? "radiogroup" : "group")">
+                @for (var i = 0; i < question.Options.Count; i++)
+                {
+                    var optionIndex = i;
+                    var isSelected = picked.Contains(optionIndex);
+                    <button type="button" class="quiz-option @(isSelected ? "quiz-option-selected" : "")" aria-pressed="@(isSelected ? "true" : "false")" @onclick="() => Toggle(optionIndex)">
+                        <span class="quiz-option-label">@(question.Type == QuizTypes.SingleChoice ? (char)('A' + optionIndex) : (isSelected ? '✓' : (char)('A' + optionIndex)))</span>
+                        <span>@question.Options[optionIndex]</span>
+                    </button>
+                }
             </div>
+            @if (question.Type == QuizTypes.MultipleResponse)
+            {
+                <p class="muted">Mehrere Antworten können richtig sein — wähle alle zutreffenden.</p>
+            }
         }
 
         <div class="modal-actions">
-            @if (!_finished)
+            <button class="btn btn-ghost" @onclick="() => _current--" disabled="@(_current == 0 || _loading)">← Zurück</button>
+            @if (_current < Session.Questions.Count - 1)
             {
-                <button class="btn btn-ghost" @onclick="Prev" disabled="@(_current == 0)">← Zurück</button>
-                <button class="btn btn-primary" @onclick="Next" disabled="@(_answers[_current] < 0)">
-                    @(_current < Questions.Count - 1 ? "Weiter →" : "Ergebnis anzeigen")
-                </button>
+                <button class="btn btn-primary" @onclick="() => _current++">Weiter →</button>
             }
             else
             {
-                <button class="btn btn-ghost" @onclick="Restart">Nochmal</button>
-                <button class="btn btn-primary" @onclick="() => OnClose.InvokeAsync()">Schließen</button>
+                <button class="btn btn-primary" @onclick="SubmitAsync" disabled="@_loading">@(_loading ? "Wird bewertet…" : "Abgeben & bewerten")</button>
             }
+        </div>
+    }
+    else
+    {
+        <div class="quiz-result-head card-quiz-result">
+            <span class="grade grade-@_result.Grade.ToLowerInvariant()">@_result.Grade</span>
+            <div>
+                <div class="quiz-score">@_result.Score / @_result.MaxScore Punkte (@_result.Percentage%)</div>
+                @if (_result.Passed is not null)
+                {
+                    <p><span class="badge @(_result.Passed == true ? "badge-global" : "badge-admin")">@(_result.Passed == true ? "Bestanden" : "Nicht bestanden")</span>
+                       <span class="muted"> Bestehensgrenze @_result.PassPercent%</span></p>
+                }
+                <p class="muted">@_result.Feedback</p>
+                <p class="muted">
+                    @_result.Stats.QuestionCount Fragen aus @_result.Stats.UsedCheckedCardCount von @_result.Stats.CheckedCardCount gecheckten Karten
+                </p>
+            </div>
+        </div>
+
+        <div class="graded-list">
+            @foreach (var g in _result.GradedAnswers)
+            {
+                <div class="graded-item">
+                    <div class="graded-q">@g.Question</div>
+                    @if (!string.IsNullOrWhiteSpace(g.SourceTerm))
+                    {
+                        <div class="graded-a muted">Quellenkarte: @g.SourceTerm</div>
+                    }
+                    @if (g.Type == QuizTypes.FreeText)
+                    {
+                        <div class="graded-label">Markierte Antwort</div>
+                        <div class="graded-a muted">@g.UserAnswer</div>
+                        <div class="graded-f"><span class="pill">@g.Score / @g.Max</span> @g.Feedback</div>
+                        @if (!string.IsNullOrWhiteSpace(g.CompletedSolution))
+                        {
+                            <div class="graded-solution">
+                                <div class="graded-label">Ergänzte Referenzlösung</div>
+                                <div class="graded-solution-body">@g.CompletedSolution</div>
+                            </div>
+                        }
+                        @if (g.OfficialSources.Count > 0)
+                        {
+                            <div class="graded-sources">
+                                <div class="graded-label">Offizielle Quellen</div>
+                                <ul class="source-list">
+                                    @foreach (var source in g.OfficialSources)
+                                    {
+                                        <li>
+                                            <a href="@source.Url" target="_blank" rel="noreferrer">@source.Title</a>
+                                            @if (!string.IsNullOrWhiteSpace(source.Publisher)) { <span class="muted"> · @source.Publisher</span> }
+                                        </li>
+                                    }
+                                </ul>
+                            </div>
+                        }
+                    }
+                    else
+                    {
+                        <div class="card-quiz-options">
+                            @for (var i = 0; i < g.Options.Count; i++)
+                            {
+                                var chosen = g.SelectedIndexes.Contains(i);
+                                var correctOption = _result.ShowCorrectAnswers && g.CorrectIndexes.Contains(i);
+                                var aria = (chosen ? "gewählt" : "nicht gewählt") + (correctOption ? ", richtig" : "");
+                                var css = correctOption ? "quiz-option quiz-option-correct" : chosen && _result.ShowCorrectAnswers ? "quiz-option quiz-option-wrong" : chosen ? "quiz-option quiz-option-selected" : "quiz-option";
+                                <div class="@css" aria-label="@aria">
+                                    <span class="quiz-option-label">@(chosen ? '✓' : (char)('A' + i))</span>
+                                    <span>@g.Options[i]</span>
+                                </div>
+                            }
+                        </div>
+                        <div class="graded-f"><span class="pill">@g.Score / @g.Max</span> @g.Feedback</div>
+                        @if (_result.ShowCorrectAnswers && !string.IsNullOrWhiteSpace(g.Explanation))
+                        {
+                            <div class="graded-a muted">@g.Explanation</div>
+                        }
+                    }
+                </div>
+            }
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-ghost" @onclick="() => OnRestart.InvokeAsync()">Neues Quiz</button>
+            <button class="btn btn-primary" @onclick="() => OnClose.InvokeAsync()">Fertig</button>
         </div>
     }
 </div>
 
 @code {
-    [Parameter, EditorRequired] public List<CardQuizQuestion> Questions { get; set; } = new();
+    [Parameter, EditorRequired] public QuizStartResponse Session { get; set; } = new();
     [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnRestart { get; set; }
+    /// <summary>Wird nach erfolgreicher Abgabe aufgerufen (z. B. um den Verlauf neu zu laden).</summary>
+    [Parameter] public EventCallback OnSubmitted { get; set; }
 
     private int _current;
-    private List<int> _answers = new();
-    private bool _finished;
-    private int _score;
-
-    private double ScorePercent => Questions.Count == 0 ? 0 : Math.Round((double)_score / Questions.Count * 100, 1);
-    private string ScoreGrade => ScorePercent switch
-    {
-        >= 90 => "A",
-        >= 75 => "B",
-        >= 60 => "C",
-        >= 45 => "D",
-        _ => "F",
-    };
+    private List<HashSet<int>> _selected = new();
+    private List<string> _texts = new();
+    private QuizResultResponse? _result;
+    private bool _loading;
+    private string? _error;
+    private string _loadedSession = "";
 
     protected override void OnParametersSet()
     {
-        if (_answers.Count != Questions.Count)
-            ResetState();
-    }
-
-    private void SelectAnswer(int optionIndex)
-    {
-        if (_answers[_current] >= 0) return;
-        _answers[_current] = optionIndex;
-        if (Questions[_current].CorrectIndex == optionIndex)
-            _score++;
-    }
-
-    private void Prev()
-    {
-        if (_current > 0) _current--;
-    }
-
-    private void Next()
-    {
-        if (_current < Questions.Count - 1)
-        {
-            _current++;
-            return;
-        }
-
-        _finished = true;
-    }
-
-    private void Restart() => ResetState();
-
-    private void ResetState()
-    {
+        if (_loadedSession == Session.SessionId) return;
+        _loadedSession = Session.SessionId;
         _current = 0;
-        _finished = false;
-        _score = 0;
-        _answers = Enumerable.Repeat(-1, Questions.Count).ToList();
+        _result = null;
+        _error = null;
+        _selected = Session.Questions.Select(_ => new HashSet<int>()).ToList();
+        _texts = Session.Questions.Select(_ => "").ToList();
+    }
+
+    private static string TypeLabel(string type) => type switch
+    {
+        QuizTypes.SingleChoice => "eine richtige Antwort",
+        QuizTypes.MultipleResponse => "mehrere richtige Antworten",
+        _ => "Freitext",
+    };
+
+    private void Toggle(int option)
+    {
+        var picked = _selected[_current];
+        if (Session.Questions[_current].Type == QuizTypes.SingleChoice)
+        {
+            picked.Clear();
+            picked.Add(option);
+        }
+        else if (!picked.Remove(option)) picked.Add(option);
+    }
+
+    private async Task SubmitAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            var auth = await AuthState.GetAuthenticationStateAsync();
+            var userSub = auth.User.GetUserId() ?? throw new UnauthorizedAccessException();
+            var req = new QuizSubmitRequest
+            {
+                ModuleId = Session.ModuleId, Category = Session.Category, CardId = Session.CardId, SessionId = Session.SessionId,
+                Answers = Session.Questions.Select((q, i) => new QuizAnswerItem
+                {
+                    Question = q.Question, QuestionId = q.QuestionId, SourceCardId = q.SourceCardId,
+                    UserAnswer = _texts[i], SelectedIndexes = _selected[i].OrderBy(x => x).ToList(),
+                }).ToList(),
+            };
+            _result = await Quiz.SubmitQuizAsync(req, userSub);
+            await OnSubmitted.InvokeAsync();
+        }
+        catch (Exception ex) { _error = "Bewertung fehlgeschlagen: " + ex.Message; }
+        finally { _loading = false; }
     }
 }

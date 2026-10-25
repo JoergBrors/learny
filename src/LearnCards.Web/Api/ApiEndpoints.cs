@@ -293,17 +293,18 @@ public static class ApiEndpoints
             return Results.Ok(new { created = result.Created, updated = result.Updated, skipped = result.Skipped, errors = result.Errors });
         }).DisableAntiforgery();
 
-        secured.MapPost("/cards/{cardId}/quiz", async (string cardId, QuizService quiz, HttpContext http) =>
+        // Kartenquiz: startet über dieselbe Quiz-Engine wie das Modulquiz (ADR 0019). Antwort enthält die Sitzung; Lösungen gibt es erst nach der Abgabe.
+        secured.MapPost("/cards/{cardId}/quiz", async (string cardId, QuizService quiz, CardRepository repo, HttpContext http) =>
         {
             try
             {
-                var questions = await quiz.GetCardQuizAsync(cardId, Uid(http));
-                return Results.Ok(new { card_id = cardId, questions });
+                var card = await repo.GetReadableCardAsync(cardId, Uid(http))
+                    ?? throw new InvalidOperationException("Die ausgewählte Karte wurde nicht gefunden.");
+                var start = await quiz.StartSessionAsync(card.ModuleId, "", cardId, 0, Uid(http), http.RequestAborted);
+                return Results.Ok(StartDto(start, cardId));
             }
-            catch (InvalidOperationException e)
-            {
-                return Results.Json(new { detail = e.Message }, statusCode: 400);
-            }
+            catch (QuizRuleException e) { return Results.Json(new { detail = e.Message }, statusCode: e.Status); }
+            catch (InvalidOperationException e) { return Results.Json(new { detail = e.Message }, statusCode: 400); }
         });
 
         // ─── Quiz ───────────────────────────────────────────────────────────
@@ -311,17 +312,40 @@ public static class ApiEndpoints
         {
             try
             {
-                var questions = await quiz.StartQuizAsync(req.ModuleId, req.Category, req.NumQuestions, Uid(http), req.CardId);
-                return Results.Ok(new { questions, module_id = req.ModuleId, category = req.Category, card_id = req.CardId });
+                var start = await quiz.StartSessionAsync(req.ModuleId, req.Category, string.IsNullOrWhiteSpace(req.CardId) ? null : req.CardId, req.NumQuestions, Uid(http), http.RequestAborted);
+                return Results.Ok(StartDto(start, req.CardId));
             }
+            catch (QuizRuleException e) { return Results.Json(new { detail = e.Message }, statusCode: e.Status); }
             catch (InvalidOperationException e) { return Results.Json(new { detail = e.Message }, statusCode: 404); }
         });
 
         secured.MapPost("/quiz/submit", async (QuizSubmitRequest req, QuizService quiz, HttpContext http) =>
         {
-            try { return Results.Ok(await quiz.SubmitQuizAsync(req, Uid(http))); }
+            try { return Results.Ok(await quiz.SubmitQuizAsync(req, Uid(http), http.RequestAborted)); }
+            catch (QuizRuleException e) { return Results.Json(new { detail = e.Message }, statusCode: e.Status); }
             catch (InvalidOperationException e) { return Results.Json(new { detail = e.Message }, statusCode: 404); }
         });
+
+        // Quizkonfiguration je Modul: lesen darf jeder, der das Modul lernen darf; ändern nur der Eigentümer (freigegeben/global = schreibgeschützt)
+        secured.MapGet("/modules/{moduleId}/quiz-config", (string moduleId, QuizService quiz, HttpContext http) =>
+            Guard(async () => Results.Ok(QuizConfigDto(await quiz.GetConfigViewAsync(moduleId, Uid(http), http.RequestAborted)))));
+
+        secured.MapPut("/modules/{moduleId}/quiz-config", (string moduleId, QuizConfig config, QuizService quiz, HttpContext http) =>
+            Guard(async () => Results.Ok(QuizConfigDto(await quiz.SaveConfigAsync(moduleId, config, Uid(http), http.RequestAborted)))));
+
+        // Fragenpool (enthält Lösungen → nur Eigentümer)
+        secured.MapGet("/modules/{moduleId}/quiz-questions", (string moduleId, QuizService quiz, HttpContext http, string? card_id, string? origin, bool? active) =>
+            Guard(async () => Results.Ok((await quiz.ListQuestionsAsync(moduleId, Uid(http), card_id, origin, active, http.RequestAborted)).Select(PoolQuestionDto))));
+
+        // Fragen im Pool anlegen/ändern (Eigentümer; neue Fragen haben source=editor). Fragen aus quiz[] der Karte (source=card_json) werden über die Karte geändert.
+        secured.MapPost("/modules/{moduleId}/quiz-questions", (string moduleId, QuizQuestionInput input, QuizService quiz, HttpContext http) =>
+            Guard(async () => Results.Json(PoolQuestionDto(await quiz.CreateQuestionAsync(moduleId, input, Uid(http), http.RequestAborted)), statusCode: 201)));
+
+        secured.MapPut("/modules/{moduleId}/quiz-questions/{questionId}", (string moduleId, string questionId, QuizQuestionInput input, QuizService quiz, HttpContext http) =>
+            Guard(async () => Results.Ok(PoolQuestionDto(await quiz.UpdateQuestionAsync(moduleId, questionId, input, Uid(http), http.RequestAborted)))));
+
+        secured.MapPut("/modules/{moduleId}/quiz-questions/{questionId}/active", (string moduleId, string questionId, StatusUpdateRequest req, QuizService quiz, HttpContext http) =>
+            Guard(async () => { await quiz.SetQuestionActiveAsync(moduleId, questionId, req.Active, Uid(http), http.RequestAborted); return Results.NoContent(); }));
 
         secured.MapGet("/quiz/history", async (CardRepository repo, HttpContext http, string? module_id, string? card_id) =>
             Results.Ok(await repo.QuizHistoryAsync(Uid(http), module_id, card_id)));
@@ -644,6 +668,23 @@ public static class ApiEndpoints
     {
         id = u.Id, display_name = u.DisplayName, email = u.Email, status = u.Status, roles = u.Roles,
         created_at = u.CreatedAt, last_login_at = u.LastLoginAt,
+    };
+
+    private static object StartDto(QuizStartResponse r, string? cardId) => new
+    {
+        session_id = r.SessionId, module_id = r.ModuleId, category = r.Category, card_id = string.IsNullOrWhiteSpace(cardId) ? "" : cardId,
+        pass_percent = r.PassPercent, show_correct_answers = r.ShowCorrectAnswers, notices = r.Notices, questions = r.Questions,
+    };
+
+    private static object QuizConfigDto(QuizConfigView v) => new
+    {
+        module_id = v.ModuleId, config = v.Config, can_edit = v.CanEdit, ai_available = v.AiAvailable, module_version = v.ModuleVersion, context = v.Context,
+    };
+
+    private static object PoolQuestionDto(QuizPoolQuestion q) => new
+    {
+        id = q.Id, module_id = q.ModuleId, card_id = q.CardId, type = q.Type, question = q.Question, options = q.Options, correct_indexes = q.CorrectIndexes,
+        explanation = q.Explanation, origin = q.Origin, source = q.Source, active = q.Active, module_version = q.ModuleVersion, created_at = q.CreatedAt,
     };
 
     private static object ModuleDto(ModuleInfo m) => new

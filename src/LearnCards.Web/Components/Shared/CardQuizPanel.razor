@@ -1,4 +1,6 @@
+@* Einstieg „Quiz für diese Seite/Karte“: startet über die gemeinsame Quiz-Engine (ADR 0019) und zeigt die gemeinsame Oberfläche *@
 @inject QuizService Quiz
+@inject CardRepository Repo
 @inject AuthenticationStateProvider AuthState
 
 <div class="modal-backdrop" @onclick="CloseIfIdle">
@@ -19,9 +21,9 @@
                 <button class="btn btn-primary" @onclick="() => OnClose.InvokeAsync()">Schließen</button>
             </div>
         }
-        else
+        else if (_session is not null)
         {
-            <QuizRunner Questions="_questions" OnClose="OnClose" />
+            <QuizRunner Session="_session" OnClose="OnClose" OnRestart="RestartAsync" />
         }
     </div>
 </div>
@@ -34,24 +36,29 @@
     private string _loadedCardId = "";
     private bool _loading;
     private string? _error;
-    private List<CardQuizQuestion> _questions = new();
+    private QuizStartResponse? _session;
     private string TitleSuffix => string.IsNullOrWhiteSpace(CardTerm) ? "" : $" — {CardTerm}";
 
     protected override async Task OnParametersSetAsync()
     {
         if (CardId == _loadedCardId) return;
-
         _loadedCardId = CardId;
+        await StartAsync();
+    }
+
+    private async Task RestartAsync() => await StartAsync();
+
+    private async Task StartAsync()
+    {
         _loading = true;
         _error = null;
-        _questions = new();
-
+        _session = null;
         try
         {
             var auth = await AuthState.GetAuthenticationStateAsync();
-            _questions = await Quiz.GetCardQuizAsync(CardId, auth.User.GetUserId() ?? throw new UnauthorizedAccessException());
-            if (_questions.Count == 0)
-                _error = "Für diese Karte stehen aktuell keine Seiten-Quizfragen zur Verfügung.";
+            var userSub = auth.User.GetUserId() ?? throw new UnauthorizedAccessException();
+            var card = await Repo.GetReadableCardAsync(CardId, userSub) ?? throw new InvalidOperationException("Die ausgewählte Karte wurde nicht gefunden.");
+            _session = await Quiz.StartSessionAsync(card.ModuleId, "", CardId, 0, userSub);
         }
         catch (Exception ex)
         {

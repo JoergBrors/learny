@@ -28,7 +28,7 @@
 
             <article class="template-card">
                 <h3>Vollständiges Karten-Template</h3>
-                <p class="muted">Zeigt Referenzantwort, Chat-Prompt, offizielles Quellenverzeichnis und ein Beispielbild (<code>images</code>).</p>
+                <p class="muted">Zeigt Referenzantwort, Chat-Prompt, Quellenverzeichnis, ein Beispielbild (<code>images</code>) und Quizfragen aller drei Typen (Single Choice, Multiple Response, Freitext).</p>
                 <div class="page-head-actions">
                     <a class="btn btn-primary btn-sm" href="/templates/full-card-template.json" download>JSON laden</a>
                 </div>
@@ -44,7 +44,7 @@
 
             <article class="template-card">
                 <h3>Folien-/Seiten-Template</h3>
-                <p class="muted">Mit <code>slide_number</code>, <code>target_time_sec</code>, vorbereitetem Seitenquiz und Folienbild (<code>images</code>).</p>
+                <p class="muted">Mit <code>slide_number</code>, <code>target_time_sec</code>, Seitenquiz mit allen Fragetypen und Folienbild (<code>images</code>).</p>
                 <div class="page-head-actions">
                     <a class="btn btn-primary btn-sm" href="/templates/slide-deck-template.json" download>JSON laden</a>
                 </div>
@@ -82,10 +82,97 @@
                 <ul class="help-list">
                     <li><code>slide_number</code> aktiviert die Reihenfolge im Folienmodus.</li>
                     <li><code>target_time_sec</code> zeigt das Redezeitziel pro Folie.</li>
-                    <li><code>quiz</code> hinterlegt statische Seitenfragen direkt auf der Karte.</li>
+                    <li><code>quiz</code> hinterlegt feste Quizfragen der Karte: <code>single_choice</code> (4 Optionen, <code>correct_index</code>), optional <code>multiple_response</code> (3–6 Optionen, <code>correct_indexes</code>) und <code>free_text</code> (<code>explanation</code> = Musterlösung). Sie gelangen in den Fragenpool des Moduls.</li>
                 </ul>
             </div>
         </div>
+    </section>
+
+    <section class="card panel" id="quiz">
+        <h2 class="panel-title">Quiz: Arten, Einstellungen und Bedienung</h2>
+        <p class="muted">Es gibt eine gemeinsame Quiz-Engine mit einheitlicher Bewertung. Du erreichst sie auf zwei Wegen — die Fragen und die Bewertung sind dieselben.</p>
+
+        <div class="help-grid">
+            <div class="help-block">
+                <h3>Quizarten</h3>
+                <ul class="help-list">
+                    <li><strong>Kartenbezogenes Quiz:</strong> „Quiz für diese Seite“ auf einer Karte bzw. Folie. Gestellt werden die Fragen dieser Karte.</li>
+                    <li><strong>Modulweites Quiz:</strong> „🎓 Quiz starten“ auf der Modulseite. Gestellt werden Fragen zu deinen <em>gecheckten</em> Karten des Moduls (optional einer Kategorie).</li>
+                    <li><strong>Gemeinsame Bewertung:</strong> Punkte, Prozent, Note und „bestanden“ (Prozent ≥ Bestehensgrenze) werden immer auf dem Server berechnet. Richtige Antworten siehst du erst nach der Abgabe.</li>
+                </ul>
+            </div>
+            <div class="help-block">
+                <h3>Fragetypen</h3>
+                <ul class="help-list">
+                    <li><strong>Single Choice</strong> (<code>single_choice</code>): genau eine richtige Antwort.</li>
+                    <li><strong>Multiple Response</strong> (<code>multiple_response</code>): mehrere richtige Antworten — es zählt nur, wenn du <em>genau</em> alle richtigen und keine falsche wählst.</li>
+                    <li><strong>Freitext</strong> (<code>free_text</code>): Antwort in eigenen Worten; die KI bewertet gegen die Referenz, ohne KI eine lokale Stichwort-Heuristik (grober Anhaltspunkt).</li>
+                </ul>
+            </div>
+        </div>
+
+        <h3>Bedienung</h3>
+        <ul class="help-list">
+            <li><strong>Starten:</strong> Quiz öffnen, bei Modulquiz die Fragenzahl wählen (höchstens der eingestellte Umfang), „Quiz starten“.</li>
+            <li><strong>Antworten:</strong> Single Choice — eine Option wählen; Multiple Response — alle zutreffenden Optionen anklicken (erneutes Klicken nimmt die Wahl zurück); Freitext — in das Textfeld schreiben. Mit „Zurück“/„Weiter“ blätterst du.</li>
+            <li><strong>Abgeben:</strong> „Abgeben &amp; bewerten“ bei der letzten Frage. Ein Quiz kann nur einmal abgegeben werden; eine Sitzung ist 4 Stunden gültig.</li>
+            <li><strong>Bewertung verstehen:</strong> Jede Frage bringt bis zu 10 Punkte; das Ergebnis zeigt Prozent, Note (A–F) und, ob die Bestehensgrenze erreicht ist. Richtige Optionen und Erklärungen erscheinen, wenn „Richtige Antworten nach Abgabe anzeigen“ aktiv ist.</li>
+            <li><strong>Wiederholen:</strong> „Neues Quiz“ startet einen neuen Versuch — außer der Eigentümer hat Wiederholungen ausgeschaltet. Der Verlauf deiner Ergebnisse steht im Modulquiz-Dialog.</li>
+        </ul>
+
+        <h3>Quiz-Einstellungen bearbeiten</h3>
+        <p class="muted">Auf der Modulseite unter <strong>⚙ Quiz-Einstellungen</strong>. Ändern darf nur der Eigentümer eines eigenen Moduls; in freigegebenen und globalen Modulen kannst du die Einstellungen ansehen, aber nicht ändern.</p>
+        <ul class="help-list">
+            <li><strong>Quiz aktivieren:</strong> Aus = kein Quiz in diesem Modul.</li>
+            <li><strong>Multiple Choice erlauben:</strong> Aus = nur Freitext (Single Choice und Multiple Response werden dann automatisch abgeschaltet).</li>
+            <li><strong>Zulässige Frageformate:</strong> Single Choice, Multiple Response, Freitext. Es wird nie ein nicht erlaubter Fragetyp gestellt.</li>
+            <li><strong>Herkunft der Fragen:</strong> nur fest hinterlegte Fragen (aus <code>quiz[]</code>), nur KI-generierte oder gemischt. „Nur fest“ bedeutet: keine Generierung.</li>
+            <li><strong>Generierungsstrategie:</strong> keine neuen Fragen · bei Bedarf generieren (Lücken füllen) · gespeicherte bevorzugen (nur generieren, wenn nichts Passendes gespeichert ist) · gespeicherte und neue mischen.</li>
+            <li><strong>Quizumfang:</strong> Anzahl der Fragen (1–20), Fragen und Antworten mischen, Quiz nur von der Karte, nur vom Modul oder von beiden Stellen aus.</li>
+            <li><strong>Bewertung:</strong> Bestehensgrenze in Prozent, Wiederholungsversuche zulassen, richtige Antworten nach Abgabe anzeigen.</li>
+            <li>Ungültige Kombinationen werden verhindert oder mit einer Begründung abgelehnt.</li>
+        </ul>
+
+        <h3>KI-Fragen</h3>
+        <ul class="help-list">
+            <li><strong>Wann wird generiert?</strong> Nur wenn die Herkunft KI erlaubt, die Strategie es vorsieht, zu wenige passende Fragen gespeichert sind und eine KI-Verbindung (OpenAI-Schlüssel) konfiguriert ist.</li>
+            <li><strong>Wann wird gespeichert?</strong> Gültige KI-Fragen werden im Fragenpool <em>deines eigenen</em> Moduls gespeichert. Ungültige Fragen (falscher Typ, falsche Antwortindizes, fremde Quellenkarte) verwirft die Anwendung; Duplikate werden vermieden.</li>
+            <li><strong>Wann werden sie wiederverwendet?</strong> Bei späteren Quizzen je nach Strategie — „gespeicherte bevorzugen“ und „bei Bedarf“ nutzen zuerst, was schon im Pool liegt, „mischen“ verwendet gespeicherte und neue Fragen zugleich.</li>
+            <li><strong>Ohne KI-Verbindung:</strong> Gespeicherte und feste Fragen funktionieren weiter. Fehlende Fragen werden — nur wenn Freitext erlaubt ist — aus den Karten abgeleitet; Freitext wird lokal per Stichwort-Heuristik bewertet. Du erhältst einen Hinweis.</li>
+            <li><strong>Globale und freigegebene Module:</strong> Dort werden für dich generierte Fragen nur für dein Quiz verwendet und <em>nicht gespeichert</em>. Globale Modulversionen sind eingefroren und bleiben dadurch unverändert; ihre Einstellungen und Fragen sind die der veröffentlichten Version.</li>
+        </ul>
+    </section>
+
+    <section class="card panel" id="quiz-json">
+        <h2 class="panel-title">Quizfragen im JSON (<code>quiz[]</code>)</h2>
+        <p class="muted">Jede Lernkarte (<code>module</code>, <code>category</code>, <code>term</code>, <code>question</code>, <code>definition</code> sind Pflicht) kann optional ein Feld <code>quiz</code> mit <strong>festen</strong> Quizfragen enthalten.
+            Fehlt <code>quiz</code> oder ist es <code>[]</code>, hat die Karte keine festen Fragen. Ältere Dateien, die nur <code>single_choice</code> (auch ohne <code>type</code>) verwenden, funktionieren unverändert.</p>
+        <pre class="help-code"><code>"quiz": [
+  { "type": "single_choice",
+    "question": "Welche Antwort stimmt?",
+    "options": ["A", "B", "C", "D"],
+    "correct_index": 1,
+    "explanation": "B stimmt, weil …" },
+
+  { "type": "multiple_response",
+    "question": "Welche sind Primzahlen?",
+    "options": ["2", "3", "4", "6"],
+    "correct_indexes": [0, 1],
+    "explanation": "2 und 3 sind Primzahlen." },
+
+  { "type": "free_text",
+    "question": "Erkläre den Begriff in eigenen Worten.",
+    "explanation": "Musterlösung, gegen die bewertet wird." }
+]</code></pre>
+        <ul class="help-list">
+            <li><code>single_choice</code> (Standard): genau 4 Optionen, <code>correct_index</code> ist 0-basiert (0 = erste Option).</li>
+            <li><code>multiple_response</code>: 3 bis 6 Optionen, <code>correct_indexes</code> enthält <em>alle</em> richtigen Optionen (0-basiert, mindestens eine, ohne Doppelte).</li>
+            <li><code>free_text</code>: keine Optionen und keine Indizes; <code>explanation</code> ist die Musterlösung.</li>
+            <li>Pflicht in jedem Eintrag: <code>question</code> und <code>explanation</code>. Alle anderen Felder sind typabhängig optional; nicht erwähnte Felder gibt es nicht.</li>
+            <li><strong>Feste Fragen, KI-Fragen und Editor-Fragen:</strong> Das <code>quiz[]</code> der Karte enthält die festen Fragen und gehört zum Import/Export. Von der KI erzeugte und gespeicherte Fragen liegen im Fragenpool des Moduls und stehen <em>nicht</em> im Karten-JSON.</li>
+            <li>Das exakte, aktuelle Format liefert das Live-Importschema <code>GET /api/schema/import/cards</code> (für KI-Assistenten per MCP: Werkzeug <code>get_import_schema</code>).</li>
+            <li>Die Vorlagen oben zeigen die Fragetypen: das <em>Vollständige Karten-Template</em> und das <em>Folien-Template</em> enthalten alle drei, das <em>Minimal-Template</em> und <em>Karte mit Bild</em> bewusst kein Quiz.</li>
+        </ul>
     </section>
 
     <section class="card panel">
@@ -148,10 +235,11 @@
 
         <h3>Beispiel-Prompt für eine normale KI</h3>
         <pre class="help-code"><code>Erzeuge aus meinen Foliennotizen ein valides JSON-Objekt im folgenden Format:
-{"cards":[{"module":"","category":"","term":"","question":"","definition":"","how_it_works":"","context":"","key_fact":"","reference_answer":"","chat_prompt":"","official_sources":[{"title":"","url":"","publisher":""}],"slide_number":1,"target_time_sec":90,"quiz":[{"type":"single_choice","question":"","options":["","","",""],"correct_index":0,"explanation":""}],"archived":false,"sort_order":1}]}
+{"cards":[{"module":"","category":"","term":"","question":"","definition":"","how_it_works":"","context":"","key_fact":"","reference_answer":"","chat_prompt":"","official_sources":[{"title":"","url":"","publisher":""}],"slide_number":1,"target_time_sec":90,"quiz":[{"type":"single_choice","question":"","options":["","","",""],"correct_index":0,"explanation":""},{"type":"multiple_response","question":"","options":["","","",""],"correct_indexes":[0,2],"explanation":""},{"type":"free_text","question":"","explanation":"Musterlösung"}],"archived":false,"sort_order":1}]}
 
 Regeln:
 - Antworte ausschließlich mit JSON.
+- Quizfragen: single_choice hat genau 4 Optionen und ein correct_index; multiple_response hat 3 bis 6 Optionen und correct_indexes (alle richtigen, 0-basiert); free_text hat keine Optionen, die explanation ist die Musterlösung.
 - Verwende nur Fakten aus meinem Input.
 - Erfinde keine Technologien, Quellen oder Randbedingungen.
 - Wenn etwas unklar ist, lasse das Feld leer statt zu raten.

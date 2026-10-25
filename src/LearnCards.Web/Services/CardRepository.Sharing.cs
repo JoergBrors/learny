@@ -162,6 +162,17 @@ public partial class CardRepository
     }
 
     /// <summary>Alle Karten eines Moduls ohne Berechtigungsprüfung (nur Administration: Vorschau eingefrorener Einreichungen), inkl. Bildmetadaten.</summary>
+    /// <summary>Karte ohne Berechtigungsprüfung — nur für interne Wartungsläufe (Start-Synchronisation), nie an Benutzer ausliefern.</summary>
+    public async Task<Card?> GetCardRawAsync(string id)
+    {
+        if (!UserService.IsGuid(id)) return null;
+        var rows = await _db.QueryAsync("SELECT * FROM cards WHERE id = @id", new[] { ("id", (object?)id) });
+        return rows.Count == 0 ? null : MapCard(rows[0]);
+    }
+
+    /// <summary>Überführt <c>quiz[]</c> bestehender Karten einmalig in den Fragenpool (ADR 0019); idempotent, <c>quiz_json</c> bleibt erhalten.</summary>
+    public Task<int> SyncLegacyQuizAsync() => _quizPool.SyncLegacyAsync(GetCardRawAsync);
+
     public async Task<List<Card>> ListAllCardsOfModuleRawAsync(string moduleId)
     {
         if (!UserService.IsGuid(moduleId)) return new();
@@ -208,6 +219,7 @@ public partial class CardRepository
             ("created_at", copy.CreatedAt), ("updated_at", copy.UpdatedAt),
         });
 
+        var cardIdMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var c in sourceCards)
         {
             var copyCard = new Card
@@ -219,7 +231,11 @@ public partial class CardRepository
             };
             await InsertCardAsync(copyCard);
             await _images.CopyForCardAsync(c.Id, copyCard.Id);   // gleiche Binärdaten, neue Bild-IDs (Referenzzählung schützt vor vorzeitigem Löschen)
+            cardIdMap[c.Id] = copyCard.Id;
         }
+        // Quizkonfiguration und aktive Fragen (feste und gespeicherte KI-Fragen) werden mit der Version eingefroren (ADR 0019)
+        await _quizPool.CopyForStagedModuleAsync(source.Id, copy.Id, cardIdMap, version);
+        await _db.ExecuteAsync("UPDATE cards SET quiz_synced = 1 WHERE module_id = @m", new[] { ("m", (object?)copy.Id) });
         return (copy, sourceCards.Count);
     }
 

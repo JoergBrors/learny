@@ -508,6 +508,10 @@ kbd {
   font-weight: 700;
   flex: 0 0 auto;
 }
+.quiz-option-selected {
+  border-color: color-mix(in srgb, var(--brand-500) 65%, var(--border));
+  background: color-mix(in srgb, var(--brand-500) 14%, var(--surface));
+}
 .quiz-option-correct {
   border-color: color-mix(in srgb, var(--ok) 60%, var(--border));
   background: color-mix(in srgb, var(--ok-bg) 74%, var(--surface));
@@ -516,6 +520,13 @@ kbd {
   border-color: color-mix(in srgb, var(--danger) 60%, var(--border));
   background: color-mix(in srgb, var(--danger-bg) 72%, var(--surface));
 }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 1rem 1.5rem; margin-top: 1rem; align-items: start; }
+.form-grid label { display: flex; flex-direction: column; gap: .3rem; }
+.form-grid label.check { flex-direction: row; align-items: center; gap: .55rem; }
+.form-grid fieldset { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .6rem .9rem; display: flex; flex-direction: column; gap: .4rem; }
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.alert-info { border: 1px solid var(--border); background: var(--surface-2); color: var(--ink-soft); border-radius: var(--radius-sm); padding: .6rem .9rem; margin-bottom: .75rem; }
+.card-quiz-options + .graded-f { margin-top: .85rem; }
 .card-quiz-feedback { margin-top: 1rem; }
 .card-quiz-result { margin-top: 1.25rem; }
 

@@ -83,6 +83,13 @@ public class QuizResultRecord
     public string Feedback { get; set; } = "";
     public string AnswersJson { get; set; } = "[]";
     public string StatsJson { get; set; } = "{}";
+    /// <summary>Quizsitzung (ADR 0019), aus der das Ergebnis serverseitig berechnet wurde; leer bei Altdaten.</summary>
+    public string? SessionId { get; set; }
+    /// <summary>Bestanden laut Bestehensgrenze zum Zeitpunkt des Versuchs; null bei Altdaten.</summary>
+    public bool? Passed { get; set; }
+    public int? PassPercent { get; set; }
+    /// <summary>Globale Modulversion des Versuchs; null bei privaten Modulen.</summary>
+    public int? ModuleVersion { get; set; }
     /// <summary>Lernkontext des Ergebnisses: "private", "shared" oder "global" (ADR 0015).</summary>
     public string Context { get; set; } = "private";
     public DateTime CompletedAt { get; set; } = DateTime.UtcNow;
@@ -162,13 +169,8 @@ public class CardJson
         if (TargetTimeSec is <= 0) return (false, "'target_time_sec' muss größer als 0 sein");
         foreach (var quiz in Quiz)
         {
-            if (quiz.Type != "single_choice") return (false, "Aktuell wird nur quiz.type='single_choice' unterstützt");
-            if (string.IsNullOrWhiteSpace(quiz.Question)) return (false, "Jede Quizfrage benötigt ein 'question'");
-            if (quiz.Options is null || quiz.Options.Count != 4 || quiz.Options.Any(string.IsNullOrWhiteSpace))
-                return (false, "Jede Quizfrage benötigt genau 4 nicht-leere 'options'");
-            if (quiz.CorrectIndex < 0 || quiz.CorrectIndex >= quiz.Options.Count)
-                return (false, "'correct_index' muss auf eine vorhandene Option zeigen");
-            if (string.IsNullOrWhiteSpace(quiz.Explanation)) return (false, "Jede Quizfrage benötigt eine 'explanation'");
+            var (quizOk, quizError) = quiz.Validate();
+            if (!quizOk) return (false, quizError);
         }
         var (imagesOk, imagesError) = CardImageValidator.ValidateAndNormalize(Images);
         if (!imagesOk) return (false, imagesError);
@@ -176,13 +178,45 @@ public class CardJson
     }
 }
 
+/// <summary>
+/// Frage im kanonischen <c>quiz[]</c> der Karte (ADR 0006/0010/0019). <c>single_choice</c>: genau 4 Optionen + <c>correct_index</c> (unverändert).
+/// Optional und abwärtskompatibel: <c>multiple_response</c> (3–6 Optionen, <c>correct_indexes</c>) und <c>free_text</c> (ohne Optionen, <c>explanation</c> = Musterlösung).
+/// </summary>
 public class CardQuizQuestion
 {
     public string Type { get; set; } = "single_choice";
     public string Question { get; set; } = "";
     public List<string> Options { get; set; } = new();
     public int CorrectIndex { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public List<int>? CorrectIndexes { get; set; }
     public string Explanation { get; set; } = "";
+
+    public (bool Ok, string Error) Validate()
+    {
+        if (string.IsNullOrWhiteSpace(Question)) return (false, "Jede Quizfrage benötigt ein 'question'");
+        if (string.IsNullOrWhiteSpace(Explanation)) return (false, "Jede Quizfrage benötigt eine 'explanation'");
+        switch (Type)
+        {
+            case QuizTypes.SingleChoice:
+                if (Options is null || Options.Count != 4 || Options.Any(string.IsNullOrWhiteSpace))
+                    return (false, "Jede Quizfrage benötigt genau 4 nicht-leere 'options'");
+                if (CorrectIndex < 0 || CorrectIndex >= Options.Count)
+                    return (false, "'correct_index' muss auf eine vorhandene Option zeigen");
+                return (true, "");
+            case QuizTypes.MultipleResponse:
+                if (Options is null || Options.Count is < 3 or > 6 || Options.Any(string.IsNullOrWhiteSpace))
+                    return (false, "multiple_response benötigt 3 bis 6 nicht-leere 'options'");
+                if (CorrectIndexes is null || CorrectIndexes.Count == 0 || CorrectIndexes.Distinct().Count() != CorrectIndexes.Count
+                    || CorrectIndexes.Any(i => i < 0 || i >= Options.Count))
+                    return (false, "'correct_indexes' muss mindestens eine, eindeutige, vorhandene Option enthalten");
+                return (true, "");
+            case QuizTypes.FreeText:
+                return (true, "");
+            default:
+                return (false, "quiz.type muss 'single_choice', 'multiple_response' oder 'free_text' sein");
+        }
+    }
 }
 
 public class CardImportBatch
@@ -209,12 +243,17 @@ public class QuizStartRequest
     public int NumQuestions { get; set; } = 5;
 }
 
+/// <summary>Frage für den Client (ohne Lösung). Alte Clients lesen weiter nur <c>question</c>/<c>topic</c>/<c>source_card_id</c>/<c>source_term</c>.</summary>
 public class QuizQuestion
 {
     public string Question { get; set; } = "";
     public string Topic { get; set; } = "";
     public string SourceCardId { get; set; } = "";
     public string SourceTerm { get; set; } = "";
+    public string QuestionId { get; set; } = "";
+    /// <summary>single_choice | multiple_response | free_text</summary>
+    public string Type { get; set; } = QuizTypes.FreeText;
+    public List<string> Options { get; set; } = new();
 }
 
 public class QuizAnswerItem
@@ -222,6 +261,10 @@ public class QuizAnswerItem
     public string Question { get; set; } = "";
     public string UserAnswer { get; set; } = "";
     public string SourceCardId { get; set; } = "";
+    /// <summary>Frage-ID aus <c>/quiz/start</c> (maßgeblich bei Sitzungen).</summary>
+    public string QuestionId { get; set; } = "";
+    /// <summary>Gewählte Optionen (0-basiert) bei single_choice/multiple_response.</summary>
+    public List<int> SelectedIndexes { get; set; } = new();
 }
 
 public class QuizSubmitRequest
@@ -229,6 +272,8 @@ public class QuizSubmitRequest
     public string ModuleId { get; set; } = "";
     public string Category { get; set; } = "";
     public string CardId { get; set; } = "";
+    /// <summary>Sitzung aus <c>/quiz/start</c>. Ohne Sitzung gilt der ältere Freitext-Ablauf (Rückwärtskompatibilität).</summary>
+    public string SessionId { get; set; } = "";
     public List<QuizAnswerItem> Answers { get; set; } = new();
 }
 
@@ -238,6 +283,14 @@ public class GradedAnswer
     public string UserAnswer { get; set; } = "";
     public string SourceCardId { get; set; } = "";
     public string SourceTerm { get; set; } = "";
+    public string QuestionId { get; set; } = "";
+    public string Type { get; set; } = QuizTypes.FreeText;
+    public List<string> Options { get; set; } = new();
+    public List<int> SelectedIndexes { get; set; } = new();
+    /// <summary>Richtige Optionen — nur gefüllt, wenn die Konfiguration „richtige Antworten anzeigen“ erlaubt.</summary>
+    public List<int> CorrectIndexes { get; set; } = new();
+    public bool? Correct { get; set; }
+    public string Explanation { get; set; } = "";
     public double Score { get; set; }
     public double Max { get; set; } = 10;
     public string Feedback { get; set; } = "";
@@ -255,6 +308,12 @@ public class QuizResultResponse
     public string Feedback { get; set; } = "";
     public QuizSessionStats Stats { get; set; } = new();
     public List<GradedAnswer> GradedAnswers { get; set; } = new();
+    public string ResultId { get; set; } = "";
+    public string SessionId { get; set; } = "";
+    public bool? Passed { get; set; }
+    public int? PassPercent { get; set; }
+    public int? ModuleVersion { get; set; }
+    public bool ShowCorrectAnswers { get; set; } = true;
 }
 
 public class QuizSessionStats

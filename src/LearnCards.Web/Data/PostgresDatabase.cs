@@ -141,12 +141,17 @@ public sealed class PostgresDatabase : IDatabase
         await EnsureCardColumnAsync("quiz_json", "TEXT NOT NULL DEFAULT '[]'", ct);
         await EnsureCardColumnAsync("images_json", "TEXT NOT NULL DEFAULT '[]'", ct);   // ADR 0016 (seit ADR 0017 nur noch Altbestand)
         await EnsureCardColumnAsync("images_migrated", "INTEGER NOT NULL DEFAULT 0", ct);   // ADR 0017: 1 = Bilder liegen in card_images
+        await EnsureCardColumnAsync("quiz_synced", "INTEGER NOT NULL DEFAULT 0", ct);   // ADR 0019: 1 = quiz[] ist in den Fragenpool übernommen
     }
 
     private async Task MigrateQuizResultColumnsAsync(CancellationToken ct)
     {
         await EnsureTableColumnAsync("quiz_results", "card_id", "UUID NULL", ct);
         await EnsureTableColumnAsync("quiz_results", "stats_json", "TEXT NOT NULL DEFAULT '{}'", ct);
+        await EnsureTableColumnAsync("quiz_results", "session_id", "TEXT NULL", ct);   // ADR 0019
+        await EnsureTableColumnAsync("quiz_results", "passed", "INTEGER NULL", ct);
+        await EnsureTableColumnAsync("quiz_results", "pass_percent", "INTEGER NULL", ct);
+        await EnsureTableColumnAsync("quiz_results", "module_version", "INTEGER NULL", ct);
     }
 
     private async Task EnsureCardColumnAsync(string columnName, string definition, CancellationToken ct)

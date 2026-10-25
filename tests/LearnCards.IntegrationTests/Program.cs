@@ -1069,6 +1069,377 @@ try
     Check((await bobAgain.GetAsync("/auth/login?devUser=bob")).Headers.Location?.ToString().Contains("login?error") == true, "Gesperrter Benutzer kann sich nicht neu anmelden");
     Check((await admin.PutAsync($"/api/admin/users/{adminId}/status", Body(new { active = false }))).StatusCode == HttpStatusCode.BadRequest, "Admin kann sich nicht selbst sperren");
 
+    // ─── Einheitliches Quizsystem (ADR 0019): Konfiguration, Pool, Sitzungen, Bewertung, Rechte ───
+    Console.WriteLine("\nQuiz-Engine (ADR 0019)");
+    async Task<(string ModuleId, string[] CardIds)> MakeQuizModule(HttpClient who, string name)
+    {
+        var defs = new object[]
+        {
+            new { module = name, category = "K", term = "SC-Karte", question = "Frage SC?", definition = "Definition der SC-Karte",
+                  quiz = new object[] { new { type = "single_choice", question = "Welche Antwort stimmt?", options = new[] { "A", "B", "C", "D" }, correct_index = 1, explanation = "B stimmt." } } },
+            new { module = name, category = "K", term = "MR-Karte", question = "Frage MR?", definition = "Definition der MR-Karte",
+                  quiz = new object[]
+                  {
+                      new { type = "multiple_response", question = "Welche sind Primzahlen?", options = new[] { "2", "3", "4", "6" }, correct_indexes = new[] { 0, 1 }, explanation = "2 und 3." },
+                      new { type = "free_text", question = "Erkläre den Begriff MR.", options = Array.Empty<string>(), explanation = "Muster: MR ist ein Auswahlformat mit mehreren richtigen Antworten." },
+                  } },
+            new { module = name, category = "K", term = "Ohne-Quiz", question = "Frage ohne Quiz?", definition = "Definition ohne Quiz", quiz = Array.Empty<object>() },
+        };
+        var ids = new List<string>();
+        foreach (var d in defs)
+        {
+            var created = await who.PostAsync("/api/cards/", Body(d));
+            ids.Add((await J(created))!["id"]!.GetValue<string>());
+            await who.PutAsync($"/api/cards/{ids[^1]}/state", Body(new { is_checked = true, marked_review = false }));
+        }
+        var module = (await J(await who.GetAsync($"/api/cards/{ids[0]}")))!["module_id"]!.GetValue<string>();
+        return (module, ids.ToArray());
+    }
+    async Task<(HttpStatusCode Status, JsonNode? Body)> QStart(HttpClient who, string moduleId, string? cardId = null, int n = 5)
+    {
+        var r = cardId is null
+            ? await who.PostAsync("/api/quiz/start", Body(new { module_id = moduleId, category = "", card_id = "", num_questions = n }))
+            : await who.PostAsync($"/api/cards/{cardId}/quiz", null);
+        return (r.StatusCode, await J(r));
+    }
+    // Antworten: richtige Auswahl (nach Fragetext), Freitext mit Stichworten der Musterlösung
+    object[] QAnswers(JsonNode start, bool correct, Func<string, int[]>? pick = null) => start["questions"]!.AsArray().Select(q =>
+    {
+        var text = q!["question"]!.GetValue<string>();
+        var type = q["type"]!.GetValue<string>();
+        int[] sel = type == "free_text" ? Array.Empty<int>()
+            : pick is not null ? pick(text)
+            : !correct ? new[] { 3 }
+            : text.StartsWith("Welche Antwort") ? new[] { 1 } : new[] { 0, 1 };
+        return (object)new { question = text, question_id = q["question_id"]!.GetValue<string>(), source_card_id = q["source_card_id"]!.GetValue<string>(), user_answer = type == "free_text" && correct ? "Auswahlformat mehreren richtigen Antworten" : "", selected_indexes = sel };
+    }).ToArray();
+    async Task<(HttpStatusCode Status, JsonNode? Body)> QSubmit(HttpClient who, string moduleId, JsonNode start, object[] answers, string cardId = "")
+    {
+        var r = await who.PostAsync("/api/quiz/submit", Body(new { module_id = moduleId, category = "", card_id = cardId, session_id = start["session_id"]!.GetValue<string>(), answers }));
+        return (r.StatusCode, await J(r));
+    }
+
+    var (qm, qCards) = await MakeQuizModule(ann, "QZ-Engine");
+    var modulePageHtml = await (await ann.GetAsync($"/module/{qm}")).Content.ReadAsStringAsync();
+    Check(modulePageHtml.Contains("Quiz-Einstellungen") && modulePageHtml.Contains("Quiz starten"), "Quiz-UI: Modulseite rendert den Einstieg zu den Quiz-Einstellungen (Serverrendering)");
+    var cfg0 = (await J(await ann.GetAsync($"/api/modules/{qm}/quiz-config")))!;
+    Check(cfg0["can_edit"]!.GetValue<bool>() && cfg0["config"]!["enabled"]!.GetValue<bool>() && cfg0["config"]!["pass_percent"]!.GetValue<int>() == 60
+          && cfg0["config"]!["origin"]!.GetValue<string>() == "mixed" && cfg0["config"]!["strategy"]!.GetValue<string>() == "on_demand", "Quiz: Standardkonfiguration ist kompatibel (aktiv, 60 %, gemischt, bei Bedarf)");
+    var pool0 = (await J(await ann.GetAsync($"/api/modules/{qm}/quiz-questions")))!.AsArray();
+    Check(pool0.Count == 3 && pool0.All(q => q!["source"]!.GetValue<string>() == "card_json" && q["origin"]!.GetValue<string>() == "manual" && q["active"]!.GetValue<bool>()),
+        "Quiz: quiz[] der Karten erscheint als Projektion im Fragenpool (3 Fragen, manuell, aktiv)");
+    Check(pool0.Any(q => q!["type"]!.GetValue<string>() == "multiple_response" && q["correct_indexes"]!.AsArray().Count == 2) && pool0.Any(q => q!["type"]!.GetValue<string>() == "free_text"), "Quiz: Multiple Response und Freitext aus quiz[] werden übernommen");
+
+    // Import-Verträge: alte quiz[]-Struktur gültig, ungültige Erweiterungen abgelehnt
+    var badMr = await ann.PostAsync("/api/cards/", Body(new { module = "QZ-Engine", category = "K", term = "Bad", question = "Q?", definition = "D", quiz = new object[] { new { type = "multiple_response", question = "x?", options = new[] { "a", "b", "c" }, correct_indexes = new[] { 5 }, explanation = "e" } } }));
+    var badType = await ann.PostAsync("/api/cards/", Body(new { module = "QZ-Engine", category = "K", term = "Bad2", question = "Q?", definition = "D", quiz = new object[] { new { type = "essay", question = "x?", explanation = "e" } } }));
+    Check(badMr.StatusCode == HttpStatusCode.BadRequest && badType.StatusCode == HttpStatusCode.BadRequest, "Quiz: ungültige quiz[]-Einträge (falscher Index, unbekannter Typ) werden abgelehnt");
+    var schemaText = (await (await ann.GetAsync("/api/schema/import/cards")).Content.ReadAsStringAsync());
+    Check(schemaText.Contains("correct_index") && schemaText.Contains("multiple_response") && schemaText.Contains("single_choice"), "Quiz: Importschema nennt weiterhin correct_index und zusätzlich multiple_response");
+
+    // Kartenquiz: Sitzung ohne Lösungen, serverseitige Bewertung
+    var cardStart = await QStart(ann, qm, qCards[0]);
+    var cardStartText = cardStart.Body!.ToJsonString();
+    Check(cardStart.Status == HttpStatusCode.OK && cardStart.Body["questions"]!.AsArray().Count == 1 && cardStart.Body["questions"]![0]!["type"]!.GetValue<string>() == "single_choice"
+          && !cardStartText.Contains("correct_index") && !cardStartText.Contains("B stimmt"), "Quiz: Kartenquiz startet über die Engine; die Antwort enthält keine Lösung");
+    var cardOk = await QSubmit(ann, qm, cardStart.Body, QAnswers(cardStart.Body, true), qCards[0]);
+    Check(cardOk.Status == HttpStatusCode.OK && cardOk.Body!["percentage"]!.GetValue<double>() == 100 && cardOk.Body["passed"]!.GetValue<bool>() && cardOk.Body["graded_answers"]![0]!["correct"]!.GetValue<bool>(),
+        "Quiz: richtige Single-Choice-Antwort → 100 %, bestanden (serverseitig bewertet)");
+    Check((await QSubmit(ann, qm, cardStart.Body, QAnswers(cardStart.Body, true), qCards[0])).Status == HttpStatusCode.Conflict, "Quiz: eine Sitzung kann nur einmal abgegeben werden (409)");
+    Check((await QSubmit(ben, qm, cardStart.Body, QAnswers(cardStart.Body, true), qCards[0])).Status == HttpStatusCode.NotFound, "Quiz: fremder Benutzer kann die Sitzung nicht abgeben (404)");
+    var cardBad = await QStart(ann, qm, qCards[0]);
+    var cardBadRes = await QSubmit(ann, qm, cardBad.Body!, QAnswers(cardBad.Body!, false), qCards[0]);
+    Check(cardBadRes.Body!["percentage"]!.GetValue<double>() == 0 && !cardBadRes.Body["passed"]!.GetValue<bool>() && cardBadRes.Body["graded_answers"]![0]!["correct_indexes"]![0]!.GetValue<int>() == 1, "Quiz: falsche Antwort → 0 %, nicht bestanden; richtige Antwort wird angezeigt");
+
+    // Multiple Response: nur die exakte Menge zählt
+    var mrStart = await QStart(ann, qm, qCards[1]);
+    Check(mrStart.Body!["questions"]!.AsArray().Select(q => q!["type"]!.GetValue<string>()).OrderBy(x => x).SequenceEqual(new[] { "free_text", "multiple_response" }), "Quiz: Kartenquiz einer Karte mit zwei Fragen liefert Multiple Response und Freitext");
+    var mrPartial = await QSubmit(ann, qm, mrStart.Body, QAnswers(mrStart.Body, true, t => new[] { 0 }), qCards[1]);
+    var mrPartialGraded = mrPartial.Body!["graded_answers"]!.AsArray().Single(g => g!["type"]!.GetValue<string>() == "multiple_response")!;
+    Check(!mrPartialGraded["correct"]!.GetValue<bool>() && mrPartialGraded["score"]!.GetValue<double>() == 0, "Quiz: Multiple Response mit nur einer von zwei richtigen Optionen → falsch");
+    var mrStart2 = await QStart(ann, qm, qCards[1]);
+    var mrFull = await QSubmit(ann, qm, mrStart2.Body!, QAnswers(mrStart2.Body!, true), qCards[1]);
+    Check(mrFull.Body!["graded_answers"]!.AsArray().Single(g => g!["type"]!.GetValue<string>() == "multiple_response")!["correct"]!.GetValue<bool>(), "Quiz: Multiple Response mit allen richtigen Optionen → richtig");
+
+    // Modulquiz: gleiche Engine, Fragen aus dem Pool + Offline-Ableitung aus Karten (ohne KI)
+    var modStart = await QStart(ann, qm);
+    var modTypes = modStart.Body!["questions"]!.AsArray().Select(q => q!["type"]!.GetValue<string>()).ToList();
+    Check(modStart.Status == HttpStatusCode.OK && modStart.Body["questions"]!.AsArray().Count == 4 && modTypes.Contains("single_choice") && modTypes.Contains("multiple_response") && modTypes.Count(t => t == "free_text") == 2,
+        "Quiz: Modulquiz mischt gespeicherte Fragen (3) und eine aus der Karte abgeleitete Freitextfrage (Offline-Fallback)");
+    Check(modStart.Body["notices"]!.AsArray().Count > 0, "Quiz: fehlende KI wird als Hinweis gemeldet (kein stiller Wechsel)");
+    var modRes = await QSubmit(ann, qm, modStart.Body, QAnswers(modStart.Body, true));
+    Check(modRes.Status == HttpStatusCode.OK && modRes.Body!["graded_answers"]!.AsArray().Count == 4 && modRes.Body["score"]!.GetValue<double>() >= 20 && modRes.Body["max_score"]!.GetValue<double>() == 40
+          && modRes.Body["pass_percent"]!.GetValue<int>() == 60, "Quiz: Modulquiz bewertet gemischte Fragetypen mit derselben Logik (Auswahl exakt, Freitext lokal)");
+    var hist = (await J(await ann.GetAsync($"/api/quiz/history?module_id={qm}")))!.AsArray();
+    Check(hist.Count >= 4 && hist.Any(h => !string.IsNullOrEmpty(h!["session_id"]?.GetValue<string>()) && h["passed"] is not null && h["pass_percent"] is not null), "Quiz: Ergebnisse speichern Sitzung, Bestanden-Status und Bestehensgrenze (für Auftrag 3)");
+
+    // Rückwärtskompatibilität: alter Ablauf ohne Sitzung (Freitext) funktioniert weiter
+    var legacy = await ann.PostAsync("/api/quiz/submit", Body(new { module_id = qm, category = "", card_id = "", answers = new[] { new { question = "Frage SC?", user_answer = "Definition der SC-Karte", source_card_id = qCards[0] } } }));
+    var legacyBody = await J(legacy);
+    Check(legacy.IsSuccessStatusCode && legacyBody!["graded_answers"]!.AsArray().Count == 1 && legacyBody["passed"] is not null, "Quiz: Abgabe ohne Sitzung (älterer Client) wird weiter als Freitext bewertet");
+
+    // Konfiguration: ungültige Kombinationen werden verhindert
+    async Task<HttpResponseMessage> PutCfg(HttpClient who, string moduleId, object cfg) => await who.PutAsync($"/api/modules/{moduleId}/quiz-config", Body(cfg));
+    var baseCfg = new Func<Dictionary<string, object>>(() => new()
+    {
+        ["enabled"] = true, ["allow_multiple_choice"] = true, ["origin"] = "mixed", ["strategy"] = "on_demand", ["single_choice"] = true, ["multiple_response"] = true, ["free_text"] = true,
+        ["question_count"] = 5, ["shuffle_questions"] = true, ["shuffle_answers"] = false, ["scope"] = "both", ["pass_percent"] = 60, ["allow_retry"] = true, ["show_correct_answers"] = true,
+    });
+    var c1 = baseCfg(); c1["allow_multiple_choice"] = false;
+    var r1 = await PutCfg(ann, qm, c1);
+    Check(r1.StatusCode == HttpStatusCode.BadRequest && (await r1.Content.ReadAsStringAsync()).Contains("Multiple Choice"), "Quiz-Konfiguration: Multiple Choice aus + Auswahlformate an → 400 mit Begründung");
+    var c2 = baseCfg(); c2["single_choice"] = false; c2["multiple_response"] = false; c2["free_text"] = false;
+    Check((await PutCfg(ann, qm, c2)).StatusCode == HttpStatusCode.BadRequest, "Quiz-Konfiguration: aktives Quiz ohne erlaubtes Frageformat → 400");
+    var c3 = baseCfg(); c3["origin"] = "fixed";
+    Check((await PutCfg(ann, qm, c3)).StatusCode == HttpStatusCode.BadRequest, "Quiz-Konfiguration: nur feste Fragen + Generierung → 400");
+    var c4 = baseCfg(); c4["pass_percent"] = 0; var c5 = baseCfg(); c5["question_count"] = 99; var c6 = baseCfg(); c6["scope"] = "x";
+    Check((await PutCfg(ann, qm, c4)).StatusCode == HttpStatusCode.BadRequest && (await PutCfg(ann, qm, c5)).StatusCode == HttpStatusCode.BadRequest && (await PutCfg(ann, qm, c6)).StatusCode == HttpStatusCode.BadRequest, "Quiz-Konfiguration: Bestehensgrenze, Umfang und Bereich werden geprüft");
+
+    // Multiple Choice aus → nur Freitext
+    var cFt = baseCfg(); cFt["allow_multiple_choice"] = false; cFt["single_choice"] = false; cFt["multiple_response"] = false;
+    Check((await PutCfg(ann, qm, cFt)).IsSuccessStatusCode, "Quiz-Konfiguration: Multiple Choice deaktivieren (Auswahlformate aus) wird gespeichert");
+    var ftStart = await QStart(ann, qm);
+    Check(ftStart.Status == HttpStatusCode.OK && ftStart.Body!["questions"]!.AsArray().All(q => q!["type"]!.GetValue<string>() == "free_text" && q["options"]!.AsArray().Count == 0), "Quiz: ohne Multiple Choice erscheinen nur Freitextfragen");
+
+    // Nur Auswahl: ohne passende Fragen kein stiller Wechsel auf Freitext
+    var cChoice = baseCfg(); cChoice["free_text"] = false; cChoice["question_count"] = 10;
+    await PutCfg(ann, qm, cChoice);
+    var choiceStart = await QStart(ann, qm);
+    Check(choiceStart.Body!["questions"]!.AsArray().All(q => q!["type"]!.GetValue<string>() != "free_text") && choiceStart.Body["questions"]!.AsArray().Count == 2, "Quiz: nur Auswahlformate → nur gespeicherte Auswahlfragen, keine abgeleiteten Freitextfragen");
+    // Modul ohne Auswahlfragen, nur Auswahl erlaubt → klare Fehlermeldung statt stillem Wechsel
+    var onlyFree = await ann.PostAsync("/api/cards/", Body(new { module = "QZ-NurKarten", category = "K", term = "K1", question = "Q1?", definition = "D1" }));
+    var onlyFreeModule = (await J(await ann.GetAsync($"/api/cards/{(await J(onlyFree))!["id"]!.GetValue<string>()}")))!["module_id"]!.GetValue<string>();
+    var onlyFreeCard = (await J(onlyFree))!["id"]!.GetValue<string>();
+    await ann.PutAsync($"/api/cards/{onlyFreeCard}/state", Body(new { is_checked = true, marked_review = false }));
+    await PutCfg(ann, onlyFreeModule, cChoice);
+    var noChoice = await QStart(ann, onlyFreeModule);
+    Check(noChoice.Status == HttpStatusCode.NotFound && noChoice.Body!["detail"]!.GetValue<string>().Contains("Frageformate"), "Quiz: nur Auswahl erlaubt, aber keine Auswahlfragen → Fehlermeldung statt Wechsel auf Freitext");
+
+    // Umfang, Bereich, Bestehensgrenze, Anzeige der Lösungen
+    var cMisc = baseCfg(); cMisc["question_count"] = 2; cMisc["pass_percent"] = 100; cMisc["show_correct_answers"] = false;
+    Check((await PutCfg(ann, qm, cMisc)).IsSuccessStatusCode, "Quiz-Konfiguration: Umfang 2, Bestehensgrenze 100 %, Lösungen verbergen");
+    var miscStart = await QStart(ann, qm, null, 10);
+    Check(miscStart.Body!["questions"]!.AsArray().Count == 2 && !miscStart.Body["show_correct_answers"]!.GetValue<bool>(), "Quiz: konfigurierter Umfang begrenzt die Fragenzahl (auch bei größerer Anfrage)");
+    var miscRes = await QSubmit(ann, qm, miscStart.Body, QAnswers(miscStart.Body, false));
+    var miscText = miscRes.Body!.ToJsonString();
+    Check(!miscRes.Body["passed"]!.GetValue<bool>() && miscRes.Body["graded_answers"]!.AsArray().All(g => g!["correct_indexes"]!.AsArray().Count == 0 && string.IsNullOrEmpty(g["explanation"]!.GetValue<string>())),
+        "Quiz: ‚Richtige Antworten anzeigen‘ = nein → Ergebnis enthält weder richtige Optionen noch Erklärungen");
+    var cScopeCard = baseCfg(); cScopeCard["scope"] = "card"; await PutCfg(ann, qm, cScopeCard);
+    Check((await QStart(ann, qm)).Status == HttpStatusCode.Forbidden && (await QStart(ann, qm, qCards[0])).Status == HttpStatusCode.OK, "Quiz-Bereich ‚nur kartenbezogen‘: Modulquiz gesperrt (403), Kartenquiz erlaubt");
+    var cScopeMod = baseCfg(); cScopeMod["scope"] = "module"; await PutCfg(ann, qm, cScopeMod);
+    Check((await QStart(ann, qm, qCards[0])).Status == HttpStatusCode.Forbidden && (await QStart(ann, qm)).Status == HttpStatusCode.OK, "Quiz-Bereich ‚nur modulweit‘: Kartenquiz gesperrt (403), Modulquiz erlaubt");
+    var cOff = baseCfg(); cOff["enabled"] = false; await PutCfg(ann, qm, cOff);
+    Check((await QStart(ann, qm)).Status == HttpStatusCode.Forbidden, "Quiz deaktiviert: Start wird abgewiesen (403)");
+
+    // Deaktivieren einzelner Fragen (Ergebnisse bleiben erhalten)
+    await PutCfg(ann, qm, baseCfg());
+    var histBefore = (await J(await ann.GetAsync($"/api/quiz/history?module_id={qm}")))!.AsArray().Count;
+    var mrQuestionId = (await J(await ann.GetAsync($"/api/modules/{qm}/quiz-questions?origin=manual")))!.AsArray().Single(q => q!["type"]!.GetValue<string>() == "multiple_response")!["id"]!.GetValue<string>();
+    Check((await ann.PutAsync($"/api/modules/{qm}/quiz-questions/{mrQuestionId}/active", Body(new { active = false }))).StatusCode == HttpStatusCode.NoContent, "Quiz-Pool: Frage deaktivieren");
+    var noMr = await QStart(ann, qm);
+    Check(noMr.Body!["questions"]!.AsArray().All(q => q!["type"]!.GetValue<string>() != "multiple_response")
+          && (await J(await ann.GetAsync($"/api/modules/{qm}/quiz-questions?active=false")))!.AsArray().Count == 1
+          && (await J(await ann.GetAsync($"/api/quiz/history?module_id={qm}")))!.AsArray().Count == histBefore, "Quiz-Pool: deaktivierte Frage wird nicht gestellt, Ergebnisse bleiben erhalten, Filter nach Aktivstatus");
+    await ann.PutAsync($"/api/modules/{qm}/quiz-questions/{mrQuestionId}/active", Body(new { active = true }));
+    Check((await J(await ann.GetAsync($"/api/modules/{qm}/quiz-questions?card_id={qCards[1]}")))!.AsArray().Count == 2, "Quiz-Pool: Filter nach Karte");
+
+    // Quelle der Wahrheit: quiz[] der Karte bestimmt die card_json-Fragen
+    var qUpd = await ann.PutAsync($"/api/cards/{qCards[0]}", Body(new { module = "QZ-Engine", category = "K", term = "SC-Karte", question = "Frage SC?", definition = "Definition der SC-Karte", quiz = Array.Empty<object>() }));
+    var poolAfterUpd = (await J(await ann.GetAsync($"/api/modules/{qm}/quiz-questions")))!.AsArray();
+    Check(qUpd.IsSuccessStatusCode && poolAfterUpd.Count == 2 && poolAfterUpd.All(q => q!["card_id"]!.GetValue<string>() == qCards[1]), "Quiz-Pool: entfällt eine Frage aus quiz[] der Karte, verschwindet sie aus dem Pool (eine Quelle der Wahrheit)");
+    var sameAgain = await ann.PutAsync($"/api/cards/{qCards[1]}", Body(new { module = "QZ-Engine", category = "K", term = "MR-Karte", question = "Frage MR?", definition = "Definition der MR-Karte",
+        quiz = new object[] { new { type = "multiple_response", question = "Welche sind Primzahlen?", options = new[] { "2", "3", "4", "6" }, correct_indexes = new[] { 0, 1 }, explanation = "2 und 3." } } }));
+    Check(sameAgain.IsSuccessStatusCode && (await J(await ann.GetAsync($"/api/modules/{qm}/quiz-questions")))!.AsArray().Count == 1, "Quiz-Pool: unveränderte Fragen bleiben, entfallene werden entfernt, keine Duplikate");
+
+    // Rechte: fremde Benutzer, Freigabeempfänger
+    Check((await ben.GetAsync($"/api/modules/{qm}/quiz-config")).StatusCode == HttpStatusCode.NotFound
+          && (await PutCfg(ben, qm, baseCfg())).StatusCode == HttpStatusCode.NotFound
+          && (await ben.GetAsync($"/api/modules/{qm}/quiz-questions")).StatusCode == HttpStatusCode.NotFound, "Quiz-Rechte: fremder Benutzer sieht weder Konfiguration noch Pool (404)");
+    await ann.PostAsync($"/api/sharing/modules/{qm}/shares", Body(new { recipient_user_id = benId }));
+    var benCfg = (await J(await ben.GetAsync($"/api/modules/{qm}/quiz-config")))!;
+    var poolSizeBefore = (await J(await ann.GetAsync($"/api/modules/{qm}/quiz-questions")))!.AsArray().Count;
+    Check(!benCfg["can_edit"]!.GetValue<bool>() && (await PutCfg(ben, qm, baseCfg())).StatusCode == HttpStatusCode.Forbidden
+          && (await ben.GetAsync($"/api/modules/{qm}/quiz-questions")).StatusCode == HttpStatusCode.Forbidden
+          && (await ben.PutAsync($"/api/modules/{qm}/quiz-questions/{mrQuestionId}/active", Body(new { active = false }))).StatusCode == HttpStatusCode.Forbidden,
+        "Quiz-Rechte: Freigabeempfänger darf Konfiguration lesen, aber weder Konfiguration noch Fragenpool ändern oder lesen (403)");
+    var benCardStart = await QStart(ben, qm, qCards[1]);
+    var benSubmit = benCardStart.Status == HttpStatusCode.OK ? await QSubmit(ben, qm, benCardStart.Body!, QAnswers(benCardStart.Body!, true), qCards[1]) : (benCardStart.Status, (JsonNode?)null);
+    Check(benCardStart.Status == HttpStatusCode.OK && benSubmit.Status == HttpStatusCode.OK
+          && (await J(await ann.GetAsync($"/api/modules/{qm}/quiz-questions")))!.AsArray().Count == poolSizeBefore
+          , "Quiz-Rechte: Freigabeempfänger kann Quizze durchführen; der Pool bleibt unverändert");
+
+    // Globale Version: Konfiguration und Fragen werden eingefroren
+    var cGlobal = baseCfg(); cGlobal["pass_percent"] = 80; cGlobal["question_count"] = 3;
+    await PutCfg(ann, qm, cGlobal);
+    var gSub = (await J(await ann.PostAsync($"/api/sharing/modules/{qm}/submissions", null)))!["id"]!.GetValue<string>();
+    Check((await admin.PostAsync($"/api/admin/submissions/{gSub}/approve", null)).StatusCode == HttpStatusCode.NoContent, "Quiz-Global: Modul mit Quizkonfiguration wird veröffentlicht");
+    var globalQm = (await J(await ben.GetAsync("/api/modules/?scope=global")))!.AsArray().First(m => m!["name"]!.GetValue<string>() == "QZ-Engine")!["id"]!.GetValue<string>();
+    await PutCfg(ann, qm, baseCfg());   // Original ändert sich danach
+    var gCfg = (await J(await ben.GetAsync($"/api/modules/{globalQm}/quiz-config")))!;
+    Check(gCfg["config"]!["pass_percent"]!.GetValue<int>() == 80 && gCfg["config"]!["question_count"]!.GetValue<int>() == 3 && !gCfg["can_edit"]!.GetValue<bool>() && gCfg["module_version"]!.GetValue<int>() >= 1,
+        "Quiz-Global: die eingefrorene Version behält die Konfiguration; spätere Änderungen am Original wirken nicht");
+    Check((await PutCfg(ben, globalQm, baseCfg())).StatusCode == HttpStatusCode.Forbidden && (await PutCfg(admin, globalQm, baseCfg())).StatusCode == HttpStatusCode.Forbidden, "Quiz-Global: Lernende und selbst Administratoren können die globale Konfiguration nicht ändern (403)");
+    var qGlobalCards = (await J(await ben.GetAsync($"/api/cards/?module_id={globalQm}")))!.AsArray();
+    var gCardId = qGlobalCards.First(c => c!["term"]!.GetValue<string>() == "MR-Karte")!["id"]!.GetValue<string>();
+    var gStart = await QStart(ben, globalQm, gCardId);
+    var gRes = gStart.Status == HttpStatusCode.OK ? await QSubmit(ben, globalQm, gStart.Body!, QAnswers(gStart.Body!, true), gCardId) : (gStart.Status, (JsonNode?)null);
+    var gHist = (await J(await ben.GetAsync($"/api/quiz/history?module_id={globalQm}")))!.AsArray();
+    Check(gStart.Status == HttpStatusCode.OK && gRes.Status == HttpStatusCode.OK && gHist.Any(h => h!["module_version"] is not null && h["context"]!.GetValue<string>() == "global" && h["pass_percent"]!.GetValue<int>() == 80),
+        "Quiz-Global: Quiz auf der globalen Version läuft mit deren Konfiguration; das Ergebnis speichert Modulversion und Bestehensgrenze");
+
+    // Wiederholungen
+    var (retryModule, retryCards) = await MakeQuizModule(ann, "QZ-Retry");
+    var cRetry = baseCfg(); cRetry["allow_retry"] = false; await PutCfg(ann, retryModule, cRetry);
+    var rs1 = await QStart(ann, retryModule);
+    await QSubmit(ann, retryModule, rs1.Body!, QAnswers(rs1.Body!, true));
+    Check((await QStart(ann, retryModule)).Status == HttpStatusCode.Conflict, "Quiz: Wiederholung nicht erlaubt → zweiter Start wird abgewiesen (409)");
+
+    // ─── Fragen-Schnittstellen für den Editor (Auftrag 2): anlegen, ändern, zuordnen, Rechte ───
+    Console.WriteLine("\nQuiz: Fragenpool-Schnittstellen");
+    {
+        var (em, eCards) = await MakeQuizModule(ann, "QZ-Editor");
+        string QPath(string m) => $"/api/modules/{m}/quiz-questions";
+        var newQ = new { card_id = eCards[2], type = "single_choice", question = "Editor-Frage?", options = new[] { "w", "x", "y", "z" }, correct_indexes = new[] { 2 }, explanation = "y" };
+        var created = await ann.PostAsync(QPath(em), Body(newQ));
+        var createdJson = await J(created);
+        Check(created.StatusCode == HttpStatusCode.Created && createdJson!["source"]!.GetValue<string>() == "editor" && createdJson["origin"]!.GetValue<string>() == "manual" && createdJson["card_id"]!.GetValue<string>() == eCards[2] && createdJson["active"]!.GetValue<bool>(),
+            "Editor-API: Frage anlegen (source=editor, manuell, aktiv, Karte zugeordnet)");
+        var editorId = createdJson!["id"]!.GetValue<string>();
+        Check((await ann.PostAsync(QPath(em), Body(newQ))).StatusCode == HttpStatusCode.BadRequest, "Editor-API: gleiche Frage wird nicht doppelt angelegt");
+        var invalid = new[]
+        {
+            new { card_id = (string?)null, type = "single_choice", question = "x?", options = new[] { "a", "b" }, correct_indexes = new[] { 5 }, explanation = "e" },
+            new { card_id = (string?)null, type = "multiple_response", question = "x?", options = new[] { "a", "b", "c" }, correct_indexes = Array.Empty<int>(), explanation = "e" },
+            new { card_id = (string?)null, type = "free_text", question = "x?", options = new[] { "a" }, correct_indexes = Array.Empty<int>(), explanation = "e" },
+            new { card_id = (string?)null, type = "essay", question = "x?", options = Array.Empty<string>(), correct_indexes = Array.Empty<int>(), explanation = "e" },
+            new { card_id = (string?)null, type = "free_text", question = "", options = Array.Empty<string>(), correct_indexes = Array.Empty<int>(), explanation = "e" },
+        };
+        var allBad = true;
+        foreach (var bad in invalid) allBad &= (await ann.PostAsync(QPath(em), Body(bad))).StatusCode == HttpStatusCode.BadRequest;
+        Check(allBad, "Editor-API: ungültige Fragen (Index außerhalb, keine richtige Option, Optionen bei Freitext, unbekannter Typ, leer) → 400");
+        var (otherModule, otherCards) = await MakeQuizModule(ann, "QZ-Editor-Fremd");
+        Check((await ann.PostAsync(QPath(em), Body(new { card_id = otherCards[0], type = "free_text", question = "Fremde Karte?", options = Array.Empty<string>(), correct_indexes = Array.Empty<int>(), explanation = "e" }))).StatusCode == HttpStatusCode.BadRequest,
+            "Editor-API: Karte eines anderen Moduls kann nicht zugeordnet werden");
+        var updated = await ann.PutAsync($"{QPath(em)}/{editorId}", Body(new { card_id = eCards[1], type = "multiple_response", question = "Editor-Frage geändert?", options = new[] { "a", "b", "c", "d" }, correct_indexes = new[] { 0, 3 }, explanation = "a und d" }));
+        var updatedJson = await J(updated);
+        Check(updated.IsSuccessStatusCode && updatedJson!["type"]!.GetValue<string>() == "multiple_response" && updatedJson["card_id"]!.GetValue<string>() == eCards[1] && updatedJson["source"]!.GetValue<string>() == "editor",
+            "Editor-API: Frage ändern (Typ, Optionen, Karten-Zuordnung); Quelle bleibt editor");
+        var cardJsonQ = (await J(await ann.GetAsync($"{QPath(em)}?card_id={eCards[0]}")))!.AsArray().First()!["id"]!.GetValue<string>();
+        var cardJsonUpdate = await ann.PutAsync($"{QPath(em)}/{cardJsonQ}", Body(new { card_id = eCards[0], type = "single_choice", question = "Umgeschrieben?", options = new[] { "a", "b", "c", "d" }, correct_indexes = new[] { 0 }, explanation = "x" }));
+        Check(cardJsonUpdate.StatusCode == HttpStatusCode.BadRequest && (await cardJsonUpdate.Content.ReadAsStringAsync()).Contains("Karte"), "Editor-API: Fragen aus quiz[] der Karte lassen sich nur über die Karte ändern (eine Quelle der Wahrheit)");
+
+        // Editor-Fragen überleben das Speichern der Karte; card_json-Fragen folgen quiz[]
+        var cardSave = await ann.PutAsync($"/api/cards/{eCards[1]}", Body(new { module = "QZ-Editor", category = "K", term = "MR-Karte", question = "Frage MR?", definition = "Definition der MR-Karte",
+            quiz = new object[] { new { type = "free_text", question = "Neu im quiz[]", explanation = "Muster" } } }));
+        var poolAfter = (await J(await ann.GetAsync(QPath(em))))!.AsArray();
+        Check(cardSave.IsSuccessStatusCode && poolAfter.Any(q => q!["id"]!.GetValue<string>() == editorId) && poolAfter.Count(q => q!["source"]!.GetValue<string>() == "card_json" && q["card_id"]!.GetValue<string>() == eCards[1]) == 1
+              && poolAfter.Any(q => q!["question"]!.GetValue<string>() == "Neu im quiz[]"), "Quelle der Wahrheit: Speichern der Karte ändert nur card_json-Fragen, die Editor-Frage bleibt unverändert");
+        var edStart = await QStart(ann, em, eCards[1]);
+        Check(edStart.Body!["questions"]!.AsArray().Any(q => q!["question"]!.GetValue<string>() == "Editor-Frage geändert?"), "Editor-Frage erscheint im Kartenquiz der zugeordneten Karte");
+
+        // Rechte: Empfänger und fremde Benutzer
+        await ann.PostAsync($"/api/sharing/modules/{em}/shares", Body(new { recipient_user_id = benId }));
+        Check((await ben.PostAsync(QPath(em), Body(newQ))).StatusCode == HttpStatusCode.Forbidden
+              && (await ben.PutAsync($"{QPath(em)}/{editorId}", Body(newQ))).StatusCode == HttpStatusCode.Forbidden, "Editor-API: Freigabeempfänger darf Fragen weder anlegen noch ändern (403)");
+        var cora2 = await LoginAsync("quizstranger");
+        Check((await cora2.PostAsync(QPath(em), Body(newQ))).StatusCode == HttpStatusCode.NotFound, "Editor-API: fremder Benutzer erhält 404");
+        Check((await ann.PostAsync(QPath(Guid.NewGuid().ToString()), Body(newQ))).StatusCode == HttpStatusCode.NotFound && (await ann.PutAsync($"{QPath(em)}/{Guid.NewGuid()}", Body(newQ))).StatusCode == HttpStatusCode.NotFound, "Editor-API: unbekanntes Modul bzw. unbekannte Frage → 404");
+    }
+
+    // ─── Beispiele, Templates, Live-Schema, MCP und Hilfeseite bleiben synchron ───
+    Console.WriteLine("\nBeispiele, Templates, Schema, MCP, Hilfe");
+    {
+        var tplRoot = FindRepoRoot();
+        var templateDir = Path.Combine(tplRoot, "src", "LearnCards.Web", "wwwroot", "templates");
+        var files = Directory.GetFiles(templateDir, "*.json").Concat(Directory.GetFiles(Path.Combine(tplRoot, "demoodule"), "*.json")).OrderBy(x => x).ToList();
+        var schemaDoc = (await J(await ann.GetAsync("/api/schema/import/cards")))!;
+        var cardProps = schemaDoc["card_schema"]!["properties"]!.AsObject().Select(kv => kv.Key).ToHashSet();
+        var quizSchema = schemaDoc["card_schema"]!["properties"]!["quiz"]!["items"]!;
+        var quizProps = quizSchema["properties"]!.AsObject().Select(kv => kv.Key).ToHashSet();
+        var schemaTypes = quizSchema["properties"]!["type"]!["enum"]!.AsArray().Select(x => x!.GetValue<string>()).ToList();
+        var exampleQuiz = schemaDoc["example"]!["cards"]![0]!["quiz"]!.AsArray();
+        Check(schemaTypes.SequenceEqual(new[] { "single_choice", "multiple_response", "free_text" }) && quizProps.IsSupersetOf(new[] { "type", "question", "options", "correct_index", "correct_indexes", "explanation" })
+              && schemaDoc["quiz_rules"]!.AsArray().Count >= 5 && exampleQuiz.Select(q => q!["type"]!.GetValue<string>()).OrderBy(x => x).SequenceEqual(new[] { "free_text", "multiple_response", "single_choice" }),
+            "Live-Schema: beschreibt single_choice, multiple_response und free_text (Felder, Regeln, Beispiel mit allen Typen)");
+        Check(quizSchema["required"]!.AsArray().Select(x => x!.GetValue<string>()).OrderBy(x => x).SequenceEqual(new[] { "explanation", "question", "type" }), "Live-Schema: Pflichtfelder von quiz[]-Einträgen (type, question, explanation); der Rest ist typabhängig optional");
+
+        var seenTypes = new HashSet<string>();
+        var checkedNames = new List<string>();
+        var idx = 0;
+        foreach (var f in files.Concat(new[] { "<live-schema-example>" }))
+        {
+            var isExample = f == "<live-schema-example>";
+            var name = isExample ? "Live-Schema-Beispiel" : Path.GetRelativePath(tplRoot, f).Replace('\\', '/');
+            var doc = isExample ? schemaDoc["example"]!.DeepClone() : JsonNode.Parse(File.ReadAllText(f))!;
+            var cards = doc["cards"]!.AsArray();
+            var problems = new List<string>();
+            foreach (var c in cards)
+            {
+                foreach (var fk in c!.AsObject().Select(kv => kv.Key)) if (!cardProps.Contains(fk)) problems.Add("unbekanntes Feld " + fk);
+                foreach (var q in c["quiz"]?.AsArray() ?? new JsonArray())
+                {
+                    foreach (var qk in q!.AsObject().Select(kv => kv.Key)) if (!quizProps.Contains(qk)) problems.Add("unbekanntes quiz-Feld " + qk);
+                    var type = q["type"]?.GetValue<string>() ?? "single_choice";
+                    seenTypes.Add(type);
+                    var opts = q["options"]?.AsArray().Count ?? 0;
+                    if (!schemaTypes.Contains(type)) problems.Add("Typ " + type);
+                    else if (type == "single_choice" && !(opts == 4 && q["correct_index"] is { } ci && ci.GetValue<int>() is >= 0 and < 4 && q["correct_indexes"] is null)) problems.Add("single_choice ungültig: " + q["question"]);
+                    else if (type == "multiple_response" && !(opts is >= 3 and <= 6 && q["correct_indexes"] is { } cis && cis.AsArray().Count > 0 && cis.AsArray().Select(x => x!.GetValue<int>()).Distinct().Count() == cis.AsArray().Count && cis.AsArray().All(x => x!.GetValue<int>() >= 0 && x.GetValue<int>() < opts) && q["correct_index"] is null)) problems.Add("multiple_response ungültig: " + q["question"]);
+                    else if (type == "free_text" && !(opts == 0 && q["correct_index"] is null && q["correct_indexes"] is null)) problems.Add("free_text ungültig: " + q["question"]);
+                    if (string.IsNullOrWhiteSpace(q["explanation"]?.GetValue<string>()) || string.IsNullOrWhiteSpace(q["question"]?.GetValue<string>())) problems.Add("question/explanation fehlt");
+                }
+                foreach (var tplImg in c["images"]?.AsArray() ?? new JsonArray())
+                {
+                    var bytes = Convert.FromBase64String(tplImg!["data_base64"]!.GetValue<string>());
+                    if (bytes.Length > 2 * 1024 * 1024 || (c["images"]!.AsArray().Count > 5) || !new[] { "image/png", "image/jpeg", "image/webp" }.Contains(tplImg["mime_type"]!.GetValue<string>())) problems.Add("Bildlimit verletzt");
+                }
+            }
+            Check(problems.Count == 0, $"Beispiel {name}: nur Schema-Felder und gültige Quiz-/Bildstruktur" + (problems.Count > 0 ? " — " + string.Join("; ", problems.Take(3)) : ""));
+
+            var importer = await LoginAsync("tplimp" + idx++);
+            var res = await importer.PostAsync("/api/import/cards", Body(new { cards = JsonNode.Parse(cards.ToJsonString()), overwrite_existing = false }));
+            var resJson = await J(res);
+            var stored = (await J(await importer.GetAsync("/api/cards/")))!.AsArray();
+            var quizSrc = cards.Sum(c => c!["quiz"]?.AsArray().Count ?? 0);
+            var quizStored = stored.Sum(c => c!["quiz"]!.AsArray().Count);
+            Check(res.IsSuccessStatusCode && resJson!["errors"]!.AsArray().Count == 0 && resJson["created"]!.GetValue<int>() == cards.Count && stored.Count == cards.Count && quizStored == quizSrc,
+                $"Beispiel {name}: Import über /api/import/cards erfolgreich ({cards.Count} Karten, {quizSrc} Quizfragen unverändert gespeichert)");
+            checkedNames.Add(name);
+        }
+        Check(seenTypes.IsSupersetOf(new[] { "single_choice", "multiple_response", "free_text" }), "Beispiele: alle drei Fragetypen kommen in ausgelieferten Beispielen vor");
+        Console.WriteLine("  INFO geprüfte Beispiele/Templates: " + string.Join(", ", checkedNames));
+
+        // Altformat ohne quiz-Feld bzw. nur single_choice ohne type
+        var oldImp = await LoginAsync("tplold");
+        var oldRes = await oldImp.PostAsync("/api/import/cards", Body(new { cards = new object[]
+        {
+            new { module = "Alt", category = "K", term = "Ohne Quiz", question = "Q?", definition = "D" },
+            new { module = "Alt", category = "K", term = "Altes quiz", question = "Q?", definition = "D", quiz = new object[] { new { question = "Frage?", options = new[] { "a", "b", "c", "d" }, correct_index = 3, explanation = "e" } } },
+        }, overwrite_existing = false }));
+        var oldJson = await J(oldRes);
+        Check(oldRes.IsSuccessStatusCode && oldJson!["created"]!.GetValue<int>() == 2 && oldJson["errors"]!.AsArray().Count == 0, "Altformat: Karte ohne quiz und quiz-Eintrag ohne type/correct_indexes bleiben importierbar (type = single_choice)");
+
+        // MCP: Tool-Beschreibungen und Eingabeschema stimmen mit dem Live-Schema überein
+        using var listReq = new HttpRequestMessage(HttpMethod.Post, mcpUrl + "/mcp") { Content = Body(new { jsonrpc = "2.0", id = 3, method = "tools/list" }) };
+        listReq.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", benMcp!);
+        var tools = (await J(await mcp.SendAsync(listReq)))!["result"]!["tools"]!.AsArray();
+        var addCard = tools.First(t => t!["name"]!.GetValue<string>() == "add_card")!;
+        var importCards = tools.First(t => t!["name"]!.GetValue<string>() == "import_cards")!;
+        var mcpQuiz = addCard["inputSchema"]!["properties"]!["quiz"]!["items"]!;
+        var mcpTypes = mcpQuiz["properties"]!["type"]!["enum"]!.AsArray().Select(x => x!.GetValue<string>()).ToList();
+        var mcpQuizProps = mcpQuiz["properties"]!.AsObject().Select(kv => kv.Key).ToHashSet();
+        var addProps = addCard["inputSchema"]!["properties"]!.AsObject().Select(kv => kv.Key).ToHashSet();
+        Check(mcpTypes.SequenceEqual(schemaTypes) && mcpQuizProps.SetEquals(quizProps) && addProps.IsSubsetOf(cardProps.Append("module").ToHashSet()),
+            "MCP: add_card-Eingabeschema (quiz-Typen und -Felder) stimmt mit dem Live-Importschema überein; keine erfundenen Felder");
+        Check(new[] { addCard, importCards }.All(t => { var d = t["description"]!.GetValue<string>(); return d.Contains("multiple_response") && d.Contains("free_text") && d.Contains("correct_indexes") && d.Contains("get_import_schema"); }),
+            "MCP: Beschreibungen von add_card und import_cards nennen alle Quiz-Fragetypen und verweisen auf get_import_schema");
+        var mcpSchemaText = await McpCall(benMcp!, "get_import_schema");
+        Check(mcpSchemaText.Contains("multiple_response") && mcpSchemaText.Contains("quiz_rules"), "MCP: get_import_schema liefert das aktuelle Live-Schema inkl. Quizregeln");
+        var mcpAddText = await McpCall(benMcp!, "add_card", new { module = "MCP-Quiz", category = "K", term = "MR", question = "Q?", definition = "D",
+            quiz = new object[] { new { type = "multiple_response", question = "Welche?", options = new[] { "a", "b", "c" }, correct_indexes = new[] { 0, 2 }, explanation = "a und c" }, new { type = "free_text", question = "Frei?", explanation = "Muster" } } });
+        Check(mcpAddText.StartsWith("Card created"), "MCP: add_card nimmt multiple_response und free_text im quiz[] an");
+    }
+
     // ─── Freigabe: Version zum Ersetzen wählen, globale Version löschen ───
     Console.WriteLine("\nVeröffentlichung: Ersetzen wählen und Löschen");
     async Task<(string SubmissionId, string ModuleId)> SubmitModuleAsync(HttpClient who, string moduleName)
@@ -1214,6 +1585,221 @@ try
         Check((await other.PostAsync("/api/admin/images/migrate", Body(new { source = "database", target = "local" }))).StatusCode == HttpStatusCode.Forbidden, "Migration: nur Administratoren dürfen sie starten (403)");
     }
     finally { StopProcess(migRun.Proc); }
+
+    // ─── Quiz mit KI (OpenAI-Mock): Generierung, Speicherung, Wiederverwendung, Mischung, Offline-Fallback (ADR 0019) ───
+    Console.WriteLine("\nQuiz-Engine mit KI-Mock");
+    await using var mockAi = new MockOpenAi();
+    var aiRun = await StartWebAsync("e2e-quizai", new() { ["OPENAI_API_KEY"] = "mock-key", ["OPENAI_BASE_URL"] = mockAi.BaseUrl });
+    try
+    {
+        HttpClient AiUser(string name) => new(new HttpClientHandler { AllowAutoRedirect = false, UseCookies = true, CookieContainer = new CookieContainer() }) { BaseAddress = new Uri(aiRun.Url), Timeout = TimeSpan.FromSeconds(60) };
+        var aiOwner = AiUser("x"); await aiOwner.GetAsync("/auth/login?devUser=aiowner");
+        var aiRecv = AiUser("y"); await aiRecv.GetAsync("/auth/login?devUser=airecv");
+        var aiRecvId = IdOf(await J(await aiRecv.GetAsync("/api/me")));
+        var aiCards = new List<string>();
+        for (var i = 1; i <= 3; i++)
+        {
+            var cr = await aiOwner.PostAsync("/api/cards/", Body(new { module = "AI-Quiz", category = "K", term = $"T{i}", question = $"Q{i}?", definition = $"D{i} Definition mit Inhalt", quiz = Array.Empty<object>() }));
+            aiCards.Add((await J(cr))!["id"]!.GetValue<string>());
+            await aiOwner.PutAsync($"/api/cards/{aiCards[^1]}/state", Body(new { is_checked = true, marked_review = false }));
+        }
+        var aiModule = (await J(await aiOwner.GetAsync($"/api/cards/{aiCards[0]}")))!["module_id"]!.GetValue<string>();
+        var aiCfg = baseCfg(); aiCfg["question_count"] = 4; aiCfg["shuffle_questions"] = false;
+        await PutCfg(aiOwner, aiModule, aiCfg);
+        Check((await J(await aiOwner.GetAsync($"/api/modules/{aiModule}/quiz-config")))!["ai_available"]!.GetValue<bool>(), "Quiz-KI: Konfiguration meldet KI als verfügbar");
+
+        async Task<JsonArray> AiPool(string? origin = null) => (await J(await aiOwner.GetAsync($"/api/modules/{aiModule}/quiz-questions" + (origin is null ? "" : "?origin=" + origin))))!.AsArray();
+        object[] AiAnswers(JsonNode start, JsonArray pool) => start["questions"]!.AsArray().Select(q =>
+        {
+            var id = q!["question_id"]!.GetValue<string>();
+            var correct = pool.FirstOrDefault(p => p!["id"]!.GetValue<string>() == id)?["correct_indexes"]?.AsArray().Select(x => x!.GetValue<int>()).ToArray() ?? new[] { 0 };
+            var free = q["type"]!.GetValue<string>() == "free_text";
+            return (object)new { question = q["question"]!.GetValue<string>(), question_id = id, source_card_id = q["source_card_id"]!.GetValue<string>(), user_answer = free ? "meine Antwort" : "", selected_indexes = free ? Array.Empty<int>() : correct };
+        }).ToArray();
+
+        // 1) erster Start: nichts gespeichert → generieren, validieren, speichern
+        var ai1 = await QStart(aiOwner, aiModule);
+        var aiPool1 = await AiPool("ai");
+        var aiTypes = aiPool1.Select(p => p!["type"]!.GetValue<string>()).ToHashSet();
+        Check(ai1.Status == HttpStatusCode.OK && ai1.Body!["questions"]!.AsArray().Count == 4 && mockAi.GenerateCalls == 1, "Quiz-KI: ohne gespeicherte Fragen wird einmal generiert (4 Fragen)");
+        Check(aiPool1.Count == 4 && aiTypes.Contains("single_choice") && aiTypes.Contains("multiple_response") && aiTypes.Contains("free_text") && aiPool1.All(p => p!["source"]!.GetValue<string>() == "ai" && p["origin"]!.GetValue<string>() == "ai"),
+            "Quiz-KI: gültige KI-Fragen werden im Pool gespeichert (Herkunft ai); ungültige (unbekannter Typ, fremde Karte, 3 Optionen, Index außerhalb) werden verworfen");
+        Check(!ai1.Body.ToJsonString().Contains("Musterlösung") && !ai1.Body.ToJsonString().Contains("b ist richtig"), "Quiz-KI: auch KI-Fragen verraten ihre Lösung nicht vor der Abgabe");
+
+        // 2) Bewertung: Auswahl lokal, Freitext durch die KI
+        var aiRes = await QSubmit(aiOwner, aiModule, ai1.Body!, AiAnswers(ai1.Body!, aiPool1));
+        var choiceGraded = aiRes.Body!["graded_answers"]!.AsArray().Where(g => g!["type"]!.GetValue<string>() != "free_text").ToList();
+        var freeGraded = aiRes.Body["graded_answers"]!.AsArray().Where(g => g!["type"]!.GetValue<string>() == "free_text").ToList();
+        Check(aiRes.Status == HttpStatusCode.OK && choiceGraded.All(g => g!["score"]!.GetValue<double>() == 10) && freeGraded.All(g => g!["score"]!.GetValue<double>() == 8 && g["feedback"]!.GetValue<string>() == "mock-bewertung")
+              && mockAi.GradeCalls == 1 && aiRes.Body["feedback"]!.GetValue<string>() == "mock-gesamt", "Quiz-KI: Auswahlfragen exakt lokal bewertet, Freitext per KI (ein Aufruf für alle Freitextfragen)");
+
+        // 3) zweiter Start: gespeicherte Fragen werden wiederverwendet, keine Neugenerierung
+        var ai2 = await QStart(aiOwner, aiModule);
+        Check(ai2.Body!["questions"]!.AsArray().Count == 4 && mockAi.GenerateCalls == 1 && (await AiPool("ai")).Count == 4, "Quiz-KI: gespeicherte KI-Fragen werden wiederverwendet — keine unnötige Neugenerierung");
+
+        // 4) Mischung: gespeicherte und neue Fragen
+        var cMix = baseCfg(); cMix["question_count"] = 4; cMix["shuffle_questions"] = false; cMix["strategy"] = "mix"; await PutCfg(aiOwner, aiModule, cMix);
+        var ai3 = await QStart(aiOwner, aiModule);
+        var poolAfterMix = await AiPool("ai");
+        var mixIds = ai3.Body!["questions"]!.AsArray().Select(q => q!["question_id"]!.GetValue<string>()).ToHashSet();
+        var storedIdsBefore = aiPool1.Select(p => p!["id"]!.GetValue<string>()).ToHashSet();
+        Check(ai3.Body["questions"]!.AsArray().Count == 4 && mockAi.GenerateCalls == 2 && poolAfterMix.Count == 6 && mixIds.Count(storedIdsBefore.Contains) == 2,
+            "Quiz-KI: Strategie ‚mischen‘ → 2 gespeicherte + 2 neue Fragen; die neuen werden gespeichert (Pool 6)");
+
+        // 5) keine Generierung
+        var cNone = baseCfg(); cNone["strategy"] = "none"; cNone["question_count"] = 4; await PutCfg(aiOwner, aiModule, cNone);
+        var ai4 = await QStart(aiOwner, aiModule);
+        Check(ai4.Body!["questions"]!.AsArray().Count == 4 && mockAi.GenerateCalls == 2, "Quiz-KI: Strategie ‚keine neuen Fragen‘ → nur Gespeichertes, kein KI-Aufruf");
+
+        // 6) gespeicherte bevorzugen: nichts nachgenerieren, solange es Gespeichertes gibt
+        var cPref = baseCfg(); cPref["strategy"] = "prefer_stored"; cPref["question_count"] = 20; await PutCfg(aiOwner, aiModule, cPref);
+        var ai5 = await QStart(aiOwner, aiModule, null, 20);
+        Check(ai5.Body!["questions"]!.AsArray().Count == 6 && mockAi.GenerateCalls == 2, "Quiz-KI: ‚Gespeicherte bevorzugen‘ → alle 6 gespeicherten Fragen, nichts nachgeneriert");
+
+        // 7) nur feste Fragen: KI-Fragen werden nicht gestellt, nichts generiert, Ableitung aus den Karten bleibt möglich
+        var cFixed = baseCfg(); cFixed["origin"] = "fixed"; cFixed["strategy"] = "none"; cFixed["question_count"] = 10; await PutCfg(aiOwner, aiModule, cFixed);
+        var ai6 = await QStart(aiOwner, aiModule, null, 10);
+        Check(ai6.Body!["questions"]!.AsArray().Count == 3 && ai6.Body["questions"]!.AsArray().All(q => q!["type"]!.GetValue<string>() == "free_text" && q["question"]!.GetValue<string>().StartsWith('Q')) && mockAi.GenerateCalls == 2,
+            "Quiz-KI: ‚nur feste Fragen‘ → keine KI-Fragen, kein KI-Aufruf; Fragen werden aus den Karten abgeleitet");
+
+        // 8) nur KI-Fragen
+        var cAiOnly = baseCfg(); cAiOnly["origin"] = "ai"; cAiOnly["strategy"] = "none"; cAiOnly["question_count"] = 10; await PutCfg(aiOwner, aiModule, cAiOnly);
+        var ai7 = await QStart(aiOwner, aiModule, null, 10);
+        Check(ai7.Body!["questions"]!.AsArray().Count == 6 && mockAi.GenerateCalls == 2, "Quiz-KI: ‚nur KI-Fragen‘ → die gespeicherten KI-Fragen");
+
+        // 9) Lernende verändern den Pool nie: Generierung bleibt flüchtig
+        var cLearner = baseCfg(); cLearner["question_count"] = 20; await PutCfg(aiOwner, aiModule, cLearner);
+        await aiOwner.PostAsync($"/api/sharing/modules/{aiModule}/shares", Body(new { recipient_user_id = aiRecvId }));
+        foreach (var cid in aiCards) await aiRecv.PutAsync($"/api/cards/{cid}/state", Body(new { is_checked = true, marked_review = false }));
+        var poolBeforeLearner = (await AiPool()).Count;
+        var genBeforeLearner = mockAi.GenerateCalls;
+        var learner = await QStart(aiRecv, aiModule, null, 20);
+        Check(learner.Status == HttpStatusCode.OK && mockAi.GenerateCalls == genBeforeLearner + 1 && learner.Body!["questions"]!.AsArray().Count == 20 && (await AiPool()).Count == poolBeforeLearner,
+            "Quiz-KI: Lernende in freigegebenen Modulen erhalten generierte Fragen, der Pool des Eigentümers bleibt unverändert");
+        var learnerRes = await QSubmit(aiRecv, aiModule, learner.Body!, AiAnswers(learner.Body!, new JsonArray()));
+        Check(learnerRes.Status == HttpStatusCode.OK && learnerRes.Body!["graded_answers"]!.AsArray().Count == 20, "Quiz-KI: flüchtige Fragen werden ebenfalls serverseitig bewertet");
+
+        // 10) KI nicht erreichbar → Fallback ohne Fehler
+        mockAi.Mode = "fail";
+        var failStart = await QStart(aiOwner, aiModule, null, 20);
+        Check(failStart.Status == HttpStatusCode.OK && failStart.Body!["questions"]!.AsArray().Count >= 6 && failStart.Body["notices"]!.AsArray().Any(n => n!.GetValue<string>().Contains("fehlgeschlagen")),
+            "Quiz-KI: KI-Fehler bei der Generierung → Hinweis und Weiterarbeit mit vorhandenen Fragen (Offline-Fallback)");
+        var failRes = await QSubmit(aiOwner, aiModule, failStart.Body, AiAnswers(failStart.Body, await AiPool()));
+        Check(failRes.Status == HttpStatusCode.OK && failRes.Body!["feedback"]!.GetValue<string>().Contains("Heuristik"), "Quiz-KI: KI-Fehler bei der Bewertung → lokale Heuristik statt Abbruch");
+        mockAi.Mode = "ok";
+    }
+    finally { StopProcess(aiRun.Proc); }
+
+    // Altbestand: quiz[] vorhandener Karten wird beim Start in den Fragenpool übernommen (idempotent, quiz_json bleibt erhalten)
+    {
+        var legRun = await StartWebAsync("e2e-quizlegacy", new());
+        string legCard, legModule;
+        try
+        {
+            var lc = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseCookies = true, CookieContainer = new CookieContainer() }) { BaseAddress = new Uri(legRun.Url) };
+            await lc.GetAsync("/auth/login?devUser=legacyq");
+            var made = await lc.PostAsync("/api/cards/", Body(new { module = "QZ-Altbestand", category = "K", term = "Alt", question = "Q?", definition = "D",
+                quiz = new object[] { new { type = "single_choice", question = "Altfrage?", options = new[] { "A", "B", "C", "D" }, correct_index = 2, explanation = "C" } } }));
+            legCard = (await J(made))!["id"]!.GetValue<string>();
+            legModule = (await J(await lc.GetAsync($"/api/cards/{legCard}")))!["module_id"]!.GetValue<string>();
+        }
+        finally { StopProcess(legRun.Proc); }
+        await Task.Delay(500);
+        await using (var ldb = new LearnCards.Web.Data.SqliteDatabase(Path.Combine(tmp, "e2e-quizlegacy", "e2e.db")))
+        {
+            await ldb.InitAsync();
+            await ldb.ExecuteAsync("DELETE FROM quiz_questions", null);          // Zustand vor dem Update simulieren: Pool leer, Karte nicht übernommen
+            await ldb.ExecuteAsync("UPDATE cards SET quiz_synced = 0", null);
+        }
+        for (var round = 1; round <= 2; round++)
+        {
+            var again = await StartWebAsync("e2e-quizlegacy", new());
+            try
+            {
+                var lc2 = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseCookies = true, CookieContainer = new CookieContainer() }) { BaseAddress = new Uri(again.Url) };
+                await lc2.GetAsync("/auth/login?devUser=legacyq");
+                var poolLeg = (await J(await lc2.GetAsync($"/api/modules/{legModule}/quiz-questions")))!.AsArray();
+                var cardLeg = (await J(await lc2.GetAsync($"/api/cards/{legCard}")))!;
+                Check(poolLeg.Count == 1 && poolLeg[0]!["correct_indexes"]![0]!.GetValue<int>() == 2 && cardLeg["quiz"]!.AsArray().Count == 1,
+                    round == 1 ? "Quiz-Migration: vorhandenes quiz[] wird beim Start in den Pool übernommen, die Karte behält ihr quiz[]" : "Quiz-Migration: ein weiterer Start ist idempotent (keine Duplikate)");
+            }
+            finally { StopProcess(again.Proc); }
+            await Task.Delay(300);
+        }
+    }
+
+    // ─── Quizsitzungen: Ablauf (4 h) und Bereinigung (24 h); Ergebnisse bleiben ───
+    Console.WriteLine("\nQuiz: Sitzungsablauf und Bereinigung");
+    {
+        var sessRun = await StartWebAsync("e2e-quizsess", new());
+        HttpClient SessClient(string url) => new(new HttpClientHandler { AllowAutoRedirect = false, UseCookies = true, CookieContainer = new CookieContainer() }) { BaseAddress = new Uri(url), Timeout = TimeSpan.FromSeconds(60) };
+        string sModule, sCard, sExpired, sActive, sOld;
+        int resultsBefore;
+        try
+        {
+            var sc = SessClient(sessRun.Url);
+            await sc.GetAsync("/auth/login?devUser=sessuser");
+            (sModule, var sCards) = await MakeQuizModule(sc, "QZ-Sitzung");
+            sCard = sCards[0];
+            var done = await QStart(sc, sModule, sCard);
+            await QSubmit(sc, sModule, done.Body!, QAnswers(done.Body!, true), sCard);   // ein gespeichertes Ergebnis
+            resultsBefore = (await J(await sc.GetAsync($"/api/quiz/history?module_id={sModule}")))!.AsArray().Count;
+            sExpired = (await QStart(sc, sModule, sCard)).Body!["session_id"]!.GetValue<string>();
+            sActive = (await QStart(sc, sModule, sCard)).Body!["session_id"]!.GetValue<string>();
+            sOld = (await QStart(sc, sModule, sCard)).Body!["session_id"]!.GetValue<string>();
+        }
+        finally { StopProcess(sessRun.Proc); }
+        await Task.Delay(500);
+        await using (var sdb = new LearnCards.Web.Data.SqliteDatabase(Path.Combine(tmp, "e2e-quizsess", "e2e.db")))
+        {
+            await sdb.InitAsync();
+            await sdb.ExecuteAsync("UPDATE quiz_sessions SET created_at = @c WHERE id = @id", new (string, object?)[] { ("c", DateTime.UtcNow.AddHours(-5)), ("id", sExpired) });   // abgelaufen (> 4 h), noch aufbewahrt
+            await sdb.ExecuteAsync("UPDATE quiz_sessions SET created_at = @c WHERE id = @id", new (string, object?)[] { ("c", DateTime.UtcNow.AddDays(-3)), ("id", sOld) });      // älter als 24 h → wird beim Start entfernt
+        }
+        var sessRun2 = await StartWebAsync("e2e-quizsess", new());
+        try
+        {
+            var sc2 = SessClient(sessRun2.Url);
+            await sc2.GetAsync("/auth/login?devUser=sessuser");
+            async Task<HttpResponseMessage> SubmitById(string sid) => await sc2.PostAsync("/api/quiz/submit", Body(new { module_id = sModule, category = "", card_id = sCard, session_id = sid,
+                answers = new object[] { new { question = "Welche Antwort stimmt?", question_id = "", source_card_id = sCard, user_answer = "", selected_indexes = new[] { 1 } } } }));
+            Check((await SubmitById(sExpired)).StatusCode == HttpStatusCode.Gone, "Quizsitzung: abgelaufene Sitzung (> 4 h) wird abgelehnt (410)");
+            Check((await SubmitById(sOld)).StatusCode == HttpStatusCode.NotFound, "Quizsitzung: Sitzungen älter als 24 h wurden beim Start bereinigt");
+            Check((await J(await sc2.GetAsync($"/api/quiz/history?module_id={sModule}")))!.AsArray().Count == resultsBefore, "Quizsitzung: gespeicherte Ergebnisse bleiben bei Ablauf und Bereinigung erhalten");
+            var activeRes = await SubmitById(sActive);
+            Check(activeRes.IsSuccessStatusCode, "Quizsitzung: gültige Sitzung funktioniert nach dem Neustart weiter");
+            Check((await J(await sc2.GetAsync($"/api/quiz/history?module_id={sModule}")))!.AsArray().Count == resultsBefore + 1, "Quizsitzung: Ergebnis der aktiven Sitzung wird gespeichert");
+        }
+        finally { StopProcess(sessRun2.Proc); }
+    }
+
+    // ─── Hilfeseite ↔ Templates (echte Dateien, Download über die Anwendung) ───
+    Console.WriteLine("\nHilfeseite und Template-Downloads");
+    {
+        var contentRoot = Path.Combine(FindRepoRoot(), "src", "LearnCards.Web");
+        var statRun = await StartWebAsync("e2e-static", new() { ["ASPNETCORE_CONTENTROOT"] = contentRoot });
+        try
+        {
+            var hc = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseCookies = true, CookieContainer = new CookieContainer() }) { BaseAddress = new Uri(statRun.Url), Timeout = TimeSpan.FromSeconds(60) };
+            await hc.GetAsync("/auth/login?devUser=helpreader");
+            var help = await (await hc.GetAsync("/help")).Content.ReadAsStringAsync();
+            var linked = System.Text.RegularExpressions.Regex.Matches(help, @"/templates/([\w\-]+\.json)").Select(m => m.Groups[1].Value).ToHashSet();
+            var onDisk = Directory.GetFiles(Path.Combine(contentRoot, "wwwroot", "templates"), "*.json").Select(Path.GetFileName).ToHashSet();
+            Check(linked.Count > 0 && linked.SetEquals(onDisk!), $"Hilfeseite: verlinkt genau die ausgelieferten Templates ({string.Join(", ", linked.OrderBy(x => x))})");
+            var allServed = true;
+            foreach (var name in linked)
+            {
+                var res = await hc.GetAsync("/templates/" + name);
+                allServed &= res.IsSuccessStatusCode && JsonNode.DeepEquals(JsonNode.Parse(await res.Content.ReadAsStringAsync()), JsonNode.Parse(File.ReadAllText(Path.Combine(contentRoot, "wwwroot", "templates", name))));
+            }
+            Check(allServed, "Hilfeseite: alle Template-Downloads funktionieren und liefern den Dateiinhalt");
+            var helpTerms = new[] { "single_choice", "multiple_response", "free_text", "correct_indexes", "Quiz-Einstellungen", "Bestehensgrenze", "/api/schema/import/cards", "KI-Fragen" };
+            var missing = helpTerms.Where(t => !help.Contains(t)).ToList();
+            Check(missing.Count == 0, "Hilfeseite: erklärt Fragetypen, Quiz-Einstellungen, KI-Fragen und verweist auf das Live-Importschema" + (missing.Count > 0 ? " — fehlt: " + string.Join(", ", missing) : ""));
+            Check(!help.Contains("WYSIWYG") && !help.Contains("Zertifikat"), "Hilfeseite: dokumentiert keine späteren Funktionen (Editor, Zertifikate) als verfügbar");
+        }
+        finally { StopProcess(statRun.Proc); }
+    }
 
     if (perfRows.Count > 0)
     {

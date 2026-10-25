@@ -18,7 +18,7 @@ Referenz dafür, *wie das System funktioniert und warum* — für Menschen und f
 | [0007](0007-mcp-server.md) | Eigenständiger MCP-Server als API-Client | Akzeptiert |
 | [0008](0008-ki-integration-und-fallback.md) | KI-Integration mit Offline-Fallback und Token-Budget | Akzeptiert |
 | [0009](0009-deployment-wege.md) | Deployment: IIS per Tag, Docker, Azure | Akzeptiert |
-| [0010](0010-folienmodus-und-karten-quiz.md) | Folienmodus und statische Karten-Quizze | Akzeptiert |
+| [0010](0010-folienmodus-und-karten-quiz.md) | Folienmodus und statische Karten-Quizze | Akzeptiert (Quizlogik teilweise ersetzt durch 0019) |
 | [0011](0011-mehrbenutzerarchitektur.md) | Mehrbenutzerarchitektur: Identität, Besitz, Rollen, Migration | Akzeptiert |
 | [0012](0012-rollen-aus-entra-app-roles.md) | Rollen aus Entra-ID-App-Rollen (`roles`-Claim) | Akzeptiert |
 | [0013](0013-mcp-benutzergebundene-anmeldung.md) | MCP: benutzergebundene Anmeldung per OAuth und persönliche Tokens | Akzeptiert |
@@ -27,6 +27,7 @@ Referenz dafür, *wie das System funktioniert und warum* — für Menschen und f
 | [0016](0016-bilder-in-lernkarten.md) | Bilder als Bestandteil von Lernkarten (Base64) | Akzeptiert |
 | [0017](0017-konfigurierbare-bildspeicher.md) | Konfigurierbare Bildspeicherprovider, Bild-Cache, Migration | Akzeptiert |
 | [0018](0018-zentraler-image-proxy-und-storage-zugriff.md) | Zentraler Image-Proxy und Storage-Zugriffsdelegation (SAS-Broker) | Akzeptiert |
+| [0019](0019-einheitliches-quizsystem.md) | Einheitliche Quiz-Engine, Quizkonfiguration und persistenter Fragenpool | Akzeptiert |
 
 Prüfberichte, die Anlass für ADRs sind, liegen unter [docs/reviews/](../reviews/) (aktuell: [Mehrbenutzer-Prüfbericht](../reviews/2026-10-24-mehrbenutzer-pruefbericht.md)).
 
