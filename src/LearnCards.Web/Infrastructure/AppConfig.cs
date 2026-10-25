@@ -47,6 +47,9 @@ public class AppConfig
     // Bildspeicher (ADR 0017)
     public ImageStorageSettings ImageStorage { get; set; } = new();
 
+    // Blockchain-Verankerung und Badge-Signierung (ADR 0021/0022)
+    public BlockchainSettings Blockchain { get; set; } = new();
+
     // MCP
     public string McpApiKey { get; set; } = "";
     /// <summary>
@@ -111,6 +114,10 @@ public class AppConfig
         // ── Bildspeicher: Konfiguration laden und beim Start vollständig prüfen (ADR 0017) ──
         cfg.ImageStorage = ImageStorageSettings.Load();
         cfg.ImageStorage.EnsureValid();
+
+        // ── Blockchain (ADR 0022): Konfiguration beim Start prüfen; Mainnet nie implizit ──
+        cfg.Blockchain = BlockchainSettings.Load(Path.GetFullPath("data"));
+        cfg.Blockchain.EnsureValid();
 
         // ── Datenbank-Provider bestimmen ────────────────────────────────
         var provider = E("DB_PROVIDER", "auto").ToLowerInvariant();

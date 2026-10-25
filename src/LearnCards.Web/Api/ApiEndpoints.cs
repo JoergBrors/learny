@@ -13,7 +13,7 @@ namespace LearnCards.Web.Api;
 /// Zugriff: eingeloggte Benutzer (Cookie) ODER MCP-/Automation-Clients mit X-MCP-Key-Header.
 /// Alle Daten sind auf den authentifizierten Benutzer beschränkt (ADR 0011).
 /// </summary>
-public static class ApiEndpoints
+public static partial class ApiEndpoints
 {
     private const string UserItem = "lc.user";
     private const string ViaKeyItem = "lc.via-key";
@@ -130,6 +130,7 @@ public static class ApiEndpoints
         MapAdminEndpoints(secured);
         MapSharingEndpoints(secured);
         MapGlobalReviewEndpoints(secured);
+        MapCertificateEndpoints(app, secured);
 
         // ─── Module ─────────────────────────────────────────────────────────
         // scope: private (Standard, kompatibel) | shared (mir freigegeben) | global (veröffentlicht) | all — ADR 0015

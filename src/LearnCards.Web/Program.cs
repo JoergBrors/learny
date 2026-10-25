@@ -5,6 +5,7 @@ using LearnCards.Web.Domain;
 using LearnCards.Web.Data;
 using LearnCards.Web.Infrastructure;
 using LearnCards.Web.Services;
+using LearnCards.Web.Services.Certificates;
 using LearnCards.Web.Services.ImageStorage;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -38,6 +39,21 @@ builder.Services.AddSingleton<OidcService>();
 builder.Services.AddSingleton<UserService>();
 builder.Services.AddSingleton<McpLinkService>();
 builder.Services.AddSingleton<SharingService>();
+// Zertifikate, Open Badges und Blockchain-Verankerung (ADR 0021/0022)
+builder.Services.AddSingleton<BadgeSigner>();
+builder.Services.AddSingleton<ChainSettingsStore>();
+builder.Services.AddSingleton<IChainClientFactory, ChainClientFactory>();
+builder.Services.AddSingleton<IPriceFeed, HttpPriceFeed>();
+builder.Services.AddSingleton<IAnchorSigner>(sp =>
+{
+    var b = sp.GetRequiredService<AppConfig>().Blockchain;
+    return b.Simulate || b.TestSigner
+        ? new PseudoAnchorSigner(b.WalletAddress.Length > 0 ? b.WalletAddress : "0x0000000000000000000000000000000000000001")   // nur Simulation/Test (Konfigurationsprüfung: lokaler RPC)
+        : new UnavailableAnchorSigner(b.WalletAddress);
+});
+builder.Services.AddSingleton<CertificateService>();
+builder.Services.AddSingleton<AnchorService>();
+builder.Services.AddHostedService<AnchorWorker>();
 
 // DataProtection-Schlüssel persistieren (Login-Cookies überleben Neustarts; ./data auch als Docker-Volume)
 var keysDir = Path.GetFullPath(Environment.GetEnvironmentVariable("DATA_PROTECTION_DIR") ?? "data/keys");
@@ -134,6 +150,8 @@ await db.InitAsync();
 var syncedQuizCards = await app.Services.GetRequiredService<CardRepository>().SyncLegacyQuizAsync();   // quiz[] → Fragenpool (ADR 0019)
 if (syncedQuizCards > 0) app.Logger.LogInformation("Quiz: {Count} Karten in den Fragenpool übernommen.", syncedQuizCards);
 await app.Services.GetRequiredService<QuizService>().CleanupSessionsIfDueAsync(force: true);   // abgelaufene Quizsitzungen entfernen (ADR 0019)
+var badgeSigner = app.Services.GetRequiredService<BadgeSigner>();   // Schlüssel laden bzw. beim ersten Start erzeugen (ADR 0021)
+if (badgeSigner.GeneratedKeyFile) app.Logger.LogWarning("Badge-Signaturschlüssel wurde lokal in {File} erzeugt. Für Produktion BADGE_SIGNING_KEY_PEM aus einer Secret-Verwaltung setzen und die Datei sichern (ohne den Schlüssel sind ausgestellte Badges nicht mehr prüfbar).", cfg.Blockchain.BadgeKeyFile);
 var imageService = app.Services.GetRequiredService<CardImageService>();
 var convertedImages = await imageService.MigrateLegacyInlineImagesAsync();
 if (convertedImages > 0) app.Logger.LogInformation("Bilder von {Count} Karten in den Bildspeicher überführt (images_json bleibt unverändert).", convertedImages);

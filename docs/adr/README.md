@@ -29,6 +29,8 @@ Referenz dafür, *wie das System funktioniert und warum* — für Menschen und f
 | [0018](0018-zentraler-image-proxy-und-storage-zugriff.md) | Zentraler Image-Proxy und Storage-Zugriffsdelegation (SAS-Broker) | Akzeptiert |
 | [0019](0019-einheitliches-quizsystem.md) | Einheitliche Quiz-Engine, Quizkonfiguration und persistenter Fragenpool | Akzeptiert |
 | [0020](0020-sichere-visuelle-bearbeitung-formatierter-lerninhalte.md) | Sichere visuelle Bearbeitung formatierter Lerninhalte (Rich-Text, Karteneditor) | Akzeptiert |
+| [0021](0021-zertifikate-und-open-badges.md) | Zertifikate und signierte Open Badges 3.0 | Akzeptiert (Oberfläche teilweise offen) |
+| [0022](0022-polygon-verankerung-und-kostenschranke.md) | Polygon-Verankerung, Merkle-Bündelung und harte Kostenschranke | Akzeptiert (Signierlösung offen) |
 
 Prüfberichte, die Anlass für ADRs sind, liegen unter [docs/reviews/](../reviews/) (aktuell: [Mehrbenutzer-Prüfbericht](../reviews/2026-10-24-mehrbenutzer-pruefbericht.md)).
 

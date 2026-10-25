@@ -2,6 +2,7 @@ using System.Text.Json;
 using LearnCards.Web.Api;
 using LearnCards.Web.Data;
 using LearnCards.Web.Domain;
+using LearnCards.Web.Services.Certificates;
 
 namespace LearnCards.Web.Services;
 
@@ -29,10 +30,12 @@ public class QuizService
     private readonly CardRepository _repo;
     private readonly OpenAiClient _openAi;
     private readonly QuizPoolService _pool;
+    private readonly CertificateService _certificates;
     private readonly Microsoft.Extensions.Logging.ILogger<QuizService> _log;
 
-    public QuizService(CardRepository repo, OpenAiClient openAi, QuizPoolService pool, Microsoft.Extensions.Logging.ILogger<QuizService> log)
+    public QuizService(CardRepository repo, OpenAiClient openAi, QuizPoolService pool, CertificateService certificates, Microsoft.Extensions.Logging.ILogger<QuizService> log)
     {
+        _certificates = certificates;
         _repo = repo;
         _openAi = openAi;
         _pool = pool;
@@ -493,6 +496,16 @@ public class QuizService
         };
         await _repo.SaveQuizResultAsync(record);
         result.ResultId = record.Id;
+        // Abschlussnachweis (ADR 0021): nur nach bestandenem, sitzungsverifiziertem Modulquiz; die Bewertung selbst bleibt hier — ein Fehler darf das Ergebnis nie gefährden
+        if (passed && record.SessionId is not null && string.IsNullOrEmpty(record.CardId))
+        {
+            try
+            {
+                var cert = await _certificates.TryIssueAsync(record, access.Module.Name, access.Context, access.Module.GlobalVersion);
+                if (cert is not null) result.CertificateId = cert.Id;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException) { _log.LogWarning("Zertifikat konnte nicht ausgestellt werden: {Message}", ex.Message); }
+        }
         return result;
     }
 

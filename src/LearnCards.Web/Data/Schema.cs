@@ -298,6 +298,94 @@ public static class Schema
             """;
 
         yield return "CREATE INDEX IF NOT EXISTS ix_quiz_sessions_user ON quiz_sessions(user_sub, created_at)";
+
+        // ─── Zertifikate, Open Badges und Blockchain-Verankerung (ADR 0021/0022) ───
+        // Ein Verankerungs-Batch bündelt viele Nachweise unter einer Merkle-Wurzel (eine Transaktion). Kosten und Netzwerk gehören eindeutig zum Batch.
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS anchor_batches (
+                id                 {id} PRIMARY KEY,
+                network            TEXT NOT NULL,
+                chain_id           INTEGER NOT NULL,
+                merkle_root        TEXT NOT NULL,
+                leaf_count         INTEGER NOT NULL,
+                status             TEXT NOT NULL,
+                tx_hash            TEXT NULL,
+                nonce              TEXT NULL,
+                raw_tx             TEXT NULL,
+                block_number       TEXT NULL,
+                gas_limit          TEXT NULL,
+                gas_used           TEXT NULL,
+                max_fee_per_gas    TEXT NULL,
+                effective_gas_price TEXT NULL,
+                fee_wei            TEXT NULL,
+                rate_eur_per_pol   {real} NULL,
+                rate_at            TEXT NULL,
+                est_total_eur      {real} NULL,
+                fee_eur            {real} NULL,
+                cost_per_cert_eur  {real} NULL,
+                simulated_cost_eur {real} NULL,
+                saved_eur          {real} NULL,
+                simulated          INTEGER NOT NULL DEFAULT 0,
+                error              TEXT NOT NULL DEFAULT '',
+                attempts           INTEGER NOT NULL DEFAULT 0,
+                created_at         TEXT NOT NULL,
+                submitted_at       TEXT NULL,
+                confirmed_at       TEXT NULL,
+                updated_at         TEXT NOT NULL
+            )
+            """;
+
+        yield return "CREATE UNIQUE INDEX IF NOT EXISTS ux_anchor_batches_root ON anchor_batches(network, merkle_root)";
+        yield return "CREATE INDEX IF NOT EXISTS ix_anchor_batches_status ON anchor_batches(status, network)";
+
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS certificates (
+                id                 {id} PRIMARY KEY,
+                number             TEXT NOT NULL,
+                user_id            {id} NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                module_id          {id} NOT NULL,
+                module_name        TEXT NOT NULL,
+                module_version     INTEGER NOT NULL DEFAULT 0,
+                module_scope       TEXT NOT NULL DEFAULT 'private',
+                result_id          {id} NULL,
+                learner_name       TEXT NOT NULL,
+                score_percent      {real} NOT NULL,
+                pass_percent       INTEGER NOT NULL,
+                issued_at          TEXT NOT NULL,
+                badge_jws          TEXT NOT NULL,
+                badge_hash         TEXT NOT NULL,
+                leaf_hash          TEXT NOT NULL,
+                status             TEXT NOT NULL DEFAULT 'active',
+                revoked_at         TEXT NULL,
+                revoked_reason     TEXT NOT NULL DEFAULT '',
+                revoked_by         TEXT NULL,
+                chain_status       TEXT NOT NULL DEFAULT 'none',
+                chain_network      TEXT NOT NULL DEFAULT '',
+                chain_id           INTEGER NOT NULL DEFAULT 0,
+                batch_id           {id} NULL REFERENCES anchor_batches(id) ON DELETE SET NULL,
+                merkle_proof_json  TEXT NULL,
+                chain_error        TEXT NOT NULL DEFAULT '',
+                chain_attempts     INTEGER NOT NULL DEFAULT 0,
+                chain_updated_at   TEXT NULL,
+                anchored_at        TEXT NULL
+            )
+            """;
+
+        yield return "CREATE UNIQUE INDEX IF NOT EXISTS ux_certificates_number ON certificates(number)";
+        yield return "CREATE UNIQUE INDEX IF NOT EXISTS ux_certificates_user_module ON certificates(user_id, module_id, module_version)";
+        yield return "CREATE INDEX IF NOT EXISTS ix_certificates_chain ON certificates(chain_status, chain_network)";
+        yield return "CREATE INDEX IF NOT EXISTS ix_certificates_user ON certificates(user_id, issued_at)";
+        yield return "CREATE INDEX IF NOT EXISTS ix_certificates_batch ON certificates(batch_id)";
+
+        // Administrativ änderbare Betriebseinstellungen (Blockchain). Nie Geheimnisse; nur Werte, die zusätzlich zur Umgebungskonfiguration gelten dürfen.
+        yield return """
+            CREATE TABLE IF NOT EXISTS app_settings (
+                name        TEXT PRIMARY KEY,
+                value       TEXT NOT NULL,
+                updated_at  TEXT NOT NULL,
+                updated_by  TEXT NULL
+            )
+            """;
     }
 
     /// <summary>

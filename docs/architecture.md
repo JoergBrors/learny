@@ -133,6 +133,16 @@ Browser / MCP ──► GET /api/images/{id} ──► Berechtigung (privat/frei
 Clients erhalten Bilder ausschließlich über `/api/images/{id}` ([ADR 0018](adr/0018-zentraler-image-proxy-und-storage-zugriff.md)); Karten-JSON enthält nur diese URL (nie Provider, Schlüssel, SAS oder Cloud-URLs). `FlashCardView` zeigt sie mit `loading="lazy"`.
 Listenendpunkte liefern nur Metadaten; Base64 gibt es nur mit `?include_image_data=true`. Die Migration zwischen Providern ist eine ausdrücklich gestartete Admin-Aktion (`/api/admin/images/migrate`), die Quelle bleibt erhalten.
 
+## Zertifikate und Blockchain-Verankerung
+
+Nach einem bestandenen, sitzungsverifizierten Modulquiz stellt `QuizService` über `CertificateService` ein signiertes Open Badge 3.0 aus ([ADR 0021](adr/0021-zertifikate-und-open-badges.md)). Der Prüf-Hash des Badges geht in eine Warteschlange; der `AnchorService` (Hintergrund-Worker) bündelt fällige Nachweise zu einem Merkle-Baum,
+prüft die Kosten hart (`AnchorCostGuard`, ≤ 0,001 EUR je Nachweis) und verankert die Wurzel als Nullwert-Transaktion auf Polygon ([ADR 0022](adr/0022-polygon-verankerung-und-kostenschranke.md)). Ohne Blockchain, ohne Freigabe oder ohne sichere Kostenschätzung bleibt das Badge gültig und die Verankerung ausstehend.
+
+```
+QuizService (bestanden) ─► CertificateService ─► Badge (VC-JWT, ES256) ─► Warteschlange (chain_status=pending)
+AnchorWorker ─► AnchorService: Batch + Merkle-Wurzel ─► AnchorCostGuard (2×) ─► IAnchorSigner ─► IChainClient (JSON-RPC) ─► Bestätigung/Finalität ─► Verifikation der On-Chain-Daten
+```
+
 ## Karteneditor und formatierte Texte
 
 Der Karteneditor (`/module/{id}/edit`) ist eine reine Oberfläche über den vorhandenen Diensten ([ADR 0020](adr/0020-sichere-visuelle-bearbeitung-formatierter-lerninhalte.md)): Karten über `CardRepository` (anlegen, ändern mit Konflikterkennung, duplizieren, sortieren, archivieren), Bilder über `CardImageService`,

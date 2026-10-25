@@ -311,6 +311,8 @@ public class QuizResultResponse
     public QuizSessionStats Stats { get; set; } = new();
     public List<GradedAnswer> GradedAnswers { get; set; } = new();
     public string ResultId { get; set; } = "";
+    /// <summary>Ausgestelltes (oder bereits vorhandenes) Zertifikat bei bestandenem Modulquiz (ADR 0021).</summary>
+    public string? CertificateId { get; set; }
     public string SessionId { get; set; } = "";
     public bool? Passed { get; set; }
     public int? PassPercent { get; set; }

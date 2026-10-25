@@ -198,6 +198,7 @@ try
     await ImageStorageUnitTests.RunAsync(Check, tmp);
     await ImageStorageRemoteUnitTests.RunAsync(Check);
     RichTextUnitTests.Run(Check);
+    await BlockchainUnitTests.RunAsync(Check, tmp);
     Console.WriteLine();
 
     // ─── Warten bis der Server antwortet ───────────────────────────────────

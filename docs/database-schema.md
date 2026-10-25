@@ -326,6 +326,17 @@ Index: `ix_quiz_sessions_user (user_sub, created_at)`.
 
 > **Hinweis (ADR 0020):** Der Karteneditor und die formatierten Texte benötigen **keine** Schemaänderung — das Markup liegt in den bestehenden Spalten `definition`, `how_it_works`, `context`, `key_fact`, `reference_answer`; die Reihenfolge nutzt `cards.sort_order`.
 
+### certificates, anchor_batches, app_settings
+
+Zertifikate und Blockchain-Verankerung ([ADR 0021](adr/0021-zertifikate-und-open-badges.md)/[0022](adr/0022-polygon-verankerung-und-kostenschranke.md)); alle drei Tabellen entstehen über `CREATE TABLE IF NOT EXISTS`, keine Änderung bestehender Tabellen.
+
+- **certificates** — `id`, `number` (unique), `user_id` (FK → users, `CASCADE`), `module_id` (ohne FK: Nachweis überlebt das Modul), `module_name`, `module_version` (0 = nicht global), `module_scope` (`private|shared|global`), `result_id`, `learner_name`, `score_percent`, `pass_percent`, `issued_at`,
+  `badge_jws` (signiertes VC-JWT), `badge_hash` (SHA-256 der JWS), `leaf_hash` (Merkle-Blatt), `status` (`active|revoked`), `revoked_at/_reason/_by`, `chain_status` (`none|pending|batched|cost_blocked|anchoring|confirmed|failed`), `chain_network`, `chain_id` (Netzwerk **bei Ausstellung**), `batch_id` (FK → anchor_batches, `SET NULL`),
+  `merkle_proof_json`, `chain_error`, `chain_attempts`, `chain_updated_at`, `anchored_at`. Unique: `(user_id, module_id, module_version)`; Indizes auf Verankerungsstatus, Benutzer, Batch.
+- **anchor_batches** — `id`, `network`, `chain_id`, `merkle_root` (unique je Netzwerk), `leaf_count`, `status` (`planned|cost_blocked|submitted|confirmed|failed`), `tx_hash`, `nonce`, `raw_tx` (signierte Rohtransaktion für identisches Wiedersenden — kein Geheimnis), `block_number`, `gas_limit`, `gas_used`, `max_fee_per_gas`, `effective_gas_price`, `fee_wei`,
+  `rate_eur_per_pol`, `rate_at`, `est_total_eur`, `fee_eur` (Testnet/Simulation: 0), `cost_per_cert_eur`, `simulated_cost_eur`, `saved_eur`, `simulated`, `error`, `attempts`, Zeitstempel. Große Zahlen (wei) stehen als Text.
+- **app_settings** — `name` (PK), `value`, `updated_at`, `updated_by`: administrative Betriebseinstellungen (`chain.*`, Mainnet-Freigabe). Nie Geheimnisse.
+
 ## Schema-Initialisierung und Migrationen
 
 Beim Start (`PostgresDatabase.InitAsync`, serialisiert über ein Gate):
