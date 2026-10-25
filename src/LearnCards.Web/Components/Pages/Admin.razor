@@ -4,6 +4,7 @@
 @inject UserService Users
 @inject CardRepository Repo
 @inject SharingService Sharing
+@inject TopicService Topics
 @inject AuthenticationStateProvider AuthState
 
 <PageTitle>@(_isAdmin ? "Administration" : "Globale Inhalte") — LearnCards</PageTitle>
@@ -139,6 +140,89 @@
                 }
             </div>
         }
+
+        <div class="card panel">
+            <h2 class="panel-title">Globale Themenversionen (ADR 0027)</h2>
+            <p class="muted">
+                Eigentümer reichen eine <strong>eingefrorene Themenversion</strong> ein. Du siehst nur diese Version (Module als eingefrorene Kopien), nie die privaten Originalmodule.
+                Bis zur Freigabe bleibt die bisherige globale Version aktiv; eine Ablehnung ändert nichts an ihr.
+            </p>
+            @if (_pendingTopics.Count == 0)
+            {
+                <p>Keine Themenversionen zur Freigabe.</p>
+            }
+            else
+            {
+                <div class="table-wrap">
+                    <table class="table">
+                        <caption class="sr-only">Themenversionen zur Freigabe</caption>
+                        <thead><tr><th>Thema</th><th>Eigentümer</th><th>Version</th><th>Umfang</th><th>Eingereicht</th><th>Aktionen</th></tr></thead>
+                        <tbody>
+                            @foreach (var v in _pendingTopics)
+                            {
+                                <tr>
+                                    <td>@v.Name</td>
+                                    <td>@v.OwnerName</td>
+                                    <td>@v.VersionNumber</td>
+                                    <td>@v.Stats.Modules Module · @v.Stats.Cards Karten · @v.Stats.ChoiceQuestions MC · Abschluss @v.Stats.FinalExamQuestions</td>
+                                    <td>@v.SubmittedAt?.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                                    <td class="actions">
+                                        <button class="btn btn-ghost btn-sm" @onclick="() => ToggleTopicPreview(v.Id)">@(_topicPreviewId == v.Id ? "Vorschau schließen" : "Prüfen")</button>
+                                        @if (_isAdmin)
+                                        {
+                                            <button class="btn btn-primary btn-sm" @onclick="() => ApproveTopic(v.Id)">Freigeben</button>
+                                            <button class="btn btn-ghost btn-sm" @onclick="() => _topicRejectId = _topicRejectId == v.Id ? null : v.Id">Ablehnen</button>
+                                        }
+                                    </td>
+                                </tr>
+                                @if (_topicRejectId == v.Id)
+                                {
+                                    <tr><td colspan="6">
+                                        <div class="form-row">
+                                            <input class="input" placeholder="Begründung (optional)" maxlength="500" @bind="_topicRejectReason" aria-label="Begründung der Ablehnung" />
+                                            <button class="btn btn-primary btn-sm" @onclick="() => RejectTopic(v.Id)">Ablehnung bestätigen</button>
+                                        </div>
+                                    </td></tr>
+                                }
+                                @if (_topicPreviewId == v.Id && _topicPreview is not null)
+                                {
+                                    <tr><td colspan="6">
+                                        <p>@_topicPreview.Topic.Description</p>
+                                        <ol>
+                                            @foreach (var m in _topicPreview.Modules)
+                                            {
+                                                <li>@m.Name — @m.Cards Karten, @m.PoolQuestions Fragen@(m.Exam.Enabled ? $", Modulprüfung ({m.Exam.QuestionCount} Fragen, ab {m.Exam.PassPercent} %)" : "")</li>
+                                            }
+                                        </ol>
+                                        <p class="muted">Abschlussprüfung: @(_topicPreview.FinalExam.Enabled ? $"{_topicPreview.FinalExam.QuestionCount} Fragen, ab {_topicPreview.FinalExam.PassPercent} %" : "nicht vorgesehen")</p>
+                                    </td></tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+            @if (_topicHistory.Count > 0)
+            {
+                <h3>Veröffentlichungsverlauf</h3>
+                <div class="table-wrap">
+                    <table class="table">
+                        <caption class="sr-only">Veröffentlichungsverlauf der Themen</caption>
+                        <thead><tr><th>Thema</th><th>Version</th><th>Status</th><th>Entscheidung</th></tr></thead>
+                        <tbody>
+                            @foreach (var h in _topicHistory.Take(20))
+                            {
+                                <tr>
+                                    <td>@h.Name</td><td>@h.VersionNumber</td>
+                                    <td>@(h.GlobalStatus switch { "active" => "aktiv", "pending_approval" => "offen", "superseded" => "ersetzt", "rejected" => "abgelehnt", "deactivated" => "zurückgenommen", _ => h.GlobalStatus })</td>
+                                    <td>@h.DecidedAt?.ToLocalTime().ToString("dd.MM.yyyy HH:mm")@(h.DecisionReason.Length > 0 ? " — " + h.DecisionReason : "")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
 
         <div class="card panel">
             <h2 class="panel-title">Globale Lernmodule</h2>
@@ -333,6 +417,12 @@
     private readonly Dictionary<string, string> _assignTargets = new();
     private readonly Dictionary<string, string> _replaceTargets = new();
     private string? _deleteId;
+    private List<TopicVersionInfo> _pendingTopics = new();
+    private List<TopicVersionInfo> _topicHistory = new();
+    private string? _topicPreviewId;
+    private TopicDetail? _topicPreview;
+    private string? _topicRejectId;
+    private string _topicRejectReason = "";
 
     /// <summary>Zuletzt veröffentlichte Version je Veröffentlichung — Auswahl für „ersetzen“.</summary>
     private IEnumerable<ModuleInfo> PublicationChoices() =>
@@ -371,6 +461,8 @@
             }
             _globalModules = await Sharing.ListGlobalModulesForReviewAsync(_actorId);
             _results = await Sharing.GetGlobalResultSummariesAsync(_actorId);
+            _pendingTopics = _isAdmin ? await Topics.ListPendingGlobalAsync(_actorId) : new();
+            _topicHistory = await Topics.ListGlobalHistoryAsync(_actorId);
             _ready = true;
         }
         catch (UnauthorizedAccessException)
@@ -379,6 +471,22 @@
             Fail("Administrator- oder Auditorrechte erforderlich.");
         }
     }
+
+    private async Task ToggleTopicPreview(string versionId)
+    {
+        if (_topicPreviewId == versionId) { _topicPreviewId = null; return; }
+        try { _topicPreview = await Topics.GetVersionForReviewAsync(_actorId, versionId); _topicPreviewId = versionId; }
+        catch (Exception e) when (e is KeyNotFoundException or UnauthorizedAccessException) { Fail(e.Message); }
+    }
+
+    private Task ApproveTopic(string versionId) => Run(async () => { await Topics.ApproveGlobalAsync(_actorId, versionId); return "Themenversion global freigegeben."; });
+
+    private Task RejectTopic(string versionId) => Run(async () =>
+    {
+        await Topics.RejectGlobalAsync(_actorId, versionId, _topicRejectReason);
+        _topicRejectId = null; _topicRejectReason = "";
+        return "Themenversion abgelehnt; die bisherige globale Version bleibt aktiv.";
+    });
 
     private Task ToggleRole(AppUser u, string role) => Run(async () =>
     {

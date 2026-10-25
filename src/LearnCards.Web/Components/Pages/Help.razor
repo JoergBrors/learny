@@ -5,7 +5,7 @@
 
 <div class="container help-page">
     <section class="card panel">
-        <nav class="breadcrumb"><a href="/">Lernmodule</a> <span aria-hidden="true">›</span> <span>Hilfe & Templates</span></nav>
+        <nav class="breadcrumb"><a href="/">Module</a> <span aria-hidden="true">›</span> <span>Hilfe & Templates</span></nav>
         <h1>Hilfe & Templates</h1>
         <p class="muted">
             Diese Seite zeigt das Importformat, direkte Download-Vorlagen und einen einfachen Workflow,
@@ -47,6 +47,22 @@
                 <p class="muted">Mit <code>slide_number</code>, <code>target_time_sec</code>, Seitenquiz mit allen Fragetypen und Folienbild (<code>images</code>).</p>
                 <div class="page-head-actions">
                     <a class="btn btn-primary btn-sm" href="/templates/slide-deck-template.json" download>JSON laden</a>
+                </div>
+            </article>
+
+            <article class="template-card">
+                <h3>Vollständiges Modul (JSON)</h3>
+                <p class="muted">Format <code>learny-module</code>: Karten mit Bild und Quiz, Quizkonfiguration und zusätzliche Pool-Fragen. Import über <strong>JSON importieren</strong> auf der Modulseite oder <code>POST /api/modules/import</code>; es entsteht immer ein neues eigenes Modul.</p>
+                <div class="page-head-actions">
+                    <a class="btn btn-primary btn-sm" href="/templates/module-template.json" download>JSON laden</a>
+                </div>
+            </article>
+
+            <article class="template-card">
+                <h3>Thema (Lernpfad, JSON)</h3>
+                <p class="muted">Format <code>learny-topic</code>: eigene Module (nach Namen), Reihenfolge, Modul- und Abschlussprüfung, Themenfragen. Import über <strong>Thema aus JSON erstellen</strong>; es entsteht ein Entwurf.</p>
+                <div class="page-head-actions">
+                    <a class="btn btn-primary btn-sm" href="/templates/topic-template.json" download>JSON laden</a>
                 </div>
             </article>
         </div>
@@ -334,6 +350,39 @@ Hier sind meine Folien / Notizen:
                 <p class="muted">JSON validieren, Reihenfolge kontrollieren, Quizfragen und Quellen manuell gegenlesen.</p>
             </div>
         </div>
+    </section>
+
+    <section class="card panel" id="topics">
+        <h2 class="panel-title">Module und Themen — der Unterschied</h2>
+        <p class="muted">Ein <strong>Modul</strong> enthält Lernkarten samt Quizfragen und Quizkonfiguration (Menüpunkt <a href="/">Module</a>). Ein <strong>Thema</strong> ist ein Lernpfad aus mehreren <strong>eigenen</strong> Modulen mit Reihenfolge, Modulprüfungen und Abschlussprüfung (Menüpunkt <a href="/topics">Themen</a>). Module werden einem Thema nur zugeordnet, nie kopiert; ein Modul darf in mehreren Themen vorkommen.</p>
+        <div class="help-grid">
+            <div class="help-block">
+                <h3>Globale Module klonen</h3>
+                <p class="muted">Globale Module kannst du nicht direkt in ein Thema aufnehmen. Wähle unter <strong>Globale Module</strong> die Aktion <strong>In eigene Module klonen</strong>: Du erhältst eine unabhängige, private Kopie mit allen Karten, Bildern, Kartenquizfragen und der Quizkonfiguration (bei gleichem Namen „… (Kopie)“). Das Original bleibt unverändert; Freigaben, Lernstände und Ergebnisse werden nicht übernommen.</p>
+            </div>
+            <div class="help-block">
+                <h3>Eigene Module zu Themen hinzufügen</h3>
+                <p class="muted">Im Themeneditor erscheinen nur deine eigenen, privaten Module. Mit dir geteilte Module und globale Originale werden abgelehnt — auch bei API- oder MCP-Zugriff. Ältere Entwürfe mit einem globalen Modul zeigen die Aktion <strong>Durch eigene Kopie ersetzen</strong>; veröffentlichte Versionen bleiben unverändert.</p>
+            </div>
+            <div class="help-block">
+                <h3>Module als JSON</h3>
+                <p class="muted"><strong>Als JSON exportieren</strong> an der Modulkarte liefert das vollständige Modul (<code>learny-module</code>) inklusive Bildern (Base64), Kartenquiz, Quizkonfiguration und zusätzlicher Pool-Fragen. <strong>JSON importieren</strong> erkennt solche Dateien und legt ein neues eigenes Modul an (nie ein Überschreiben; bei Namensgleichheit „… (Import)“). Fehler brechen den Import vollständig ab. Das bisherige Karten-JSON bleibt unverändert; Schema: <code>/api/schema/import/module</code>.</p>
+            </div>
+            <div class="help-block">
+                <h3>Themen als JSON</h3>
+                <p class="muted">Im Themeneditor exportierst du die Definition (<code>learny-topic</code>, optional mit Moduldefinitionen). Jedes Modul hat eine stabile <strong>Referenz</strong> (<code>module_ref</code>, GUID), die Umbenennen überlebt; <code>module_name</code> ist nur der Anzeigename (ohne Referenz zählt der Name). Eingebettete Module mit bekannter Referenz werden wiederverwendet statt neu angelegt. Unbekannte, globale oder fremde Module führen zu einer Fehlermeldung. <strong>Thema aus JSON erstellen</strong> legt einen Entwurf an, <strong>Thema aus JSON aktualisieren</strong> ersetzt nur den Entwurf. Veröffentlicht wird nichts automatisch; Versionen, Freigaben, Zuweisungen und Ergebnisse sind nicht Teil der Datei. Schema: <code>/api/schema/import/topic</code>.</p>
+            </div>
+        </div>
+        <ol>
+            <li>Öffne <a href="/topics">Themen</a> und lege ein Thema an (oder erstelle es aus JSON).</li>
+            <li>Füge eigene Module hinzu und ordne sie per Pfeilen.</li>
+            <li>Lege für jedes Modul die Prüfung (Fragenzahl, Bestehensgrenze, Wiederholung) und die Abschlussprüfung (Verteilung, eigene Themenfragen, Freischaltregeln) fest.</li>
+            <li><strong>Neue Version veröffentlichen</strong> friert den Stand ein. Lernende sehen nur veröffentlichte Versionen; spätere Änderungen wirken erst mit der nächsten Version, bestandene Prüfungen unveränderter Module bleiben erhalten.</li>
+            <li>Mit <strong>Teilen</strong> erlaubst du anderen das Lernen, mit <strong>Zuweisen</strong> erteilst du eine Lernaufgabe. Für die globale Veröffentlichung reichst du eine Version ein; ein Administrator gibt sie frei oder lehnt sie ab (die bisherige globale Version bleibt bis dahin aktiv).</li>
+        </ol>
+        <h3>MCP-Werkzeuge für Themen und Module</h3>
+        <p class="muted">Ein KI-Client arbeitet nur mit seinem Benutzertoken und nur mit eigenen Inhalten: <code>get_topic_import_schema</code> → <code>list_modules</code> → <code>create_topic</code> (oder <code>import_topic</code>) → <code>get_topic</code>; Anpassungen mit <code>update_topic</code> (ersetzt den Entwurf), Sicherung mit <code>export_topic</code>. Für Module: <code>get_module_import_schema</code>, <code>export_module</code>, <code>import_module</code> und <code>clone_global_module</code>. Lesen: <code>list_topics</code>, <code>get_topic</code>, <code>get_topic_exam_structure</code>. Nicht über MCP möglich: Veröffentlichen, globale Freigaben, Administration, Freigaben und Zuweisungen an andere Benutzer.</p>
+        <p class="muted">Prüfungen werden serverseitig bewertet und funktionieren auch ohne KI-Schlüssel.</p>
     </section>
 
     <section class="card panel">

@@ -1,0 +1,443 @@
+@page "/topics/{Id}/edit"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject TopicService Topics
+@inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthState
+
+<PageTitle>@(_d?.Topic.Name ?? "Thema bearbeiten") — LearnCards</PageTitle>
+
+<div class="container">
+    @if (_loading)
+    {
+        <div class="spinner-wrap" aria-busy="true"><div class="spinner" role="status"></div></div>
+    }
+    else if (_d is null)
+    {
+        <div class="empty-state">
+            <div class="empty-icon" aria-hidden="true">🧭</div>
+            <h1>Thema nicht gefunden</h1>
+            <p>Das Thema existiert nicht oder gehört einem anderen Benutzer.</p>
+            <a class="btn btn-primary" href="/topics">Zu den Themen</a>
+        </div>
+    }
+    else
+    {
+        <div class="page-head">
+            <div>
+                <h1>@_d.Topic.Name</h1>
+                <ul class="topic-stats topic-stats-big" aria-label="Umfang des Themas">
+                    <li><strong>@_d.Stats.Cards</strong> Lernkarten</li>
+                    <li><strong>@_d.Stats.ChoiceQuestions</strong> Multiple-Choice-Fragen</li>
+                    <li><strong>@_d.Stats.FinalExamQuestions</strong> Abschlussprüfungsfragen</li>
+                    <li><strong>@_d.Stats.Modules</strong> Module</li>
+                </ul>
+            </div>
+            <div class="page-head-actions">
+                <a class="btn btn-ghost" href="/topics/@Id">👁 Ansicht</a>
+                <a class="btn btn-ghost" href="/topics">← Themen</a>
+            </div>
+        </div>
+
+        @if (_message is not null)
+        {
+            <div class="alert @(_error ? "alert-error" : "alert-ok")" role="status">@_message</div>
+        }
+        @if (_d.Topic.Status == "archived")
+        {
+            <div class="alert alert-info" role="status">Dieses Thema ist archiviert und kann nicht bearbeitet werden. <button class="btn btn-ghost btn-sm" @onclick="() => ArchiveAsync(false)">Archivierung aufheben</button></div>
+        }
+
+        @* ─── Allgemein ─── *@
+        <div class="card panel">
+            <h2 class="panel-title">Allgemein</h2>
+            <label class="form-label" for="tname">Name</label>
+            <input id="tname" class="input" maxlength="120" @bind="_name" />
+            <label class="form-label" for="tdesc">Beschreibung</label>
+            <textarea id="tdesc" class="input" rows="3" maxlength="2000" @bind="_description"></textarea>
+            <div class="page-head-actions topic-actions">
+                <button class="btn btn-primary" @onclick="SaveGeneralAsync" disabled="@(_d.Topic.Status == "archived")">Speichern</button>
+                <button class="btn btn-ghost" @onclick="DuplicateAsync">Duplizieren</button>
+                @if (_d.Topic.Status != "archived") { <button class="btn btn-ghost" @onclick="() => ArchiveAsync(true)">Archivieren</button> }
+            </div>
+        </div>
+
+        @* ─── Module ─── *@
+        <div class="card panel">
+            <h2 class="panel-title">Module und Reihenfolge</h2>
+            <p class="muted">Die Reihenfolge bestimmt den Lernpfad. Ein Modul kann mehreren Themen angehören — es wird nie kopiert, erst die veröffentlichte Version friert eine Kopie ein.</p>
+            @if (_d.Modules.Count == 0) { <p class="muted">Noch keine Module zugeordnet.</p> }
+            <ol class="topic-path">
+                @for (var i = 0; i < _d.Modules.Count; i++)
+                {
+                    var idx = i; var m = _d.Modules[i];
+                    <li class="topic-module-row">
+                        <span aria-hidden="true">@m.Icon</span>
+                        <strong>@m.Name</strong>
+                        <span class="muted">@m.Cards Karten · @m.PoolQuestions Fragen</span>
+                        @if (m.Unavailable) { <span class="badge badge-warn">nicht mehr verfügbar</span> }
+                        @if (m.RequiresOwnCopy)
+                        {
+                            <span class="badge badge-warn">kein eigenes Modul</span>
+                            <button class="btn btn-ghost btn-sm" @onclick="() => ReplaceWithCloneAsync(m.ModuleId)" disabled="@_busy"
+                                    title="Klont das globale Modul in deine eigenen Module und ersetzt die Zuordnung (Position und Prüfung bleiben)">⧉ Durch eigene Kopie ersetzen</button>
+                        }
+                        <span class="topic-row-actions">
+                            <button class="icon-btn" title="Nach oben" aria-label="@($"{m.Name} nach oben")" @onclick="() => MoveAsync(idx, -1)" disabled="@(idx == 0)">▲</button>
+                            <button class="icon-btn" title="Nach unten" aria-label="@($"{m.Name} nach unten")" @onclick="() => MoveAsync(idx, 1)" disabled="@(idx == _d.Modules.Count - 1)">▼</button>
+                            <button class="icon-btn" title="Entfernen" aria-label="@($"{m.Name} entfernen")" @onclick="() => RemoveModuleAsync(m.ModuleId)">✕</button>
+                        </span>
+                    </li>
+                }
+            </ol>
+            <label class="form-label" for="msearch">Modul hinzufügen (nur eigene, private Module)</label>
+            <p class="muted">Globale Module lassen sich zuerst auf der Seite <a href="/">Module</a> mit „In eigene Module klonen“ in eine eigene Kopie überführen.</p>
+            <input id="msearch" class="input" placeholder="Modulname suchen…" @bind="_moduleQuery" @bind:event="oninput" @onkeyup="SearchModulesAsync" />
+            @if (_addable.Count > 0)
+            {
+                <ul class="topic-search-results">
+                    @foreach (var m in _addable)
+                    {
+                        <li><button class="btn btn-ghost btn-sm" @onclick="() => AddModuleAsync(m.Id)">＋ @m.Icon @m.Name <span class="muted">(@m.ActiveCount Karten)</span></button></li>
+                    }
+                </ul>
+            }
+        </div>
+
+        @* ─── JSON (ADR 0028) ─── *@
+        <div class="card panel">
+            <h2 class="panel-title">Thema als JSON</h2>
+            <p class="muted">Die Definition enthält Module (nach Namen), Reihenfolge, Prüfungen und Themenfragen — keine IDs, Versionen, Freigaben, Zuweisungen oder Ergebnisse. Aktualisieren ersetzt nur den <strong>Entwurf</strong>; veröffentlicht wird nichts.</p>
+            <div class="page-head-actions topic-actions">
+                <a class="btn btn-ghost" href="/api/topics/@Id/export" download="thema.json">⬇ Thema als JSON exportieren</a>
+                <a class="btn btn-ghost" href="/api/topics/@Id/export?include_modules=true" download="thema-mit-modulen.json">⬇ Export inklusive Moduldefinitionen</a>
+                <label class="btn btn-ghost file-btn">
+                    ⬆ Thema aus JSON aktualisieren
+                    <InputFile OnChange="PickDefinitionAsync" accept=".json" disabled="@(_busy || _d.Topic.Status == "archived")" />
+                </label>
+            </div>
+            @if (_pendingJson is not null)
+            {
+                <div class="alert alert-info" role="status">
+                    Datei „@_pendingJsonName“ ist gültig. Sie ersetzt den aktuellen Entwurf (Module, Reihenfolge, Prüfungen, Themenfragen).
+                    <button class="btn btn-primary btn-sm" @onclick="ApplyDefinitionAsync" disabled="@_busy">Entwurf aktualisieren</button>
+                    <button class="btn btn-ghost btn-sm" @onclick="() => _pendingJson = null">Verwerfen</button>
+                </div>
+            }
+        </div>
+
+        @* ─── Prüfungen ─── *@
+        @if (_cfg is not null)
+        {
+            <div class="card panel">
+                <h2 class="panel-title">Prüfungen</h2>
+                <p class="muted">Prüfungen verwenden ausschließlich gespeicherte Fragen der Module (kein KI-Zwang, auch ohne API-Schlüssel); die Auswertung erfolgt serverseitig.</p>
+                <div class="table-wrap">
+                    <table class="table">
+                        <caption class="sr-only">Modulprüfungen</caption>
+                        <thead><tr><th>Modul</th><th>Aktiv</th><th>Fragen</th><th>Bestehen ab %</th><th>Wiederholung</th><th>Fragen mischen</th><th>Antworten mischen</th><th>Erklärungen</th><th>Nächster Schritt ab %</th><th>Fragetypen</th></tr></thead>
+                        <tbody>
+                            @foreach (var m in _d.Modules.Where(m => !m.Unavailable))
+                            {
+                                var e = _cfg.ModuleExams[m.ModuleId];
+                                <tr>
+                                    <td>@m.Name <span class="muted">(@m.PoolQuestions Fragen)</span></td>
+                                    <td><input type="checkbox" @bind="e.Enabled" aria-label="@($"Prüfung {m.Name} aktiv")" /></td>
+                                    <td><input class="input input-num" type="number" min="1" max="20" @bind="e.QuestionCount" aria-label="Anzahl Fragen" /></td>
+                                    <td><input class="input input-num" type="number" min="1" max="100" @bind="e.PassPercent" aria-label="Bestehensgrenze" /></td>
+                                    <td><input type="checkbox" @bind="e.AllowRetry" aria-label="Wiederholung erlaubt" /></td>
+                                    <td><input type="checkbox" @bind="e.ShuffleQuestions" aria-label="Fragen mischen" /></td>
+                                    <td><input type="checkbox" @bind="e.ShuffleAnswers" aria-label="Antworten mischen" /></td>
+                                    <td><input type="checkbox" @bind="e.ShowExplanations" aria-label="Erklärungen nach Abgabe" /></td>
+                                    <td><input class="input input-num" type="number" min="0" max="100" @bind="e.MinPercentForNext" aria-label="Mindestleistung für den nächsten Lernschritt" /></td>
+                                    <td class="topic-types">
+                                        <label><input type="checkbox" @bind="e.SingleChoice" /> SC</label>
+                                        <label><input type="checkbox" @bind="e.MultipleResponse" /> MR</label>
+                                        <label><input type="checkbox" @bind="e.FreeText" /> Text</label>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+
+                <h3>Abschlussprüfung</h3>
+                @{ var f = _cfg.FinalExam; }
+                <div class="topic-form-grid">
+                    <label><input type="checkbox" @bind="f.Enabled" /> Abschlussprüfung aktiv</label>
+                    <label>Anzahl Fragen <input class="input input-num" type="number" min="1" max="50" @bind="f.QuestionCount" /></label>
+                    <label>Bestehen ab % <input class="input input-num" type="number" min="1" max="100" @bind="f.PassPercent" /></label>
+                    <label><input type="checkbox" @bind="f.AllowRetry" /> Wiederholung erlaubt</label>
+                    <label><input type="checkbox" @bind="f.RandomSelection" /> zufällige Auswahl und Reihenfolge</label>
+                    <label><input type="checkbox" @bind="f.ShuffleAnswers" /> Antworten mischen</label>
+                    <label><input type="checkbox" @bind="f.ShowExplanations" /> Lösungen und Erklärungen nach Abgabe zeigen</label>
+                    <label><input type="checkbox" @bind="f.IncludeTopicQuestions" /> eigene Themenfragen einbeziehen</label>
+                    <label>Fragetypen:
+                        <label><input type="checkbox" @bind="f.SingleChoice" /> Single Choice</label>
+                        <label><input type="checkbox" @bind="f.MultipleResponse" /> Multiple Response</label>
+                        <label><input type="checkbox" @bind="f.FreeText" /> Freitext</label>
+                    </label>
+                    <label>Verteilung über die Module
+                        <select class="input" @bind="f.Distribution">
+                            <option value="even">gleichmäßig</option>
+                            <option value="proportional">proportional zur Fragenanzahl</option>
+                            <option value="manual">manuell je Modul</option>
+                        </select>
+                    </label>
+                    <label>Freischaltung:
+                        <label><input type="checkbox" @bind="f.Unlock.RequireAllModulesCompleted" /> alle Module abgeschlossen</label>
+                        <label><input type="checkbox" @bind="f.Unlock.RequireModuleExamsPassed" /> alle Modulprüfungen bestanden</label>
+                    </label>
+                </div>
+                @if (f.Distribution == "manual")
+                {
+                    <div class="form-row">
+                        @foreach (var m in _d.Modules.Where(m => !m.Unavailable))
+                        {
+                            var key = m.ModuleId;
+                            <label>@m.Name <input class="input input-num" type="number" min="0" max="50" value="@(f.ManualCounts.GetValueOrDefault(key))" @onchange="e => f.ManualCounts[key] = int.TryParse(e.Value?.ToString(), out var n) ? n : 0" /></label>
+                        }
+                    </div>
+                }
+                <div class="page-head-actions topic-actions">
+                    <button class="btn btn-primary" @onclick="SaveExamsAsync" disabled="@(_d.Topic.Status == "archived")">Prüfungskonfiguration speichern</button>
+                </div>
+
+                <h3>Eigene Themenfragen (Abschlussprüfung)</h3>
+                <p class="muted">@_questions.Count(q => q.Active) aktive Fragen · zusätzlich zu den Fragen der Module.</p>
+                <ul class="topic-questions">
+                    @foreach (var q in _questions)
+                    {
+                        <li><span>@q.Question <span class="muted">(@q.Type, @q.Options.Count Optionen)</span></span>
+                            <button class="icon-btn" title="Frage entfernen" aria-label="Frage entfernen" @onclick="() => DeleteQuestionAsync(q.Id)">✕</button></li>
+                    }
+                </ul>
+                <label class="form-label" for="qtext">Neue Frage</label>
+                <input id="qtext" class="input" @bind="_qText" maxlength="2000" />
+                <label class="form-label" for="qopts">Antwortoptionen (eine pro Zeile; bei Freitext leer lassen)</label>
+                <textarea id="qopts" class="input" rows="4" @bind="_qOptions"></textarea>
+                <div class="form-row">
+                    <select class="input" @bind="_qType" aria-label="Fragetyp">
+                        <option value="single_choice">Single Choice</option>
+                        <option value="multiple_response">Multiple Response</option>
+                        <option value="free_text">Freitext</option>
+                    </select>
+                    <input class="input" placeholder="Richtige Option(en), z. B. 2 oder 1,3" @bind="_qCorrect" aria-label="Richtige Optionen (Nummern)" />
+                    <input class="input" placeholder="Erklärung bzw. Musterlösung" @bind="_qExplanation" aria-label="Erklärung" />
+                    <button class="btn btn-primary" @onclick="AddQuestionAsync" disabled="@(string.IsNullOrWhiteSpace(_qText))">Frage hinzufügen</button>
+                </div>
+            </div>
+        }
+
+        @* ─── Freigaben ─── *@
+        <div class="card panel">
+            <h2 class="panel-title">Freigaben (Lernen und Prüfungen, keine Bearbeitung)</h2>
+            @if (_d.Topic.LatestVersion == 0) { <p class="muted">Veröffentliche zuerst eine Version — Freigaben und Zuweisungen beziehen sich auf veröffentlichte Versionen.</p> }
+            <input class="input" placeholder="Benutzer suchen (mindestens 3 Zeichen: Name oder E-Mail)" @bind="_userQuery" @bind:event="oninput" @onkeyup="SearchUsersAsync" aria-label="Benutzer suchen" />
+            @if (_userResults.Count > 0)
+            {
+                <ul class="topic-search-results">
+                    @foreach (var u in _userResults)
+                    {
+                        <li>@u.DisplayName <span class="muted">@u.Email</span>
+                            <button class="btn btn-ghost btn-sm" @onclick="() => ShareAsync(u.Id)" disabled="@(_d.Topic.LatestVersion == 0)">Freigeben</button>
+                            <button class="btn btn-ghost btn-sm" @onclick="() => AssignAsync(u.Id)" disabled="@(_d.Topic.LatestVersion == 0)">Zuweisen</button></li>
+                    }
+                </ul>
+            }
+            <h3>Freigegeben für</h3>
+            @if (_shares.Count == 0) { <p class="muted">Niemand.</p> }
+            <ul class="topic-questions">
+                @foreach (var s in _shares)
+                {
+                    <li><span>@s.UserName</span><button class="btn btn-ghost btn-sm" @onclick="() => RevokeShareAsync(s.UserId)">Widerrufen</button></li>
+                }
+            </ul>
+            <h3>Zugewiesen an (Bearbeitungsstand)</h3>
+            @if (_assignments.Count == 0) { <p class="muted">Niemand.</p> }
+            <ul class="topic-questions">
+                @foreach (var a in _assignments)
+                {
+                    <li>
+                        <span><strong>@a.UserName</strong> — @(a.Progress is null ? "noch kein Fortschritt" : $"{a.Progress.ModulesCompleted}/{a.Progress.ModulesTotal} Module abgeschlossen, Modulprüfungen {a.Progress.ModuleExamsPassed}/{a.Progress.ModuleExamsTotal}, Abschlussprüfung {(a.Progress.FinalExamPassed ? "bestanden" : a.Progress.FinalExamAvailable ? "verfügbar" : "offen")}, Version {a.Progress.Version}")</span>
+                        <button class="btn btn-ghost btn-sm" @onclick="() => UnassignAsync(a.UserId)">Zurücknehmen</button>
+                    </li>
+                }
+            </ul>
+        </div>
+
+        @* ─── Versionen ─── *@
+        <div class="card panel">
+            <h2 class="panel-title">Versionen und Veröffentlichung</h2>
+            @if (_d.UnpublishedChanges)
+            {
+                <div class="alert alert-info" role="status">
+                    ⚠️ Es gibt unveröffentlichte Änderungen@(_d.ChangedModuleNames.Count > 0 ? " (geänderte Module: " + string.Join(", ", _d.ChangedModuleNames) + ")" : "").
+                    Die zuletzt veröffentlichte Version bleibt bis zur Veröffentlichung unverändert.
+                </div>
+            }
+            else if (_versions.Count > 0)
+            {
+                <p class="muted">Der Entwurf entspricht Version @_versions[0].VersionNumber.</p>
+            }
+            @foreach (var w in _d.Warnings) { <div class="alert alert-error" role="status">⚠️ @w</div> }
+            <div class="page-head-actions topic-actions">
+                <button class="btn btn-primary" @onclick="() => PublishAsync(false)" disabled="@(_busy || _d.Topic.Status == "archived")">Neue Version veröffentlichen</button>
+                <button class="btn btn-ghost" @onclick="() => PublishAsync(true)" disabled="@(_busy || _d.Topic.Status == "archived")" title="Veröffentlicht die Version und reicht sie zur globalen Freigabe ein">Veröffentlichen und global einreichen</button>
+            </div>
+            @if (_versions.Count > 0)
+            {
+                <div class="table-wrap">
+                    <table class="table">
+                        <caption class="sr-only">Versionshistorie</caption>
+                        <thead><tr><th>Version</th><th>Veröffentlicht</th><th>Module</th><th>Karten</th><th>Fragen</th><th>Global</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var v in _versions)
+                            {
+                                <tr>
+                                    <td>@v.VersionNumber</td>
+                                    <td>@v.PublishedAt?.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                                    <td>@v.Stats.Modules</td><td>@v.Stats.Cards</td><td>@v.Stats.ChoiceQuestions MC · Abschluss @v.Stats.FinalExamQuestions</td>
+                                    <td>@GlobalLabel(v)</td>
+                                    <td class="actions">
+                                        <a class="btn btn-ghost btn-sm" href="/topics/@Id?version=@v.VersionNumber">Ansehen</a>
+                                        @if (v.GlobalStatus is "none" or "rejected")
+                                        {
+                                            <button class="btn btn-ghost btn-sm" @onclick="() => SubmitGlobalAsync(v.VersionNumber)">Global einreichen</button>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public string Id { get; set; } = "";
+
+    private TopicDetail? _d;
+    private TopicExamConfig? _cfg;
+    private List<TopicQuestion> _questions = new();
+    private List<TopicShareInfo> _shares = new();
+    private List<TopicAssignmentInfo> _assignments = new();
+    private List<TopicVersionInfo> _versions = new();
+    private List<ModuleInfo> _addable = new();
+    private List<UserSearchResult> _userResults = new();
+    private string _name = "", _description = "", _moduleQuery = "", _userQuery = "";
+    private string _qText = "", _qOptions = "", _qType = "single_choice", _qCorrect = "", _qExplanation = "";
+    private bool _loading = true, _busy, _error;
+    private string? _message;
+    private string _userId = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _userId = auth.User.GetUserId() ?? throw new UnauthorizedAccessException();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _d = await Topics.GetDetailAsync(_userId, Id);
+            if (!_d.IsOwner) { _d = null; return; }
+            _name = _d.Topic.Name; _description = _d.Topic.Description;
+            _cfg = await Topics.GetExamConfigAsync(_userId, Id);
+            _questions = await Topics.ListQuestionsAsync(_userId, Id);
+            _shares = await Topics.ListSharesAsync(_userId, Id);
+            _assignments = await Topics.ListAssignmentsAsync(_userId, Id);
+            _versions = await Topics.ListVersionsAsync(_userId, Id);
+            await SearchModulesAsync();
+        }
+        catch (KeyNotFoundException) { _d = null; }
+        finally { _loading = false; }
+    }
+
+    private static string GlobalLabel(TopicVersionInfo v) => v.GlobalStatus switch
+    {
+        "active" => "aktiv", "pending_approval" => "Freigabe offen", "superseded" => "ersetzt", "rejected" => "abgelehnt" + (v.DecisionReason.Length > 0 ? $" ({v.DecisionReason})" : ""), "deactivated" => "zurückgenommen", _ => "—",
+    };
+
+    /// <summary>Führt eine Aktion aus, zeigt Erfolg bzw. die verständliche Fehlermeldung des Services und lädt neu.</summary>
+    private async Task RunAsync(Func<Task> action, string ok, bool reload = true)
+    {
+        _busy = true; _message = null;
+        try { await action(); _message = ok; _error = false; if (reload) await LoadAsync(); }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException or UnauthorizedAccessException) { _message = ex.Message; _error = true; }
+        _busy = false;
+    }
+
+    private string? _pendingJson, _pendingJsonName;
+
+    private async Task PickDefinitionAsync(InputFileChangeEventArgs e)
+    {
+        _message = null; _pendingJson = null;
+        try
+        {
+            using var reader = new StreamReader(e.File.OpenReadStream(maxAllowedSize: 28 * 1024 * 1024));
+            var text = await reader.ReadToEndAsync();
+            TopicService.ParseDefinition(text);   // nur prüfen; geändert wird erst nach Bestätigung
+            _pendingJson = text; _pendingJsonName = e.File.Name;
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException) { _message = ex.Message; _error = true; }
+    }
+
+    private async Task ApplyDefinitionAsync()
+    {
+        var json = _pendingJson; _pendingJson = null;
+        if (json is not null) await RunAsync(() => Topics.UpdateFromDefinitionAsync(_userId, Id, json), "Entwurf aus der JSON-Definition aktualisiert. Es wurde nichts veröffentlicht.");
+    }
+
+    private Task ReplaceWithCloneAsync(string moduleId) => RunAsync(() => Topics.ReplaceWithOwnCloneAsync(_userId, Id, moduleId), "Das globale Modul wurde durch eine eigene Kopie ersetzt.");
+
+    private Task SaveGeneralAsync() => RunAsync(() => Topics.UpdateAsync(_userId, Id, _name, _description), "Gespeichert.");
+    private Task ArchiveAsync(bool archived) => RunAsync(() => Topics.SetArchivedAsync(_userId, Id, archived), archived ? "Thema archiviert." : "Archivierung aufgehoben.");
+    private async Task DuplicateAsync()
+    {
+        try { var copy = await Topics.DuplicateAsync(_userId, Id); Nav.NavigateTo($"/topics/{copy.Id}/edit"); }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) { _message = ex.Message; _error = true; }
+    }
+
+    private async Task SearchModulesAsync()
+    {
+        try { _addable = await Topics.SearchAddableModulesAsync(_userId, Id, _moduleQuery); } catch (Exception ex) when (ex is InvalidOperationException) { _addable = new(); }
+    }
+    private Task AddModuleAsync(string moduleId) => RunAsync(() => Topics.AddModuleAsync(_userId, Id, moduleId), "Modul hinzugefügt.");
+    private Task RemoveModuleAsync(string moduleId) => RunAsync(async () => { await Topics.RemoveModuleAsync(_userId, Id, moduleId); }, "Modul entfernt.");
+    private Task MoveAsync(int index, int delta)
+    {
+        var ids = _d!.Modules.Select(m => m.ModuleId).ToList();
+        var target = index + delta;
+        if (target < 0 || target >= ids.Count) return Task.CompletedTask;
+        (ids[index], ids[target]) = (ids[target], ids[index]);
+        return RunAsync(() => Topics.ReorderModulesAsync(_userId, Id, ids), "Reihenfolge gespeichert.");
+    }
+
+    private Task SaveExamsAsync() => RunAsync(async () => { _cfg = await Topics.SaveExamConfigAsync(_userId, Id, _cfg!); }, "Prüfungskonfiguration gespeichert.");
+
+    private Task AddQuestionAsync()
+    {
+        var options = _qOptions.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        var correct = _qCorrect.Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries).Select(c => int.TryParse(c, out var n) ? n - 1 : -1).ToList();
+        return RunAsync(async () =>
+        {
+            await Topics.CreateQuestionAsync(_userId, Id, new QuizQuestionInput { Type = _qType, Question = _qText, Options = _qType == "free_text" ? new() : options, CorrectIndexes = _qType == "free_text" ? new() : correct, Explanation = _qExplanation });
+            _qText = _qOptions = _qCorrect = _qExplanation = "";
+        }, "Frage hinzugefügt.");
+    }
+    private Task DeleteQuestionAsync(string questionId) => RunAsync(async () => { await Topics.DeleteQuestionAsync(_userId, Id, questionId); }, "Frage entfernt.");
+
+    private async Task SearchUsersAsync() => _userResults = _userQuery.Trim().Length >= 3 ? await Topics.SearchUsersAsync(_userId, _userQuery) : new();
+    private Task ShareAsync(string userId) => RunAsync(() => Topics.GrantShareAsync(_userId, Id, userId), "Thema freigegeben.");
+    private Task AssignAsync(string userId) => RunAsync(() => Topics.AssignAsync(_userId, Id, userId), "Thema zugewiesen.");
+    private Task RevokeShareAsync(string userId) => RunAsync(async () => { await Topics.RevokeShareAsync(_userId, Id, userId); }, "Freigabe widerrufen.");
+    private Task UnassignAsync(string userId) => RunAsync(async () => { await Topics.UnassignAsync(_userId, Id, userId); }, "Zuweisung zurückgenommen.");
+
+    private Task PublishAsync(bool global) => RunAsync(async () => { await Topics.PublishAsync(_userId, Id, global); }, global ? "Version veröffentlicht und zur globalen Freigabe eingereicht." : "Neue Version veröffentlicht.");
+    private Task SubmitGlobalAsync(int version) => RunAsync(() => Topics.SubmitGlobalAsync(_userId, Id, version), $"Version {version} zur globalen Freigabe eingereicht.");
+}

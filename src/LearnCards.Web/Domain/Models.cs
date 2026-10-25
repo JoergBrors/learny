@@ -20,6 +20,8 @@ public class ModuleInfo
     /// <summary>"staged" (eingereicht, nicht lernbar), "active", "superseded" (durch neuere Version ersetzt) oder "deactivated".</summary>
     public string? GlobalStatus { get; set; }
     public string? SourceModuleId { get; set; }
+    /// <summary>Stabile Referenz (GUID) eines eigenen Moduls für portable JSON-Definitionen (ADR 0028); überlebt Umbenennen, wird bei Klonen neu vergeben. Wird bei Bedarf vergeben.</summary>
+    public string? ReferenceId { get; set; }
     public string? SourceOwnerUserId { get; set; }
     public string? SourceOwnerName { get; set; }
     public DateTime? PublishedAt { get; set; }

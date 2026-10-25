@@ -34,7 +34,7 @@ public partial class CardRepository
 
     private const string ModuleColumns =
         "m.id, m.name, m.description, m.icon, m.color, m.owner_user_id, m.scope, m.publication_id, m.global_version, m.global_status, " +
-        "m.source_module_id, m.source_owner_user_id, m.source_owner_name, m.published_at, m.created_at, m.updated_at";
+        "m.source_module_id, m.source_owner_user_id, m.source_owner_name, m.reference_id, m.published_at, m.created_at, m.updated_at";
 
     private const string ModuleSelect =
         "SELECT " + ModuleColumns + ", COUNT(c.id) AS card_count, SUM(CASE WHEN c.archived = 0 THEN 1 ELSE 0 END) AS active_count " +
@@ -104,6 +104,7 @@ public partial class CardRepository
         var deleted = await _db.ExecuteAsync("DELETE FROM modules WHERE id = @id AND owner_user_id = @owner",
             new (string, object?)[] { ("id", id), ("owner", ownerId) });
         if (deleted > 0) await _images.CleanupOrphansAsync(imageRefs);   // Binärdaten ohne weitere Verweise entfernen (Kopien/Freigaben behalten ihre)
+        if (deleted > 0) await _db.ExecuteAsync("DELETE FROM topic_modules WHERE module_id = @id", new[] { ("id", (object?)id) });   // nur die Zuordnung zu Themenentwürfen; veröffentlichte Versionen behalten ihre eingefrorenen Kopien (ADR 0027)
         return deleted;
     }
 
@@ -604,6 +605,7 @@ public partial class CardRepository
         SourceModuleId = r.GetValueOrDefault("source_module_id"),
         SourceOwnerUserId = r.GetValueOrDefault("source_owner_user_id"),
         SourceOwnerName = r.GetValueOrDefault("source_owner_name"),
+        ReferenceId = r.GetValueOrDefault("reference_id") is { Length: > 0 } rid ? rid : null,
         PublishedAt = r.GetValueOrDefault("published_at") is { Length: > 0 } pa ? DbValue.ToDateTime(pa) : null,
         CreatedAt = DbValue.ToDateTime(r.GetValueOrDefault("created_at")),
         UpdatedAt = DbValue.ToDateTime(r.GetValueOrDefault("updated_at")),

@@ -1,0 +1,49 @@
+{
+  "format": "learny-topic",
+  "schema_version": 1,
+  "name": "Beispielthema",
+  "description": "Lernpfad aus eigenen Modulen mit Modul- und Abschlussprüfung. Das Modul „Beispielmodul“ lässt sich mit module-template.json importieren.",
+  "modules": [
+    {
+      "module_ref": "7d2c5e0a-3b1f-4c6d-9a8e-2f4b6c8d0e11",
+      "module_name": "Beispielmodul",
+      "sort_order": 1,
+      "exam": {
+        "enabled": true,
+        "question_count": 2,
+        "pass_percent": 60,
+        "allow_retry": true,
+        "single_choice": true,
+        "multiple_response": true,
+        "free_text": false,
+        "min_percent_for_next": 0
+      }
+    }
+  ],
+  "exam_config": {
+    "final_exam": {
+      "enabled": true,
+      "question_count": 3,
+      "pass_percent": 70,
+      "distribution": "even",
+      "include_topic_questions": true,
+      "single_choice": true,
+      "multiple_response": true,
+      "free_text": false,
+      "unlock": {
+        "require_all_modules_completed": false,
+        "require_module_exams_passed": true
+      }
+    }
+  },
+  "topic_questions": [
+    {
+      "type": "single_choice",
+      "question": "Welcher Dienst liefert die Identität für Microsoft 365?",
+      "options": ["Microsoft Entra ID", "Paint", "Notepad", "Taskleiste"],
+      "correct_indexes": [0],
+      "explanation": "Microsoft Entra ID verwaltet Identitäten und Anmeldungen.",
+      "active": true
+    }
+  ]
+}

@@ -31,6 +31,15 @@ if (runTasks.Count == 0)
 
 await Task.WhenAll(runTasks);
 
+static JsonObject? ParseJsonObject(string? text)
+{
+    if (string.IsNullOrWhiteSpace(text)) return null;
+    try { return JsonNode.Parse(text) as JsonObject; } catch (System.Text.Json.JsonException) { return null; }
+}
+
+static string TopicResult(string what, JsonNode? topic) =>
+    $"{what}: \"{topic?["name"]?.GetValue<string>()}\" (id: {topic?["id"]?.GetValue<string>()}). Nothing was published; check the result with get_topic.";
+
 static void RegisterCoreTools(McpServerEngine engine, LearnCardsApiClient api, McpSettings settings)
 {
     engine.RegisterTool(
@@ -142,6 +151,244 @@ static void RegisterCoreTools(McpServerEngine engine, LearnCardsApiClient api, M
                     return $"• {m?["name"]?.GetValue<string>()} [{context}{owner}{version}] — {m?["active_count"]?.GetValue<int>()} active / {m?["card_count"]?.GetValue<int>()} total cards (id: {m?["id"]?.GetValue<string>()})";
                 });
                 return new ToolCallResult(string.Join("\n", lines));
+            }
+            catch (McpApiException ex) { return new ToolCallResult($"API error {ex.StatusCode}: {ex.Message}", true); }
+        });
+
+    // ─── Themen (ADR 0027): nur lesend, im Kontext des angemeldeten Benutzers ───
+    engine.RegisterTool(
+        new ToolDefinition("list_topics",
+            "List the topics (learning paths of several modules with exams) this connection may use: your own, shared with you, assigned to you and global topics, with module, card and question counts.",
+            """
+            {
+              "type": "object",
+              "properties": {
+                "include_archived": {"type": "boolean", "default": false}
+              }
+            }
+            """),
+        async (args, ct) =>
+        {
+            try
+            {
+                var archived = args["include_archived"]?.GetValue<bool>() == true ? "true" : "false";
+                if (await api.GetAsync($"topics/?include_archived={archived}", ct) is not JsonObject overview) return new ToolCallResult("No topics found.");
+                var lines = new List<string>();
+                foreach (var (section, label) in new[] { ("own", "own"), ("shared", "shared with you"), ("assigned", "assigned to you"), ("global", "global") })
+                    foreach (var t in overview[section]?.AsArray() ?? new JsonArray())
+                    {
+                        var topic = t?["topic"]; var stats = t?["stats"];
+                        lines.Add($"• {topic?["name"]?.GetValue<string>()} [{label}, version {t?["version"]?.GetValue<int>()}] — {stats?["modules"]?.GetValue<int>()} modules, {stats?["cards"]?.GetValue<int>()} cards, {stats?["choice_questions"]?.GetValue<int>()} multiple-choice questions, final exam {stats?["final_exam_questions"]?.GetValue<int>()} questions (id: {topic?["id"]?.GetValue<string>()})");
+                    }
+                return new ToolCallResult(lines.Count == 0 ? "No topics found." : string.Join("\n", lines));
+            }
+            catch (McpApiException ex) { return new ToolCallResult($"API error {ex.StatusCode}: {ex.Message}", true); }
+        });
+
+    engine.RegisterTool(
+        new ToolDefinition("get_topic",
+            "Get a topic you may read: description, version, status, the contained modules in learning order (with module ids) and counts. Without version: your draft (own topics) or the newest version you may learn.",
+            """
+            {
+              "type": "object",
+              "required": ["topic_id"],
+              "properties": {
+                "topic_id": {"type": "string"},
+                "version": {"type": "integer", "description": "Published version number (optional)"}
+              }
+            }
+            """),
+        async (args, ct) =>
+        {
+            try
+            {
+                var id = args["topic_id"]?.GetValue<string>() ?? "";
+                var version = args["version"]?.GetValue<int>() is int v && v > 0 ? $"?version={v}" : "";
+                if (await api.GetAsync($"topics/{Uri.EscapeDataString(id)}{version}", ct) is not JsonObject d) return new ToolCallResult("Topic not found.", true);
+                var lines = new List<string>
+                {
+                    $"{d["topic"]?["name"]?.GetValue<string>()} — {(d["version"]?.GetValue<int>() == 0 ? "draft" : "version " + d["version"]?.GetValue<int>())}, section {d["section"]?.GetValue<string>()}, global status {d["global_status"]?.GetValue<string>()}",
+                    d["topic"]?["description"]?.GetValue<string>() ?? "",
+                    $"Cards: {d["stats"]?["cards"]?.GetValue<int>()}, multiple-choice questions: {d["stats"]?["choice_questions"]?.GetValue<int>()}, final exam questions: {d["stats"]?["final_exam_questions"]?.GetValue<int>()}",
+                    "Modules (in order):",
+                };
+                foreach (var m in d["modules"]?.AsArray() ?? new JsonArray())
+                    lines.Add($"  {m?["position"]?.GetValue<int>() + 1}. {m?["name"]?.GetValue<string>()} — {m?["cards"]?.GetValue<int>()} cards, {m?["pool_questions"]?.GetValue<int>()} questions (module id: {m?["module_id"]?.GetValue<string>()})");
+                return new ToolCallResult(string.Join("\n", lines));
+            }
+            catch (McpApiException ex) { return new ToolCallResult($"API error {ex.StatusCode}: {ex.Message}", true); }
+        });
+
+    engine.RegisterTool(
+        new ToolDefinition("get_topic_exam_structure",
+            "Get the exam structure of a topic you may read: module exams (enabled, question count, pass percent, retries) and the final exam (question count, pass percent, distribution, unlock rules). Solutions are never returned.",
+            """
+            {
+              "type": "object",
+              "required": ["topic_id"],
+              "properties": {
+                "topic_id": {"type": "string"},
+                "version": {"type": "integer", "description": "Published version number (optional)"}
+              }
+            }
+            """),
+        async (args, ct) =>
+        {
+            try
+            {
+                var id = args["topic_id"]?.GetValue<string>() ?? "";
+                var version = args["version"]?.GetValue<int>() is int v && v > 0 ? $"?version={v}" : "";
+                if (await api.GetAsync($"topics/{Uri.EscapeDataString(id)}{version}", ct) is not JsonObject d) return new ToolCallResult("Topic not found.", true);
+                var lines = new List<string> { $"Exam structure of {d["topic"]?["name"]?.GetValue<string>()} ({(d["version"]?.GetValue<int>() == 0 ? "draft" : "version " + d["version"]?.GetValue<int>())}):" };
+                foreach (var m in d["modules"]?.AsArray() ?? new JsonArray())
+                {
+                    var e = m?["exam"];
+                    lines.Add(e?["enabled"]?.GetValue<bool>() == true
+                        ? $"  Module exam {m?["name"]?.GetValue<string>()}: {e?["question_count"]?.GetValue<int>()} questions, pass at {e?["pass_percent"]?.GetValue<int>()} %, retries {(e?["allow_retry"]?.GetValue<bool>() == true ? "allowed" : "not allowed")}"
+                        : $"  Module exam {m?["name"]?.GetValue<string>()}: not active");
+                }
+                var f = d["final_exam"];
+                lines.Add(f?["enabled"]?.GetValue<bool>() == true
+                    ? $"  Final exam: {f?["question_count"]?.GetValue<int>()} questions ({f?["distribution"]?.GetValue<string>()} distribution), pass at {f?["pass_percent"]?.GetValue<int>()} %, available pool {d["stats"]?["final_exam_pool"]?.GetValue<int>()} questions"
+                    : "  Final exam: not active");
+                return new ToolCallResult(string.Join("\n", lines));
+            }
+            catch (McpApiException ex) { return new ToolCallResult($"API error {ex.StatusCode}: {ex.Message}", true); }
+        });
+
+    // ─── Themen- und Modulverwaltung per JSON (ADR 0028): nur eigene Themenentwürfe und eigene private Module ───
+    engine.RegisterTool(
+        new ToolDefinition("get_topic_import_schema",
+            "Return the live JSON schema, rules and an example of the portable topic definition (format learny-topic). Call this before create_topic, update_topic or import_topic. Do not invent fields that are not in the schema.",
+            """{"type": "object", "properties": {}}"""),
+        async (_, ct) =>
+        {
+            try { return new ToolCallResult((await api.GetAsync("schema/import/topic", ct))?.ToJsonString(new() { WriteIndented = true }) ?? "{}"); }
+            catch (McpApiException ex) { return new ToolCallResult($"API error {ex.StatusCode}: {ex.Message}", true); }
+        });
+
+    engine.RegisterTool(
+        new ToolDefinition("get_module_import_schema",
+            "Return the live JSON schema, rules and an example of the portable full module definition (format learny-module: cards with images and quiz, quiz configuration, extra pool questions). The plain card batch format stays available through get_import_schema.",
+            """{"type": "object", "properties": {}}"""),
+        async (_, ct) =>
+        {
+            try { return new ToolCallResult((await api.GetAsync("schema/import/module", ct))?.ToJsonString(new() { WriteIndented = true }) ?? "{}"); }
+            catch (McpApiException ex) { return new ToolCallResult($"API error {ex.StatusCode}: {ex.Message}", true); }
+        });
+
+    const string TopicDefinitionArg = """
+        {"type": "object", "description": "Portable topic definition, exactly as described by get_topic_import_schema (format 'learny-topic', schema_version 1). Modules are referenced by the name of one of YOUR OWN private modules (use list_modules). Global modules must be cloned first (clone_global_module).", "required": ["format", "schema_version", "name", "modules"]}
+        """;
+
+    engine.RegisterTool(
+        new ToolDefinition("create_topic",
+            "Create a NEW private topic (learning path) as a DRAFT from a validated JSON definition. Only your own private modules can be referenced (by name); nothing is published and nobody gets access. Fails without partial changes if the JSON, a module reference or an exam setting is invalid. Workflow: get_topic_import_schema → list_modules → create_topic → get_topic.",
+            "{\"type\": \"object\", \"required\": [\"definition\"], \"properties\": {\"definition\": " + TopicDefinitionArg + "}}"),
+        async (args, ct) =>
+        {
+            try
+            {
+                if (args["definition"] is not JsonObject def) return new ToolCallResult("'definition' (object) is required. Call get_topic_import_schema.", true);
+                return new ToolCallResult(TopicResult("Topic created as draft", await api.PostAsync("topics/import", def.DeepClone(), ct)));
+            }
+            catch (McpApiException ex) { return new ToolCallResult($"API error {ex.StatusCode}: {ex.Message}", true); }
+        });
+
+    engine.RegisterTool(
+        new ToolDefinition("import_topic",
+            "Import a portable topic definition given as JSON TEXT (for example the output of export_topic) and create a private DRAFT topic from it. Same rules and validation as create_topic. Definitions with embedded modules (export_topic with include_modules=true) create the modules as new private modules of yours.",
+            """
+            {"type": "object", "required": ["definition_json"], "properties": {"definition_json": {"type": "string", "description": "The complete learny-topic JSON document as text."}}}
+            """),
+        async (args, ct) =>
+        {
+            try
+            {
+                if (ParseJsonObject(args["definition_json"]?.GetValue<string>()) is not { } def) return new ToolCallResult("'definition_json' must be a JSON object as text.", true);
+                return new ToolCallResult(TopicResult("Topic imported as draft", await api.PostAsync("topics/import", def, ct)));
+            }
+            catch (McpApiException ex) { return new ToolCallResult($"API error {ex.StatusCode}: {ex.Message}", true); }
+        });
+
+    engine.RegisterTool(
+        new ToolDefinition("update_topic",
+            "Replace the DRAFT of one of YOUR OWN topics with a complete JSON definition (name, description, modules in order, exams, topic questions). Published versions are never changed and nothing is published — a new version only arises when the owner publishes in the web UI. Omitted modules are removed from the draft. On errors the previous draft stays untouched.",
+            "{\"type\": \"object\", \"required\": [\"topic_id\", \"definition\"], \"properties\": {\"topic_id\": {\"type\": \"string\"}, \"definition\": " + TopicDefinitionArg + "}}"),
+        async (args, ct) =>
+        {
+            try
+            {
+                var id = args["topic_id"]?.GetValue<string>() ?? "";
+                if (args["definition"] is not JsonObject def) return new ToolCallResult("'definition' (object) is required. Call get_topic_import_schema.", true);
+                return new ToolCallResult(TopicResult("Topic draft updated", await api.PutAsync($"topics/{Uri.EscapeDataString(id)}/definition", def.DeepClone(), ct)));
+            }
+            catch (McpApiException ex) { return new ToolCallResult($"API error {ex.StatusCode}: {ex.Message}", true); }
+        });
+
+    engine.RegisterTool(
+        new ToolDefinition("export_topic",
+            "Export one of YOUR OWN topics (draft) as a portable JSON definition: modules in order, module and final exams, topic questions. No ids, owners, versions, shares, assignments or results. With include_modules=true the complete module definitions (cards, images, quiz) are embedded.",
+            """
+            {"type": "object", "required": ["topic_id"], "properties": {"topic_id": {"type": "string"}, "include_modules": {"type": "boolean", "default": false}}}
+            """),
+        async (args, ct) =>
+        {
+            try
+            {
+                var id = args["topic_id"]?.GetValue<string>() ?? "";
+                var inc = args["include_modules"]?.GetValue<bool>() == true ? "true" : "false";
+                return new ToolCallResult((await api.GetAsync($"topics/{Uri.EscapeDataString(id)}/export?include_modules={inc}", ct))?.ToJsonString(new() { WriteIndented = true }) ?? "{}");
+            }
+            catch (McpApiException ex) { return new ToolCallResult($"API error {ex.StatusCode}: {ex.Message}", true); }
+        });
+
+    engine.RegisterTool(
+        new ToolDefinition("clone_global_module",
+            "Clone an active GLOBAL module into a new private module of yours ('Name (Kopie)') with all cards, images, card quiz questions and quiz configuration. The original stays unchanged and nothing is shared. Afterwards the copy can be used in topics.",
+            """
+            {"type": "object", "required": ["module_id"], "properties": {"module_id": {"type": "string", "description": "Id of a global module (list_modules with scope=global)."}}}
+            """),
+        async (args, ct) =>
+        {
+            try
+            {
+                var id = args["module_id"]?.GetValue<string>() ?? "";
+                var m = await api.PostAsync($"modules/{Uri.EscapeDataString(id)}/clone", new JsonObject(), ct);
+                return new ToolCallResult($"Cloned into your own module \"{m?["name"]?.GetValue<string>()}\" ({m?["card_count"]?.GetValue<int>()} cards, id: {m?["id"]?.GetValue<string>()}).");
+            }
+            catch (McpApiException ex) { return new ToolCallResult($"API error {ex.StatusCode}: {ex.Message}", true); }
+        });
+
+    engine.RegisterTool(
+        new ToolDefinition("export_module",
+            "Export one of YOUR OWN modules (or an active global module) as a complete portable JSON definition (format learny-module): cards with images, fixed quiz questions, quiz configuration and extra pool questions. Images are Base64 and can make the result very large.",
+            """
+            {"type": "object", "required": ["module_id"], "properties": {"module_id": {"type": "string"}}}
+            """),
+        async (args, ct) =>
+        {
+            try
+            {
+                var id = args["module_id"]?.GetValue<string>() ?? "";
+                return new ToolCallResult((await api.GetAsync($"modules/{Uri.EscapeDataString(id)}/export", ct))?.ToJsonString(new() { WriteIndented = true }) ?? "{}");
+            }
+            catch (McpApiException ex) { return new ToolCallResult($"API error {ex.StatusCode}: {ex.Message}", true); }
+        });
+
+    engine.RegisterTool(
+        new ToolDefinition("import_module",
+            "Create a NEW private module of yours from a complete module definition (format learny-module, see get_module_import_schema). Never overwrites an existing module (a name clash becomes 'Name (Import)'). All ids are new; the import is all-or-nothing. Use import_cards for plain card batches.",
+            """
+            {"type": "object", "required": ["definition"], "properties": {"definition": {"type": "object", "description": "learny-module definition, exactly as described by get_module_import_schema.", "required": ["format", "schema_version", "name", "cards"]}}}
+            """),
+        async (args, ct) =>
+        {
+            try
+            {
+                if (args["definition"] is not JsonObject def) return new ToolCallResult("'definition' (object) is required. Call get_module_import_schema.", true);
+                var m = await api.PostAsync("modules/import", def.DeepClone(), ct);
+                return new ToolCallResult($"Module \"{m?["name"]?.GetValue<string>()}\" created ({m?["card_count"]?.GetValue<int>()} cards, id: {m?["id"]?.GetValue<string>()}).");
             }
             catch (McpApiException ex) { return new ToolCallResult($"API error {ex.StatusCode}: {ex.Message}", true); }
         });

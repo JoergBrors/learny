@@ -34,6 +34,8 @@ Referenz dafür, *wie das System funktioniert und warum* — für Menschen und f
 | [0023](0023-secrets-und-badge-schluessel-unter-iis.md) | Geheimnisse und Badge-Schlüssel unter IIS (außerhalb des Webroots, Marker, fail-closed) | Akzeptiert (IIS-Test offen) |
 | [0024](0024-docker-hub-veroeffentlichung.md) | Veröffentlichung als Docker-Hub-Images mit Compose-Installationspaket | Akzeptiert (Erstveröffentlichung offen) |
 | [0026](0026-betriebsmodus-fail-closed.md) | Betriebsmodus fail closed: kein stiller Dev-Login, ENV_FILE verbindlich | Akzeptiert |
+| [0027](0027-themen-lernpfade-versionierung-und-abschlusspruefungen.md) | Themen, Lernpfade, Versionierung und Abschlussprüfungen | Teilweise ersetzt durch 0028 |
+| [0028](0028-themenmodule-json-und-mcp-verwaltung.md) | Eigene Themenmodule, portable JSON-Definitionen und MCP-Verwaltung von Themenentwürfen | Akzeptiert |
 | [0025](0025-sichere-speicherung-von-mcp-tokens.md) | Sichere Speicherung von MCP-Tokens, Codes und OAuth-Clients (Schutz bei Datenbankzugriff) | Akzeptiert und umgesetzt |
 
 Prüfberichte, die Anlass für ADRs sind, liegen unter [docs/reviews/](../reviews/) (aktuell: [Mehrbenutzer-Prüfbericht](../reviews/2026-10-24-mehrbenutzer-pruefbericht.md)).

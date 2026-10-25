@@ -260,3 +260,13 @@ siehe `src/LearnCards.Web/wwwroot/app.css`.
 ## MCP-Tokens und Schlüssel (ADR 0025)
 
 `MCP_TOKEN_KEY` ist eine **Pflichtvariable** (Base64, ≥ 32 Byte, `openssl rand -base64 32`; nur in `.env`/Geheimnisverwaltung): Er schützt MCP-Tokens, Einmal-Codes und gespeicherte OAuth-Clients in der Datenbank (HMAC, Zeilen-MAC, AES-256-GCM). Auch mit Zugriff auf PostgreSQL lassen sich so keine MCP-Zugänge ablesen, herstellen oder verändern. Siehe [ADR 0025](docs/adr/0025-sichere-speicherung-von-mcp-tokens.md).
+
+## Themen und Lernpfade
+
+Unter **Themen** (`/topics`) fasst du mehrere Lernmodule zu einem Lernpfad zusammen, legst Modulprüfungen und eine Abschlussprüfung fest, veröffentlichst unveränderliche Versionen und teilst oder weist Themen anderen Benutzern zu. Globale Themenversionen benötigen die Freigabe eines Administrators. Details: [ADR 0027](docs/adr/0027-themen-lernpfade-versionierung-und-abschlusspruefungen.md). MCP-Clients können Themen lesen (`list_topics`, `get_topic`, `get_topic_exam_structure`) und eigene Themenentwürfe per JSON verwalten (siehe unten, ADR 0028).
+
+### Module und Themen als JSON, Klonen und MCP
+
+- **Module** (`/`) enthalten Lernkarten und Quizfragen; **Themen** (`/topics`) sind Lernpfade aus *eigenen* Modulen. Globale Module lassen sich mit **In eigene Module klonen** in eine private Kopie überführen und dann in Themen verwenden.
+- Module sind vollständig als JSON exportier- und importierbar (`learny-module`: Karten, Bilder, Quiz, Konfiguration, Pool-Fragen); Themen als `learny-topic` (stabile Modulreferenz `module_ref` + Anzeigename, Reihenfolge, Prüfungen, Themenfragen, optional mit eingebetteten Modulen). Importe erzeugen private Objekte bzw. einen Themenentwurf und veröffentlichen nie. Schemas: `GET /api/schema/import/module` und `/api/schema/import/topic`; Vorlagen unter `/templates/module-template.json` und `/templates/topic-template.json`.
+- MCP-Werkzeuge: `get_topic_import_schema`, `create_topic`, `import_topic`, `update_topic`, `export_topic`, `get_module_import_schema`, `export_module`, `import_module`, `clone_global_module` (zusätzlich zu `list_topics`, `get_topic`, `get_topic_exam_structure`). Sie wirken nur auf eigene Inhalte; Veröffentlichen, Freigaben, Zuweisungen und Administration sind über MCP nicht möglich. Details: [ADR 0028](docs/adr/0028-themenmodule-json-und-mcp-verwaltung.md).

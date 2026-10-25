@@ -1,0 +1,235 @@
+@page "/topics/{Id}"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject TopicService Topics
+@inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthState
+
+<PageTitle>@(_detail?.Topic.Name ?? "Thema") — LearnCards</PageTitle>
+
+<div class="container">
+    @if (_loading)
+    {
+        <div class="spinner-wrap" aria-busy="true"><div class="spinner" role="status"></div></div>
+    }
+    else if (_detail is null)
+    {
+        <div class="empty-state">
+            <div class="empty-icon" aria-hidden="true">🧭</div>
+            <h1>Thema nicht gefunden</h1>
+            <p>@(_message ?? "Das Thema existiert nicht oder ist für dich nicht freigegeben.")</p>
+            <a class="btn btn-primary" href="/topics">Zu den Themen</a>
+        </div>
+    }
+    else
+    {
+        var d = _detail;
+        <div class="page-head">
+            <div>
+                <h1>@d.Topic.Name</h1>
+                <p class="topic-badges">
+                    @if (d.IsDraft) { <span class="badge badge-draft">Entwurf</span> } else { <span class="badge">Version @d.Version</span> }
+                    @if (d.GlobalStatus == "active") { <span class="badge badge-pass">global veröffentlicht</span> }
+                    else if (d.GlobalStatus == "pending_approval") { <span class="badge badge-warn">globale Freigabe offen</span> }
+                    @if (!d.IsOwner && d.Topic.OwnerName.Length > 0) { <span class="muted">von @d.Topic.OwnerName</span> }
+                </p>
+                @if (d.Topic.Description.Length > 0) { <p class="muted">@d.Topic.Description</p> }
+            </div>
+            <div class="page-head-actions">
+                <a class="btn btn-ghost" href="/topics">← Themen</a>
+                @if (d.IsOwner)
+                {
+                    <a class="btn btn-primary" href="/topics/@d.Topic.Id/edit">✏️ Bearbeiten</a>
+                }
+            </div>
+        </div>
+
+        @if (_message is not null)
+        {
+            <div class="alert @(_error ? "alert-error" : "alert-ok")" role="status">@_message</div>
+        }
+        @if (_progress is { NewerVersionAvailable: true })
+        {
+            <div class="alert alert-info" role="status">
+                Seit deinem letzten Besuch (Version @_progress.SeenVersion) gibt es eine neue Version (@_progress.Version).
+                Neue oder geänderte Module erscheinen erneut als offen; bisherige Prüfungsergebnisse bleiben erhalten.
+            </div>
+        }
+        @foreach (var w in d.Warnings)
+        {
+            <div class="alert alert-error" role="status">⚠️ @w</div>
+        }
+
+        @if (_versions.Count > 1 || (d.IsOwner && _versions.Count > 0))
+        {
+            <div class="form-row topic-versions">
+                <label for="ver">Ansicht</label>
+                <select id="ver" class="input" @onchange="e => ChangeVersion(e.Value?.ToString())">
+                    @if (d.IsOwner) { <option value="0" selected="@d.IsDraft">Entwurf (aktueller Stand)</option> }
+                    @foreach (var v in _versions)
+                    {
+                        <option value="@v.VersionNumber" selected="@(!d.IsDraft && d.Version == v.VersionNumber)">Version @v.VersionNumber (@(v.PublishedAt?.ToLocalTime().ToString("dd.MM.yyyy") ?? "—"))</option>
+                    }
+                </select>
+            </div>
+        }
+
+        <ul class="topic-stats topic-stats-big" aria-label="Umfang des Themas">
+            <li><strong>@d.Stats.Modules</strong> Module</li>
+            <li><strong>@d.Stats.Cards</strong> Lernkarten</li>
+            <li><strong>@d.Stats.ChoiceQuestions</strong> Multiple-Choice-Fragen</li>
+            <li><strong>@d.Stats.FinalExamQuestions</strong> Abschlussprüfungsfragen</li>
+        </ul>
+
+        @if (_progress is not null && !d.IsDraft)
+        {
+            <div class="card panel">
+                <h2 class="panel-title">Mein Fortschritt</h2>
+                <p>
+                    Module: <strong>@_progress.ModulesStarted</strong> begonnen · <strong>@_progress.ModulesCompleted</strong> von @_progress.ModulesTotal abgeschlossen ·
+                    Modulprüfungen: <strong>@_progress.ModuleExamsPassed</strong> von @_progress.ModuleExamsTotal bestanden ·
+                    Abschlussprüfung: <strong>@(!_progress.FinalExamEnabled ? "nicht vorgesehen" : _progress.FinalExamPassed ? "bestanden" : _progress.FinalExamAvailable ? "verfügbar" : "noch gesperrt")</strong>
+                </p>
+                <p class="muted">Letzte Aktivität: @(_progress.LastActivityAt?.ToLocalTime().ToString("dd.MM.yyyy HH:mm") ?? "—") · angezeigte Version: @_progress.Version</p>
+            </div>
+        }
+
+        @if (_session is not null)
+        {
+            <div class="card panel" id="exam">
+                <h2 class="panel-title">@_examTitle</h2>
+                <QuizRunner Session="_session" OnClose="CloseExamAsync" OnRestart="RestartExamAsync" OnSubmitted="OnSubmittedAsync" />
+            </div>
+        }
+        else
+        {
+            <h2 class="section-title">Lernpfad</h2>
+            <ol class="topic-path">
+                @foreach (var m in d.Modules)
+                {
+                    var mp = _progress?.Modules.FirstOrDefault(x => x.ModuleId == m.ModuleId);
+                    <li class="card panel topic-module @(m.Unavailable ? "topic-module-off" : "")">
+                        <div class="topic-module-head">
+                            <h3><span aria-hidden="true">@m.Icon</span> @m.Name</h3>
+                            @if (mp is { Completed: true }) { <span class="badge badge-pass">abgeschlossen</span> }
+                            else if (mp is { Started: true }) { <span class="badge">begonnen</span> }
+                            @if (m.Exam.Enabled) { <span class="badge @(mp is { ExamPassed: true } ? "badge-pass" : "")">Modulprüfung@(mp is { ExamPassed: true } ? " bestanden" : "")</span> }
+                        </div>
+                        @if (m.Description.Length > 0) { <p class="muted">@m.Description</p> }
+                        <p class="muted">
+                            @m.Cards Lernkarten · @m.PoolQuestions Fragen (@m.ChoiceQuestions Multiple Choice)
+                            @if (mp is not null) { <text> · gelernt: @mp.CardsChecked / @mp.Cards</text> }
+                            @if (mp?.ExamBestPercent is double best) { <text> · beste Modulprüfung: @best.ToString("0.#") %</text> }
+                        </p>
+                        @if (m.Exam.Enabled)
+                        {
+                            <p class="muted">Prüfung: @m.Exam.QuestionCount Fragen · bestanden ab @m.Exam.PassPercent % · @(m.Exam.AllowRetry ? "Wiederholung erlaubt" : "keine Wiederholung")@(m.Exam.MinPercentForNext > 0 ? $" · ab {m.Exam.MinPercentForNext} % wird das nächste Modul freigeschaltet" : "")</p>
+                        }
+                        @if (mp is { Unlocked: false }) { <p class="alert alert-info">🔒 @mp.UnlockHint</p> }
+                        <div class="topic-actions">
+                            @if (!m.Unavailable && (mp is null || mp.Unlocked))
+                            {
+                                <a class="btn btn-ghost btn-sm" href="/modules/@m.ModuleId">📖 Lernen</a>
+                            }
+                            @if (!d.IsDraft && m.Exam.Enabled && (mp is null || mp.Unlocked))
+                            {
+                                <button class="btn btn-primary btn-sm" @onclick="() => StartModuleExamAsync(m)" disabled="@_busy">📝 Modulprüfung starten</button>
+                            }
+                        </div>
+                    </li>
+                }
+            </ol>
+
+            @if (d.FinalExam.Enabled)
+            {
+                <div class="card panel topic-final">
+                    <h3>🎓 Abschlussprüfung</h3>
+                    <p class="muted">
+                        @d.FinalExam.QuestionCount Fragen aus allen Modulen@(d.FinalExam.IncludeTopicQuestions ? " und eigenen Themenfragen" : "") · bestanden ab @d.FinalExam.PassPercent % ·
+                        @(d.FinalExam.AllowRetry ? "Wiederholung erlaubt" : "keine Wiederholung") · verfügbarer Fragenpool: @d.Stats.FinalExamPool
+                    </p>
+                    @if (_progress is not null && !d.IsDraft)
+                    {
+                        @if (_progress.FinalExamAttempts > 0) { <p class="muted">Versuche: @_progress.FinalExamAttempts@(_progress.FinalExamBestPercent is double fb ? $" · bestes Ergebnis {fb:0.#} %" : "")@(_progress.FinalExamPassed ? " · bestanden ✔" : "")</p> }
+                        @if (!_progress.FinalExamAvailable) { <p class="alert alert-info">🔒 @_progress.FinalExamBlockedReason</p> }
+                        <button class="btn btn-primary" @onclick="StartFinalExamAsync" disabled="@(_busy || !_progress.FinalExamAvailable)">Abschlussprüfung starten</button>
+                    }
+                    else
+                    {
+                        <p class="muted">Die Abschlussprüfung ist erst in einer veröffentlichten Version startbar.</p>
+                    }
+                </div>
+            }
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public string Id { get; set; } = "";
+    [SupplyParameterFromQuery(Name = "version")] public int? Version { get; set; }
+
+    private TopicDetail? _detail;
+    private TopicProgress? _progress;
+    private List<TopicVersionInfo> _versions = new();
+    private QuizStartResponse? _session;
+    private string _examTitle = "";
+    private Func<Task>? _restart;
+    private bool _loading = true, _busy, _error;
+    private string? _message;
+    private string _userId = "";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _userId = auth.User.GetUserId() ?? throw new UnauthorizedAccessException();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true; _session = null; _message = null;
+        try
+        {
+            _detail = await Topics.GetDetailAsync(_userId, Id, Version);
+            _versions = _detail.IsOwner ? await Topics.ListVersionsAsync(_userId, Id) : new();
+            await ReloadProgressAsync();
+            if (!_detail.IsDraft) await Topics.MarkSeenAsync(_userId, Id, _detail.Version);
+        }
+        catch (KeyNotFoundException) { _detail = null; }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException) { _detail = null; _message = ex.Message; }
+        _loading = false;
+    }
+
+    private async Task ReloadProgressAsync()
+    {
+        _progress = _detail is null || _detail.IsDraft ? null : await Topics.GetProgressAsync(_userId, Id, _detail.Version);
+    }
+
+    private void ChangeVersion(string? value) => Nav.NavigateTo(int.TryParse(value, out var v) && v > 0 ? $"/topics/{Id}?version={v}" : $"/topics/{Id}");
+
+    private async Task StartModuleExamAsync(TopicModuleView m)
+    {
+        _examTitle = $"Modulprüfung: {m.Name}";
+        _restart = () => StartModuleExamAsync(m);
+        await RunAsync(() => Topics.StartModuleExamAsync(_userId, Id, m.ModuleId, _detail!.Version));
+    }
+
+    private async Task StartFinalExamAsync()
+    {
+        _examTitle = "Abschlussprüfung";
+        _restart = StartFinalExamAsync;
+        await RunAsync(() => Topics.StartFinalExamAsync(_userId, Id, _detail!.Version));
+    }
+
+    private async Task RunAsync(Func<Task<QuizStartResponse>> start)
+    {
+        _busy = true; _message = null;
+        try { _session = await start(); }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException) { _message = ex.Message; _error = true; }   // z. B. zu kleiner Fragenpool, gesperrt
+        _busy = false;
+    }
+
+    private async Task OnSubmittedAsync() => await ReloadProgressAsync();
+    private async Task CloseExamAsync() { _session = null; await ReloadProgressAsync(); }
+    private async Task RestartExamAsync() { _session = null; if (_restart is not null) await _restart(); }
+}

@@ -134,6 +134,8 @@ public sealed class PostgresDatabase : IDatabase
         await EnsureTableColumnAsync("modules", "source_owner_name", "TEXT NULL", ct);
         await EnsureTableColumnAsync("modules", "published_at", "TEXT NULL", ct);
         await EnsureTableColumnAsync("modules", "published_by", "TEXT NULL", ct);
+        await EnsureTableColumnAsync("modules", "reference_id", "TEXT NULL", ct);   // ADR 0028: stabile Modulreferenz für portable JSON-Definitionen
+        await ExecCoreAsync("CREATE UNIQUE INDEX IF NOT EXISTS ux_modules_owner_reference ON modules(owner_user_id, reference_id)", null, ct);
         await EnsureTableColumnAsync("quiz_results", "context", "TEXT NOT NULL DEFAULT 'private'", ct);
     }
 

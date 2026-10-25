@@ -1,0 +1,183 @@
+@page "/topics"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject TopicService TopicApi
+@inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthState
+
+<PageTitle>Themen — LearnCards</PageTitle>
+
+<div class="container">
+    <div class="page-head">
+        <div>
+            <h1>Themen</h1>
+            <p class="muted">Ein Thema fasst mehrere <strong>eigene Module</strong> zu einem Lernpfad mit Modulprüfungen und einer Abschlussprüfung zusammen.</p>
+        </div>
+        <div class="page-head-actions">
+            <a class="btn btn-ghost" href="/">← Module</a>
+            <label class="btn btn-ghost file-btn" title="Neues privates Thema aus einer learny-topic-Definition (Entwurf, keine Veröffentlichung)">
+                ⬆ Thema aus JSON erstellen
+                <InputFile OnChange="ImportJsonAsync" accept=".json" disabled="@_importing" />
+            </label>
+            <button class="btn btn-primary" @onclick="() => _showCreate = !_showCreate">＋ Neues Thema</button>
+        </div>
+    </div>
+
+    @if (_message is not null)
+    {
+        <div class="alert @(_error ? "alert-error" : "alert-ok")" role="status">@_message</div>
+    }
+
+    @if (_showCreate)
+    {
+        <div class="card panel create-module">
+            <h2 class="panel-title">Neues Thema anlegen</h2>
+            <div class="form-row">
+                <input class="input" placeholder="Name, z. B. Microsoft 365 Administration" maxlength="120" @bind="_newName" aria-label="Name des Themas" />
+                <input class="input" placeholder="Beschreibung (optional)" maxlength="2000" @bind="_newDescription" aria-label="Beschreibung" />
+                <button class="btn btn-primary" @onclick="CreateAsync" disabled="@string.IsNullOrWhiteSpace(_newName)">Anlegen</button>
+            </div>
+        </div>
+    }
+
+    <div class="tab-row" role="tablist" aria-label="Themenbereich wählen">
+        <button class="chip @(_tab == "own" ? "chip-active" : "")" role="tab" aria-selected="@(_tab == "own")" @onclick='() => _tab = "own"'>Meine Themen (@_overview.Own.Count)</button>
+        <button class="chip @(_tab == "shared" ? "chip-active" : "")" role="tab" aria-selected="@(_tab == "shared")" @onclick='() => _tab = "shared"'>Mit mir geteilt (@_overview.Shared.Count)</button>
+        <button class="chip @(_tab == "assigned" ? "chip-active" : "")" role="tab" aria-selected="@(_tab == "assigned")" @onclick='() => _tab = "assigned"'>Mir zugewiesen (@_overview.Assigned.Count)</button>
+        <button class="chip @(_tab == "global" ? "chip-active" : "")" role="tab" aria-selected="@(_tab == "global")" @onclick='() => _tab = "global"'>Globale Themen (@_overview.Global.Count)</button>
+        @if (_tab == "own")
+        {
+            <label class="chip-check"><input type="checkbox" checked="@_archived" @onchange="async e => { _archived = (bool)(e.Value ?? false); await LoadAsync(); }" /> Archivierte anzeigen</label>
+        }
+    </div>
+
+    @if (_loading)
+    {
+        <div class="spinner-wrap" aria-busy="true"><div class="spinner" role="status"></div></div>
+    }
+    else if (Current.Count == 0)
+    {
+        <div class="empty-state">
+            <div class="empty-icon" aria-hidden="true">🧭</div>
+            <h2>@EmptyTitle</h2>
+            <p>@EmptyText</p>
+        </div>
+    }
+    else
+    {
+        <div class="module-grid">
+            @foreach (var t in Current)
+            {
+                <a class="module-card topic-card" href="/topics/@t.Topic.Id" aria-label="@($"Thema {t.Topic.Name} öffnen")">
+                    <h2>@t.Topic.Name</h2>
+                    @if (t.Topic.Description.Length > 0)
+                    {
+                        <p class="muted topic-desc">@t.Topic.Description</p>
+                    }
+                    <p class="topic-badges">
+                        @if (t.Version > 0) { <span class="badge">Version @t.Version</span> } else { <span class="badge badge-draft">Entwurf</span> }
+                        @if (t.Topic.Status == "archived") { <span class="badge badge-draft">archiviert</span> }
+                        @if (t.Section == "own" && t.Topic.HasUnpublishedChanges) { <span class="badge badge-warn">unveröffentlichte Änderungen</span> }
+                        @if (t.GlobalStatus == "active") { <span class="badge badge-pass">global</span> }
+                        else if (t.GlobalStatus == "pending_approval") { <span class="badge badge-warn">Freigabe offen</span> }
+                        else if (t.GlobalStatus == "rejected") { <span class="badge badge-warn">global abgelehnt</span> }
+                        @if (t.NewerVersionAvailable) { <span class="badge badge-warn">neue Version verfügbar</span> }
+                        @if (t.Section != "own" && t.Topic.OwnerName.Length > 0) { <span class="muted">von @t.Topic.OwnerName</span> }
+                    </p>
+                    <ul class="topic-stats" aria-label="Umfang">
+                        <li><strong>@t.Stats.Modules</strong> Module</li>
+                        <li><strong>@t.Stats.Cards</strong> Lernkarten</li>
+                        <li><strong>@t.Stats.ChoiceQuestions</strong> Multiple-Choice-Fragen</li>
+                        <li><strong>@t.Stats.FinalExamQuestions</strong> Abschlussprüfungsfragen</li>
+                    </ul>
+                    @if (t.Progress is { } p)
+                    {
+                        <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="@p.ModulesTotal" aria-valuenow="@p.ModulesCompleted" aria-label="Lernfortschritt">
+                            <div class="progress-fill" style="width:@(p.ModulesTotal == 0 ? 0 : p.ModulesCompleted * 100 / p.ModulesTotal)%"></div>
+                        </div>
+                        <p class="progress-meta">@p.ModulesCompleted von @p.ModulesTotal Modulen abgeschlossen@(p.FinalExamPassed ? " · Abschlussprüfung bestanden" : "")</p>
+                    }
+                    @if (t.Section == "own" && (t.SharedWithCount > 0 || t.AssignedCount > 0))
+                    {
+                        <p class="muted">@t.SharedWithCount geteilt · @t.AssignedCount zugewiesen</p>
+                    }
+                    @if (t.Section == "own")
+                    {
+                        <span class="btn btn-ghost btn-sm" role="link">Öffnen</span>
+                    }
+                </a>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private TopicService.TopicOverview _overview = new();
+    private string _tab = "own";
+    private bool _loading = true;
+    private bool _showCreate;
+    private bool _archived;
+    private string _newName = "", _newDescription = "";
+    private string? _message;
+    private bool _error;
+    private string _userId = "";
+    private bool _importing;
+
+    private async Task ImportJsonAsync(InputFileChangeEventArgs e)
+    {
+        _importing = true; _message = null;
+        try
+        {
+            using var reader = new StreamReader(e.File.OpenReadStream(maxAllowedSize: 28 * 1024 * 1024));
+            var topic = await TopicApi.CreateFromDefinitionAsync(_userId, await reader.ReadToEndAsync());
+            Nav.NavigateTo($"/topics/{topic.Id}/edit");
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException or IOException) { Fail(ex.Message); }
+        _importing = false;
+    }
+
+    private List<TopicSummary> Current => _tab switch
+    {
+        "shared" => _overview.Shared, "assigned" => _overview.Assigned, "global" => _overview.Global, _ => _overview.Own,
+    };
+
+    private string EmptyTitle => _tab switch
+    {
+        "shared" => "Noch nichts mit dir geteilt", "assigned" => "Keine zugewiesenen Themen", "global" => "Noch keine globalen Themen", _ => "Noch kein Thema",
+    };
+
+    private string EmptyText => _tab switch
+    {
+        "shared" => "Themen, die andere Benutzer für dich freigeben, erscheinen hier.",
+        "assigned" => "Themen, die dir als Lernaufgabe zugewiesen werden, erscheinen hier.",
+        "global" => "Vom Administrator freigegebene Themen erscheinen hier.",
+        _ => "Lege ein Thema an und ordne deine Lernmodule zu.",
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _userId = auth.User.GetUserId() ?? throw new UnauthorizedAccessException();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try { _overview = await TopicApi.ListOverviewAsync(_userId, _archived); }
+        catch (Exception ex) when (ex is not OperationCanceledException) { Fail(ex.Message); }
+        _loading = false;
+    }
+
+    private async Task CreateAsync()
+    {
+        try
+        {
+            var topic = await TopicApi.CreateAsync(_userId, _newName, _newDescription);
+            Nav.NavigateTo($"/topics/{topic.Id}/edit");
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException) { Fail(ex.Message); }
+    }
+
+    private void Fail(string text) { _message = text; _error = true; }
+}

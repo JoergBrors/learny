@@ -184,3 +184,27 @@ Beide Dienste werden zusätzlich als öffentliche Docker-Hub-Images (`joergb23/l
 ## Schutz von MCP-Tokens bei Datenbankzugriff (ADR 0025)
 
 MCP-Tokens und Einmal-Codes liegen nur als HMAC (Schlüssel `MCP_TOKEN_KEY` aus der `.env`) mit Zeilen-MAC in der Datenbank; OAuth-Clients des MCP-Servers werden AES-256-GCM-verschlüsselt in `mcp_oauth_clients` gespeichert. Ein Angreifer mit Lese- und Schreibzugriff auf Postgres kann weder Tokens ablesen noch gültige herstellen oder Zugänge verändern (`McpTokenProtector`, `McpLinkService`, `McpOAuthClientStore`).
+
+## Themen, Lernpfade und Abschlussprüfungen
+
+Ein Thema ([ADR 0027](adr/0027-themen-lernpfade-versionierung-und-abschlusspruefungen.md)) ordnet bestehende Module in einer Reihenfolge zu (keine Duplikate), konfiguriert Modul- und Abschlussprüfungen und wird über „Veröffentlichen“ in unveränderliche Versionen eingefroren. Unveränderte Module teilen sich die eingefrorene Kopie (Inhalts-Hash), geänderte erhalten eine neue.
+
+```
+Entwurf (topics, topic_modules, topic_exam_configs) ─ Veröffentlichen ─► topic_versions ─► topic_version_modules ─► eingefrorene Modulkopien (scope=topic)
+Eigentümer ─► Freigabe / Zuweisung        Eigentümer ─► Einreichen ─► pending_approval ─► Administrator: freigeben | ablehnen
+Lernender ─► TopicPage ─► StartTopicExamSessionAsync ─► QuizService (Sitzung, Bewertung) ─► topic_exam_attempts ─► Fortschritt
+```
+
+Dienste: `TopicService` (+ `.Versions`, `.Exams`), `CardRepository.Topics`, `QuizService.Topics`; REST in `Api/TopicEndpoints.cs`; MCP liest (`list_topics`, `get_topic`, `get_topic_exam_structure`) und verwaltet eigene Entwürfe per JSON (ADR 0028). Es gibt keine zweite Quiz-Engine und keine Themenzertifikate.
+
+### Module und Themen als JSON, Klonen, MCP-Verwaltung (ADR 0028)
+
+Themenentwürfe enthalten ausschließlich **eigene private Module** (`TopicService.CanUseModuleInTopicAsync`, gleiche Prüfung für UI, REST, MCP und Import). Globale Module werden zuvor mit `ModuleTransferService.CloneGlobalAsync` in ein eigenes Modul geklont.
+
+```
+Modul ─ Export ─► learny-module (Karten+Bilder+Quiz+Konfiguration+Pool) ─ Import/Klonen ─► neues privates Modul (alles oder nichts)
+Thema (Entwurf) ─ Export ─► learny-topic (Modulnamen, Reihenfolge, Prüfungen, Themenfragen) ─ Import/Update ─► Entwurf (nie veröffentlicht)
+MCP-Werkzeug ─► REST (/api/topics/import, /api/topics/{id}/definition, /api/modules/import|clone|export) ─► dieselben Services
+```
+
+Schemas: `/api/schema/import/module`, `/api/schema/import/topic` (`Api/TransferSchema.cs`); Vorlagen: `wwwroot/templates/module-template.json`, `topic-template.json`. MCP-Tokens dürfen nur Themen importieren und den eigenen Entwurf aktualisieren (`TokenMayReadTopics`); Veröffentlichen, Freigaben, Zuweisungen und Administration bleiben gesperrt.

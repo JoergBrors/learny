@@ -96,3 +96,13 @@ Die Anwendung lädt unter Windows `winsqlite3.dll` (Systembibliothek) vor `sqlit
 ## MCP-Token-Schutz (ADR 0025)
 
 `McpTokenUnitTests` (M1–M44) prüfen mit direktem Datenbankzugriff: eingeschleuste Zeilen/Codes, geänderte `user_id`/Ablaufdaten/Widerrufe, getauschte Hashes, manipulierte oder kopierte OAuth-Client-Datensätze, Schlüsselrotation und -verlust, Umstellung und Ablauf des Altbestands sowie die Pflicht-Konfiguration von `MCP_TOKEN_KEY`. Der Ende-zu-Ende-Test startet den MCP-Server neu und prüft, dass ein registrierter Client bekannt bleibt. Die Integrationstests setzen `MCP_TOKEN_KEY` selbst (Testwert).
+
+## Themen (ADR 0027)
+
+`TopicE2ETests` (T1–T80, im Integrationstest-Lauf): Anlegen/Zuordnen/Reihenfolge, Mehrfachzuordnung ohne Duplikate, Fremdmodul-Regeln, Versionen (monoton, parallele Veröffentlichung, keine Version ohne Änderung, Hash-Wiederverwendung, Lernstand-Übernahme), Freigaben/Zuweisungen/Widerruf, Zugriffsschutz, globale Freigabe (einreichen, freigeben, ablehnen, Vorgängerversion bleibt aktiv, Zurücknahme), Prüfungskonfiguration und -durchführung (Verteilung, zu kleiner Pool, Wiederholung, Freischaltung, offline ohne OpenAI), Fortschritt, Audit, MCP (nur lesend, Token-Grenzen).
+Browser: `node tests/browser/topics-browser-check.js <Ausgabeordner> <LearnCards.Web.dll> <Web-Projektordner>` (Chrome/Edge: Übersicht, Detail, Prüfung, Editor, Veröffentlichen, Desktop/Mobil, Hell/Dunkel, Fokus).
+
+## Themenmodule, JSON und MCP (ADR 0028)
+
+`TopicTransferTests` (T81–T132, laufen am Ende des Integrationstest-Laufs, weil sie ein globales Modul veröffentlichen): Themen nur aus eigenen Modulen (globale, geteilte, fremde und erfundene Modul-IDs bei manipulierten Anfragen), Klonen (Karten, Bild-Bytes, Quiz, Namenskonflikte, Original unverändert, nur aktive globale Module), Modul-JSON (Export/Import in einem anderen Benutzerkonto, Bild, Pool-Frage, Konfiguration, keine internen Bildfelder, 8 Fehlerfälle ohne Restmodul), Themen-JSON (Export ohne IDs, Import als Entwurf, fehlende/globale/fremde Module, eingebettete Module, 9 Fehlerfälle ohne Restthema), Entwurfsaktualisierung ohne neue Version (Version 1 bleibt unverändert, Version 2 nur durch Veröffentlichung, ältere Version weiter prüfbar), MCP (Schemas, create/update/export/import, Klonen, Modul-Export/-Import, fremde Entwürfe, gesperrte Aktionen, Dienstschlüssel ohne Datenzugriff, Audit).
+Im Block „Beispiele, Templates, Schema, MCP, Hilfe“ werden zusätzlich `module-template.json`, `topic-template.json` und die Schema-Beispiele importiert und gegen das Live-Schema geprüft.

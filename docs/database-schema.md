@@ -385,3 +385,22 @@ im 12-Schritte-Verfahren neu auf (Inline-`UNIQUE` auf `name` ist per `ALTER` nic
   (Azure: `require`); eine Verbindung, serialisiert, mit einmaligem Reconnect bei Verbindungsverlust.
 - Docker: Image `postgres:16-alpine`, Volume `postgres_data`. Konfiguration über `POSTGRES_HOST/PORT/USER/PASSWORD/DB`.
 - Backup/Restore liegt außerhalb der Anwendung (`pg_dump` auf Datenbankebene).
+
+### Themen (ADR 0027)
+
+Zehn Tabellen, alle über `CREATE TABLE IF NOT EXISTS` (SQLite und PostgreSQL), keine Änderung bestehender Tabellen; bewusst **ohne Fremdschlüssel auf `modules`** (Versionen überleben gelöschte Module).
+
+- **topics** — `id`, `owner_user_id`, `name` (unique je Eigentümer), `description`, `status` (`active|archived`), `draft_revision`, `published_revision`, Zeitstempel.
+- **topic_modules** — PK (`topic_id`, `module_id`), `sort_order`; ein Modul darf in mehreren Themen liegen. Index `ix_topic_modules_module`.
+- **topic_exam_configs** — `topic_id` (PK, FK → topics, `CASCADE`), `config_json` (Modulprüfungen + Abschlussprüfung).
+- **topic_questions** — eigene Themenfragen: `topic_id`, `options_json`, `correct_json`, `active` u. a. Index (`topic_id`, `active`).
+- **topic_versions** — `id`, `topic_id`, `version_number` (UNIQUE mit `topic_id`), `snapshot_json`, `global_status` (`none|pending_approval|active|superseded|rejected|deactivated`), `decision_reason`, Veröffentlichungs-/Entscheidungszeitpunkte. Index (`global_status`, `topic_id`).
+- **topic_version_modules** — PK (`version_id`, `module_id`): Zuordnung Version → eingefrorene Modulkopie mit `content_hash`. Index `ix_topic_version_modules_module`.
+- **topic_shares** — Freigabe an einen Benutzer (UNIQUE `topic_id`, `target_user_id`), Widerruf. Index (`target_user_id`, `revoked_at`).
+- **topic_assignments** — Zuweisung (UNIQUE `topic_id`, `user_id`), `assigned_by`, `assigned_at`, `status`. Index (`user_id`, `status`).
+- **topic_user_state** — PK (`topic_id`, `user_id`): zuletzt gesehene Version, `last_activity_at`.
+- **topic_exam_attempts** — Versuch ↔ Quizsitzung (`session_id` unique), Benutzer, Thema, Themenversion, Modul-/Abschlussprüfung. Indizes (`user_id`, `topic_id`) und (`topic_id`, `topic_version`).
+
+Eingefrorene Modulkopien liegen in `modules`/`cards` mit `scope='topic'` und ohne Eigentümer. Spaltendetails: `Data/Schema.cs` (`TopicStatements`).
+
+> **Hinweis (ADR 0028):** `modules.reference_id` (TEXT NULL) ist die stabile Modulreferenz (GUID) für Modul-/Themen-JSON; Unique-Index `ux_modules_owner_reference (owner_user_id, reference_id)`, wird beim ersten Export vergeben, Migration idempotent (SQLite `EnsureColumn`, PostgreSQL `EnsureTableColumnAsync`). Klonen, Import und die MCP-Themenverwaltung benötigen darüber hinaus **keine** Schemaänderung — sie verwenden die vorhandenen Tabellen (`modules`, `cards`, `card_images`, `quiz_questions`, `quiz_configs`, `topics*`). Importierte und geklonte Module sind gewöhnliche private Module; es entstehen keine neuen Spalten oder Tabellen.

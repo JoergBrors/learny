@@ -41,6 +41,8 @@ builder.Services.AddSingleton<McpTokenProtector>();   // ADR 0025
 builder.Services.AddSingleton<McpLinkService>();
 builder.Services.AddSingleton<McpOAuthClientStore>();
 builder.Services.AddSingleton<SharingService>();
+builder.Services.AddSingleton<ModuleTransferService>();   // Modul-JSON, Klonen (ADR 0028)
+builder.Services.AddSingleton<TopicService>();   // Themen (ADR 0027)
 // Zertifikate, Open Badges und Blockchain-Verankerung (ADR 0021/0022)
 builder.Services.AddSingleton<BadgeSigner>();
 builder.Services.AddSingleton<ChainSettingsStore>();

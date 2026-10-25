@@ -1,0 +1,68 @@
+{
+  "format": "learny-module",
+  "schema_version": 1,
+  "reference_id": "7d2c5e0a-3b1f-4c6d-9a8e-2f4b6c8d0e11",
+  "name": "Beispielmodul",
+  "description": "Vollständige Moduldefinition: Karten mit Bild und Quiz, Quizkonfiguration und eine zusätzliche Pool-Frage",
+  "icon": "📚",
+  "color": "#2AA79B",
+  "cards": [
+    {
+      "category": "Grundlagen",
+      "term": "Bedingter Zugriff",
+      "question": "Was steuert Bedingter Zugriff?",
+      "definition": "Richtlinien, die den Zugriff an **Bedingungen** knüpfen (Benutzer, Gerät, Standort, Risiko).",
+      "sort_order": 1,
+      "images": [
+        {
+          "mime_type": "image/png",
+          "data_base64": "iVBORw0KGgoAAAANSUhEUgAAACAAAAAQCAIAAAD4YuoOAAAAI0lEQVR42mPg94mhKWIAYq3ls2mERi0YtWDUglELRpIFNEUAOleXE3NVou0AAAAASUVORK5CYII=",
+          "alt_text": "Farbige Beispielfläche als Platzhalter für ein Diagramm",
+          "caption": "Platzhalter — data_base64 durch das eigene Bild ersetzen",
+          "sort_order": 1
+        }
+      ],
+      "quiz": [
+        {
+          "type": "single_choice",
+          "question": "Wofür steht Bedingter Zugriff?",
+          "options": ["Richtlinien für Zugriffsentscheidungen", "Ein Backup-Dienst", "Ein Druckertreiber", "Eine Lizenzart"],
+          "correct_index": 0,
+          "explanation": "Bedingter Zugriff wertet Signale aus und erzwingt Anforderungen."
+        }
+      ]
+    },
+    {
+      "category": "Grundlagen",
+      "term": "Mehrstufige Authentifizierung",
+      "question": "Welche Faktoren zählen zur Mehrstufigen Authentifizierung?",
+      "definition": "Mindestens zwei unabhängige Faktoren: Wissen, Besitz oder Merkmal.",
+      "sort_order": 2,
+      "quiz": [
+        {
+          "type": "multiple_response",
+          "question": "Welche Faktoren sind unabhängige Authentifizierungsfaktoren?",
+          "options": ["Kennwort", "Authenticator-App", "Zweites Kennwort", "Fingerabdruck"],
+          "correct_indexes": [0, 1, 3],
+          "explanation": "Ein zweites Kennwort ist kein unabhängiger Faktor."
+        }
+      ]
+    }
+  ],
+  "quiz_config": {
+    "enabled": true,
+    "question_count": 5,
+    "pass_percent": 60
+  },
+  "pool_questions": [
+    {
+      "type": "free_text",
+      "question": "Erkläre in einem Satz, wann Bedingter Zugriff sinnvoll ist.",
+      "options": [],
+      "correct_indexes": [],
+      "explanation": "Wenn der Zugriff von Kontext wie Gerät, Standort oder Risiko abhängen soll.",
+      "origin": "manual",
+      "active": true
+    }
+  ]
+}

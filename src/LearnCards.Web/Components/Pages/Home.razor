@@ -3,22 +3,23 @@
 @rendermode InteractiveServer
 @inject CardRepository Repo
 @inject CertificateService Certs
+@inject ModuleTransferService Transfer
 @inject NavigationManager Nav
 @inject AuthenticationStateProvider AuthState
 
-<PageTitle>Lernmodule — LearnCards</PageTitle>
+<PageTitle>Module — LearnCards</PageTitle>
 
 <div class="container">
     <div class="page-head">
         <div>
-            <h1>Lernmodule</h1>
-            <p class="muted">Willkommen, @_userName</p>
+            <h1>Module</h1>
+            <p class="muted">Willkommen, @_userName · Module enthalten Lernkarten und Quizfragen; mehrere Module bündelst du unter <a href="/topics">Themen</a> zu einem Lernpfad.</p>
         </div>
         <div class="page-head-actions">
             <a class="btn btn-ghost" href="/help">❓ Hilfe & Templates</a>
             <label class="btn btn-primary file-btn">
-                📥 JSON-Import
-                <InputFile OnChange="HandleImport" accept=".json" disabled="@_importing" />
+                📥 JSON importieren
+                <InputFile OnChange="HandleImport" accept=".json" disabled="@_importing" title="Karten-JSON (Kartenliste) oder vollständiges Modul-JSON (learny-module)" />
             </label>
             <button class="btn btn-ghost" @onclick="() => _showCreate = !_showCreate">＋ Neues Modul</button>
         </div>
@@ -53,6 +54,23 @@
                     <span>@_importProgressPercent%</span>
                 </div>
                 <div class="progress-track"><div class="progress-fill" style="width:@($"{_importProgressPercent}%")"></div></div>
+            </div>
+        </div>
+    }
+
+    @if (_pendingModule is not null)
+    {
+        <div class="card panel create-module">
+            <h2 class="panel-title">Modul-Import: @_importFileName</h2>
+            <p class="muted">
+                Modul „@_pendingModule.Name“ · @_pendingModule.Cards.Count Karten · @_pendingModule.Cards.Sum(c => c.Images?.Count ?? 0) Bilder ·
+                @_pendingModule.Cards.Sum(c => c.Quiz.Count) Kartenquizfragen · @_pendingModule.PoolQuestions.Count zusätzliche Pool-Fragen.
+                Es entsteht ein <strong>neues eigenes Modul</strong>; vorhandene Module werden nie überschrieben.
+            </p>
+            <div class="alert alert-ok" role="status">✅ Struktur und Inhalte sind gültig. Der Import wurde noch nicht ausgeführt.</div>
+            <div class="page-head-actions">
+                <button class="btn btn-primary" @onclick="ConfirmModuleImport" disabled="@_importing">Import bestätigen</button>
+                <button class="btn btn-ghost" @onclick="CancelModuleImport" disabled="@_importing">Verwerfen</button>
             </div>
         </div>
     }
@@ -136,6 +154,16 @@
                             {
                                 <span class="badge badge-@mod.Context">@(mod.Context == "shared" ? "Freigegeben" : "Global")</span>
                             }
+                            @if (_tab == "global")
+                            {
+                                <button class="btn btn-ghost btn-sm" @onclick:stopPropagation="true" @onclick="() => CloneAsync(mod)" disabled="@_cloning"
+                                        title="Erzeugt eine eigene private Kopie, die du bearbeiten und in Themen verwenden kannst">⧉ In eigene Module klonen</button>
+                            }
+                            @if (_tab != "shared")
+                            {
+                                <a class="btn btn-ghost btn-sm" href="/api/modules/@mod.Id/export" download="@(FileName(mod.Name)).json" @onclick:stopPropagation="true"
+                                   aria-label="@($"{mod.Name} als JSON exportieren")">⬇ Als JSON exportieren</a>
+                            }
                             else if (_pendingDeleteModuleId == mod.Id)
                             {
                                 <button class="btn btn-danger btn-sm" @onclick:stopPropagation="true" @onclick="() => ConfirmDeleteModule(mod.Id)">Löschen</button>
@@ -209,6 +237,11 @@
     private int _importProgressPercent;
     private string _importProgressLabel = "";
     private string? _pendingDeleteModuleId;
+    private ModuleDefinition? _pendingModule;
+    private string _pendingModuleJson = "";
+    private bool _cloning;
+
+    private static string FileName(string name) => new string(name.Select(ch => char.IsLetterOrDigit(ch) ? ch : '-').ToArray()).Trim('-').ToLowerInvariant();
 
     protected override async Task OnInitializedAsync()
     {
@@ -254,6 +287,15 @@
             using var stream = e.File.OpenReadStream(maxAllowedSize: 28 * 1024 * 1024);
             using var reader = new StreamReader(stream);
             var content = await reader.ReadToEndAsync();
+            if (LooksLikeModuleDefinition(content))
+            {
+                // vollständiges Modul-JSON (ADR 0028): validieren, Vorschau, erst nach Bestätigung importieren
+                _pendingModule = ModuleTransferService.Parse(content);
+                _pendingModuleJson = content;
+                _importFileName = e.File.Name;
+                _message = null;
+                return;
+            }
             var cards = Api.ApiEndpoints.ParseCardsJson(content);
             _pendingImportCards = cards;
             _importFileName = e.File.Name;
@@ -264,12 +306,68 @@
                 : "Analyse abgeschlossen: Import wegen Validierungsfehlern noch nicht freigegeben.";
             _messageOk = _importAnalysis.Errors.Count == 0;
         }
+        catch (IOException)
+        {
+            _message = "❌ Die Datei ist zu groß (höchstens 28 MB). Teile den Inhalt auf mehrere Dateien auf oder verwende kleinere Bilder.";
+            _messageOk = false;
+            CancelImport();
+            CancelModuleImport();
+        }
         catch (Exception ex)
         {
             _message = $"❌ Fehler: {ex.Message}";
             _messageOk = false;
             CancelImport();
+            CancelModuleImport();
         }
+    }
+
+    private static bool LooksLikeModuleDefinition(string content)
+    {
+        var head = content.AsSpan(0, Math.Min(content.Length, 4096));
+        return head.TrimStart().StartsWith("{") && head.Contains("\"learny-module\"", StringComparison.Ordinal);
+    }
+
+    private async Task ConfirmModuleImport()
+    {
+        if (_pendingModule is null) return;
+        _importing = true;
+        try
+        {
+            var module = await Transfer.ImportJsonAsync(_userId, _pendingModuleJson);
+            _message = $"✅ Modul „{module.Name}“ importiert ({module.ActiveCount} Karten).";
+            _messageOk = true;
+            CancelModuleImport();
+            _tab = "private";
+            await ReloadAsync();
+        }
+        catch (Exception ex) when (ex is ArgumentException or UnauthorizedAccessException or Services.ImageStorage.ImageStorageException)
+        {
+            _message = $"❌ {ex.Message}";
+            _messageOk = false;
+        }
+        finally { _importing = false; }
+    }
+
+    private void CancelModuleImport() { _pendingModule = null; _pendingModuleJson = ""; _importFileName = ""; }
+
+    private async Task CloneAsync(ModuleInfo source)
+    {
+        _cloning = true;
+        try
+        {
+            var clone = await Transfer.CloneGlobalAsync(_userId, source.Id);
+            _message = $"✅ „{source.Name}“ wurde als eigenes Modul „{clone.Name}“ geklont ({clone.ActiveCount} Karten) und kann jetzt in Themen verwendet werden.";
+            _messageOk = true;
+            _tab = "private";
+            await ReloadAsync();
+        }
+        catch (Exception ex) when (ex is ArgumentException or KeyNotFoundException or UnauthorizedAccessException or Services.ImageStorage.ImageStorageException)
+        {
+            _message = $"❌ {ex.Message}";
+            _messageOk = false;
+        }
+        finally { _cloning = false; }
     }
 
     private async Task ConfirmImport()

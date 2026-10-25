@@ -52,6 +52,8 @@ public sealed class SqliteDatabase : IDatabase
             EnsureColumn("mcp_links", "row_mac", "TEXT NOT NULL DEFAULT ''");
             EnsureColumn("mcp_link_codes", "key_id", "TEXT NOT NULL DEFAULT ''");
             EnsureColumn("mcp_link_codes", "row_mac", "TEXT NOT NULL DEFAULT ''");
+            EnsureColumn("modules", "reference_id", "TEXT NULL");   // ADR 0028: stabile Modulreferenz für portable JSON-Definitionen
+            ExecRaw("CREATE UNIQUE INDEX IF NOT EXISTS ux_modules_owner_reference ON modules(owner_user_id, reference_id)");
             MigrateOwnership();
             MigrateSharing();
         }

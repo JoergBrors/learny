@@ -9,13 +9,15 @@
         <Authorized>
             <header class="topbar">
                 <div class="topbar-inner">
-                    <a href="/" class="brand">
+                    <a href="/" class="brand" aria-label="LearnCards">
                         <span class="brand-mark" aria-hidden="true">
                             <svg viewBox="0 0 64 64" width="22" height="22"><rect x="6" y="10" width="52" height="44" rx="10" fill="currentColor"/><path d="M18 24h28M18 33h28M18 42h16" stroke="var(--surface)" stroke-width="4" stroke-linecap="round"/></svg>
                         </span>
                         <span>LearnCards</span>
                     </a>
                     <div class="topbar-actions">
+                        <a class="btn btn-ghost btn-sm" href="/" aria-label="Module">Module</a>
+                        <a class="btn btn-ghost btn-sm" href="/topics" aria-label="Themen">Themen</a>
                         <a class="btn btn-ghost btn-sm" href="/help">Hilfe</a>
                         @if (context.User.IsInRole(Roles.Admin))
                         {

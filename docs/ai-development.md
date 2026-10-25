@@ -9,6 +9,7 @@ umgesetzt werden. Der Rahmen besteht aus drei Ebenen:
 | Entscheidungen | [docs/adr/](adr/README.md) | *Warum* das System so ist, inkl. Leitplanken für Änderungen |
 | Überblick | [architecture.md](architecture.md), [database-schema.md](database-schema.md), [local-development.md](local-development.md), [testing.md](testing.md) | Struktur, Datenmodell, Betrieb, Tests |
 | Fachentscheidungen | [ADR 0015](adr/0015-freigaben-globale-lernmodule.md) | Freigaben, globale Module, Ergebniszuordnung |
+| Themen und JSON | [ADR 0027](adr/0027-themen-lernpfade-versionierung-und-abschlusspruefungen.md), [ADR 0028](adr/0028-themenmodule-json-und-mcp-verwaltung.md) | Themen aus eigenen Modulen, Klonen, Modul-/Themen-JSON, MCP-Werkzeuge für eigene Themenentwürfe |
 | Prüfungen | [docs/reviews/](reviews/) | Prüfberichte (z. B. [Mehrbenutzer](reviews/2026-10-24-mehrbenutzer-pruefbericht.md)) |
 
 Für einen vorgeschalteten Assistenten (ChatGPT-Projekt), der aus Wünschen fertige Aufträge für Codex/Claude Code erzeugt,

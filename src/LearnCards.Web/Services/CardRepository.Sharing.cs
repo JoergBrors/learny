@@ -25,6 +25,7 @@ public partial class CardRepository
     /// <item><b>private</b>: Eigentümer (Lesen und Ändern)</item>
     /// <item><b>shared</b>: aktive, nicht widerrufene Freigabe an diesen Benutzer (nur Lernen)</item>
     /// <item><b>global</b>: aktive globale Veröffentlichung (nur Lernen; Verwaltung nur über die Administration)</item>
+    /// <item><b>topic</b>: eingefrorene Modulkopie einer veröffentlichten Themenversion (nur Lernen und Prüfungen, ADR 0027)</item>
     /// </list>
     /// Alles andere (fremd, unveröffentlicht, eingereicht, ersetzt, deaktiviert) verhält sich wie „nicht vorhanden“ (null).
     /// </summary>
@@ -54,6 +55,13 @@ public partial class CardRepository
             module.Context = ContextGlobal;
             module.OwnerName = module.SourceOwnerName ?? "";
             return new ModuleAccess(module, ContextGlobal, CanEdit: false);
+        }
+
+        // Eingefrorene Modulkopie einer veröffentlichten Themenversion (ADR 0027): nur lernbar über Eigentum am Thema, Freigabe, Zuweisung oder aktive globale Version
+        if (module.Scope == ScopeTopic && await CanLearnTopicModuleAsync(userId, module.Id))
+        {
+            module.Context = ContextTopic;
+            return new ModuleAccess(module, ContextTopic, CanEdit: false);
         }
         return null;
     }

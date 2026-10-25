@@ -22,7 +22,7 @@ public sealed class QuizRuleException : InvalidOperationException
 /// (ohne Schlüssel bzw. bei KI-Fehler: lokale Stichwort-Heuristik als Offline-Fallback).
 /// </para>
 /// </summary>
-public class QuizService
+public partial class QuizService
 {
     private const int PageQuizCount = 3;
     private const double PointsPerQuestion = 10;
@@ -140,6 +140,9 @@ public class QuizService
         var module = access.Module;
         var config = await _pool.GetConfigAsync(module.Id, ct);
         var cardQuiz = !string.IsNullOrWhiteSpace(cardId);
+        // Themenprüfungen (ADR 0027) starten ausschließlich über das Thema (Konfiguration, Freischaltung, Versuchsbindung); modulweite Quizze über diesen Weg sind dort nicht vorgesehen
+        if (access.Context == CardRepository.ContextTopic && !cardQuiz)
+            throw new QuizRuleException("Prüfungen in Themen starten über die Themenseite (Modulprüfung bzw. Abschlussprüfung).", 403);
 
         if (!config.Enabled) throw new QuizRuleException("Das Quiz ist für dieses Modul deaktiviert.", 403);
         if (cardQuiz && config.Scope == QuizConfig.ScopeModule) throw new QuizRuleException("Für dieses Modul sind nur modulweite Quizze erlaubt.", 403);
@@ -376,6 +379,8 @@ public class QuizService
         // Ergebnisse dürfen nur auf Module/Karten verweisen, die der Benutzer lernen darf: eigene, freigegebene oder globale (ADR 0011/0015).
         var access = await _repo.ResolveModuleAccessAsync(userSub, req.ModuleId)
             ?? throw new InvalidOperationException("Das ausgewählte Modul wurde nicht gefunden.");
+        if (access.Context == CardRepository.ContextTopic && string.IsNullOrWhiteSpace(req.SessionId) && string.IsNullOrWhiteSpace(req.CardId))
+            throw new QuizRuleException("Themenprüfungen können nur über eine gestartete Prüfungssitzung abgegeben werden.", 400);
         if (!string.IsNullOrWhiteSpace(req.CardId)
             && (await _repo.GetReadableCardAsync(req.CardId, userSub) is not { } selected
                 || !string.Equals(selected.ModuleId, access.Module.Id, StringComparison.OrdinalIgnoreCase)))
@@ -496,8 +501,10 @@ public class QuizService
         };
         await _repo.SaveQuizResultAsync(record);
         result.ResultId = record.Id;
+        if (access.Context == CardRepository.ContextTopic) await _repo.CompleteTopicAttemptAsync(record);   // Prüfungsversuch mit Themenversion und Ergebnis verbinden (ADR 0027)
         // Abschlussnachweis (ADR 0021): nur nach bestandenem, sitzungsverifiziertem Modulquiz; die Bewertung selbst bleibt hier — ein Fehler darf das Ergebnis nie gefährden
-        if (passed && record.SessionId is not null && string.IsNullOrEmpty(record.CardId))
+        // Themenprüfungen stellen (noch) keine Zertifikate aus: Das Zertifikatsmodell (ADR 0021) kennt nur Module; eine Themenabschluss-Erweiterung ist in ADR 0027 vorbereitet
+        if (passed && record.SessionId is not null && string.IsNullOrEmpty(record.CardId) && access.Context != CardRepository.ContextTopic)
         {
             try
             {

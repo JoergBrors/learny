@@ -405,6 +405,163 @@ public static class Schema
                 updated_by  TEXT NULL
             )
             """;
+
+        // ─── Themen, Lernpfade, Versionierung und Abschlussprüfungen (ADR 0027) ───
+        // Absichtlich keine Fremdschlüssel auf modules: Die Tabelle wird bei alten Datenbanken von Migrationen neu aufgebaut; verwaiste Zuordnungen werden beim Lesen ausgeblendet.
+        foreach (var statement in TopicStatements(id, real)) yield return statement;
+    }
+
+    private static IEnumerable<string> TopicStatements(string id, string real)
+    {
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS topics (
+                id                 {id} PRIMARY KEY,
+                owner_user_id      {id} NULL REFERENCES users(id) ON DELETE SET NULL,
+                name               TEXT NOT NULL,
+                description        TEXT NOT NULL DEFAULT '',
+                status             TEXT NOT NULL DEFAULT 'active',
+                draft_revision     INTEGER NOT NULL DEFAULT 1,
+                published_revision INTEGER NOT NULL DEFAULT 0,
+                global_version     INTEGER NOT NULL DEFAULT 0,
+                created_at         TEXT NOT NULL,
+                updated_at         TEXT NOT NULL
+            )
+            """;
+        yield return "CREATE UNIQUE INDEX IF NOT EXISTS ux_topics_owner_name ON topics(owner_user_id, name)";
+        yield return "CREATE INDEX IF NOT EXISTS ix_topics_owner ON topics(owner_user_id, status)";
+
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS topic_modules (
+                topic_id   {id} NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+                module_id  {id} NOT NULL,
+                sort_order INTEGER NOT NULL,
+                added_at   TEXT NOT NULL,
+                PRIMARY KEY (topic_id, module_id)
+            )
+            """;
+        yield return "CREATE INDEX IF NOT EXISTS ix_topic_modules_module ON topic_modules(module_id)";
+
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS topic_exam_configs (
+                topic_id    {id} PRIMARY KEY REFERENCES topics(id) ON DELETE CASCADE,
+                config_json TEXT NOT NULL,
+                updated_at  TEXT NOT NULL
+            )
+            """;
+
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS topic_questions (
+                id           {id} PRIMARY KEY,
+                topic_id     {id} NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+                type         TEXT NOT NULL,
+                question     TEXT NOT NULL,
+                options_json TEXT NOT NULL DEFAULT '[]',
+                correct_json TEXT NOT NULL DEFAULT '[]',
+                explanation  TEXT NOT NULL DEFAULT '',
+                active       INTEGER NOT NULL DEFAULT 1,
+                created_at   TEXT NOT NULL,
+                updated_at   TEXT NOT NULL
+            )
+            """;
+        yield return "CREATE INDEX IF NOT EXISTS ix_topic_questions_topic ON topic_questions(topic_id, active)";
+
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS topic_versions (
+                id              {id} PRIMARY KEY,
+                topic_id        {id} NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+                version_number  INTEGER NOT NULL,
+                status          TEXT NOT NULL,
+                global_status   TEXT NOT NULL DEFAULT 'none',
+                name            TEXT NOT NULL,
+                description     TEXT NOT NULL DEFAULT '',
+                snapshot_json   TEXT NOT NULL DEFAULT '{"{}"}',
+                created_at      TEXT NOT NULL,
+                created_by      TEXT NULL,
+                published_at    TEXT NULL,
+                published_by    TEXT NULL,
+                submitted_at    TEXT NULL,
+                decided_at      TEXT NULL,
+                decided_by      TEXT NULL,
+                decision_reason TEXT NOT NULL DEFAULT '',
+                UNIQUE (topic_id, version_number)
+            )
+            """;
+        yield return "CREATE INDEX IF NOT EXISTS ix_topic_versions_global ON topic_versions(global_status, topic_id)";
+
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS topic_version_modules (
+                version_id       {id} NOT NULL REFERENCES topic_versions(id) ON DELETE CASCADE,
+                module_id        {id} NOT NULL,
+                role             TEXT NOT NULL DEFAULT 'module',
+                position         INTEGER NOT NULL,
+                source_module_id {id} NULL,
+                content_hash     TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (version_id, module_id)
+            )
+            """;
+        yield return "CREATE INDEX IF NOT EXISTS ix_topic_version_modules_module ON topic_version_modules(module_id)";
+
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS topic_shares (
+                id             {id} PRIMARY KEY,
+                topic_id       {id} NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+                target_user_id {id} NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                permission     TEXT NOT NULL DEFAULT 'learn',
+                created_by     TEXT NOT NULL,
+                created_at     TEXT NOT NULL,
+                revoked_at     TEXT NULL,
+                UNIQUE (topic_id, target_user_id)
+            )
+            """;
+        yield return "CREATE INDEX IF NOT EXISTS ix_topic_shares_target ON topic_shares(target_user_id, revoked_at)";
+
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS topic_assignments (
+                id          {id} PRIMARY KEY,
+                topic_id    {id} NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+                user_id     {id} NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                assigned_by TEXT NOT NULL,
+                assigned_at TEXT NOT NULL,
+                status      TEXT NOT NULL DEFAULT 'active',
+                revoked_at  TEXT NULL,
+                UNIQUE (topic_id, user_id)
+            )
+            """;
+        yield return "CREATE INDEX IF NOT EXISTS ix_topic_assignments_user ON topic_assignments(user_id, status)";
+
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS topic_user_state (
+                topic_id         {id} NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+                user_id          {id} NOT NULL,
+                seen_version     INTEGER NOT NULL DEFAULT 0,
+                last_activity_at TEXT NULL,
+                PRIMARY KEY (topic_id, user_id)
+            )
+            """;
+
+        // Prüfungsversuche bleiben dauerhaft erhalten (keine Fremdschlüssel von Benutzern/Modulen, nie kaskadierend gelöscht); das Ergebnis liegt zusätzlich in quiz_results.
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS topic_exam_attempts (
+                id               {id} PRIMARY KEY,
+                user_id          {id} NOT NULL,
+                topic_id         {id} NOT NULL,
+                topic_version_id {id} NOT NULL,
+                topic_version    INTEGER NOT NULL,
+                kind             TEXT NOT NULL,
+                module_id        {id} NOT NULL,
+                session_id       TEXT NOT NULL,
+                result_id        TEXT NULL,
+                score            {real} NULL,
+                max_score        {real} NULL,
+                percent          {real} NULL,
+                passed           INTEGER NULL,
+                started_at       TEXT NOT NULL,
+                completed_at     TEXT NULL
+            )
+            """;
+        yield return "CREATE UNIQUE INDEX IF NOT EXISTS ux_topic_attempts_session ON topic_exam_attempts(session_id)";
+        yield return "CREATE INDEX IF NOT EXISTS ix_topic_attempts_user ON topic_exam_attempts(user_id, topic_id)";
+        yield return "CREATE INDEX IF NOT EXISTS ix_topic_attempts_version ON topic_exam_attempts(topic_id, topic_version)";
     }
 
     /// <summary>
@@ -429,6 +586,7 @@ public static class Schema
                 source_module_id {id} NULL REFERENCES modules(id) ON DELETE SET NULL,
                 source_owner_user_id {id} NULL REFERENCES users(id) ON DELETE SET NULL,
                 source_owner_name TEXT NULL,
+                reference_id  TEXT NULL,
                 published_at  TEXT NULL,
                 published_by  TEXT NULL,
                 created_at    TEXT NOT NULL,

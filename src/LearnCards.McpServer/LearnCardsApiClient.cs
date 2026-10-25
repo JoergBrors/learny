@@ -45,6 +45,8 @@ public sealed class LearnCardsApiClient : IDisposable
 
     public Task<JsonNode?> PostAsync(string path, JsonNode body, CancellationToken ct) => SendAsync(HttpMethod.Post, path, body, ct);
 
+    public Task<JsonNode?> PutAsync(string path, JsonNode body, CancellationToken ct) => SendAsync(HttpMethod.Put, path, body, ct);
+
     public Task<JsonNode?> PatchAsync(string path, CancellationToken ct) => SendAsync(HttpMethod.Patch, path, null, ct);
 
     public Task<JsonNode?> GetAsync(string path, CancellationToken ct) => SendAsync(HttpMethod.Get, path, null, ct);

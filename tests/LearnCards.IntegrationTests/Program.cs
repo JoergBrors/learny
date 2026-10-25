@@ -63,6 +63,14 @@ void Check(bool ok, string name)
     Console.WriteLine($"{(ok ? "  OK  " : " FAIL ")} {name}");
 }
 
+static string SchemaTopicExample(JsonNode topicSchema)
+{
+    var ex = topicSchema["example"]!.DeepClone();
+    ex["name"] = "Schema-Beispiel";
+    ex["modules"] = new JsonArray(ex["modules"]![0]!.DeepClone());   // nur das importierte Beispielmodul „Microsoft Entra ID“
+    return ex.ToJsonString();
+}
+
 HttpClient NewClient(bool cookies = true)
 {
     var handler = new HttpClientHandler { AllowAutoRedirect = false, UseCookies = cookies, CookieContainer = new CookieContainer() };
@@ -201,6 +209,7 @@ try
     await ImageStorageRemoteUnitTests.RunAsync(Check);
     RichTextUnitTests.Run(Check);
     await BlockchainUnitTests.RunAsync(Check, tmp);
+    await TransferIntegrityUnitTests.RunAsync(Check, tmp);   // Fehlerinjektion, Referenzen, Altbestand (ADR 0028)
     await McpTokenUnitTests.RunAsync(Check, tmp);   // Schutz der MCP-Tokens bei Datenbankzugriff (ADR 0025)
     AuthModeTests.Run(Check);   // Betriebsmodus fail closed (ADR 0026)
     DockerConfigTests.Run(Check, repoRoot);   // Docker-Hub-Veröffentlichung (ADR 0024)
@@ -760,6 +769,7 @@ try
     Check((await cora.GetAsync("/api/admin/audit")).StatusCode == HttpStatusCode.Forbidden, "A7: Auditor liest nicht das gesamte Protokoll");
     var auditorLog = (await J(await cora.GetAsync("/api/global/audit")))!.AsArray();
     Check(auditorLog.Count > 0 && auditorLog.All(e => e!["action"]!.GetValue<string>().StartsWith("publication.") || e["action"]!.GetValue<string>().StartsWith("submission.")), "A7: Auditor liest Veröffentlichungsprotokolle (nur publication.*/submission.*)");
+    await TopicE2ETests.RunAsync(LoginAsync, () => NewClient(false), admin, mcpUrl, Check);   // Themen (ADR 0027)
 
     // Ablauf 8: Widerruf
     Check((await ann.DeleteAsync($"/api/sharing/modules/{shareModuleId}/shares/{benId}")).StatusCode == HttpStatusCode.NoContent, "A8: A widerruft die Freigabe");
@@ -1404,8 +1414,26 @@ try
     {
         var tplRoot = FindRepoRoot();
         var templateDir = Path.Combine(tplRoot, "src", "LearnCards.Web", "wwwroot", "templates");
-        var files = Directory.GetFiles(templateDir, "*.json").Concat(Directory.GetFiles(Path.Combine(tplRoot, "demoodule"), "*.json")).OrderBy(x => x).ToList();
+        var files = Directory.GetFiles(templateDir, "*.json").Concat(Directory.GetFiles(Path.Combine(tplRoot, "demoodule"), "*.json"))
+            .Where(f => !File.ReadAllText(f).Contains("\"learny-topic\"") && !File.ReadAllText(f).Contains("\"learny-module\"")).OrderBy(x => x).ToList();   // Modul-/Themenvorlage: eigene Formate (ADR 0028), separat geprüft
         var schemaDoc = (await J(await ann.GetAsync("/api/schema/import/cards")))!;
+        {
+            // ADR 0028: Modul- und Themenvorlage sowie die Schema-Beispiele sind gültig und importierbar (Modul zuerst, dann das Thema darauf)
+            var tpl = await LoginAsync("tpluser");
+            var moduleTpl = File.ReadAllText(Path.Combine(templateDir, "module-template.json"));
+            var topicTpl = File.ReadAllText(Path.Combine(templateDir, "topic-template.json"));
+            var modImp = await tpl.PostAsync("/api/modules/import", new StringContent(moduleTpl, System.Text.Encoding.UTF8, "application/json"));
+            var topImp = await tpl.PostAsync("/api/topics/import", new StringContent(topicTpl, System.Text.Encoding.UTF8, "application/json"));
+            Check(modImp.StatusCode == HttpStatusCode.Created && topImp.StatusCode == HttpStatusCode.Created, "Vorlagen: module-template.json und topic-template.json sind gültig und importierbar");
+            var modSchema = (await J(await tpl.GetAsync("/api/schema/import/module")))!;
+            var topSchema = (await J(await tpl.GetAsync("/api/schema/import/topic")))!;
+            Check((await tpl.PostAsync("/api/modules/import", new StringContent(modSchema["example"]!.ToJsonString(), System.Text.Encoding.UTF8, "application/json"))).StatusCode == HttpStatusCode.Created
+                  && (await tpl.PostAsync("/api/topics/import", new StringContent(SchemaTopicExample(topSchema), System.Text.Encoding.UTF8, "application/json"))).StatusCode == HttpStatusCode.Created,
+                "Live-Schemas: die Beispiele für Modul-JSON und Themen-JSON sind importierbar");
+            var moduleProps = modSchema["module_schema"]!["properties"]!.AsObject().Select(kv => kv.Key).ToHashSet();
+            var topicProps = topSchema["topic_schema"]!["properties"]!.AsObject().Select(kv => kv.Key).ToHashSet();
+            Check(JsonNode.Parse(moduleTpl)!.AsObject().All(kv => moduleProps.Contains(kv.Key)) && JsonNode.Parse(topicTpl)!.AsObject().All(kv => topicProps.Contains(kv.Key)), "Vorlagen: verwenden nur Felder des Live-Schemas");
+        }
         var cardProps = schemaDoc["card_schema"]!["properties"]!.AsObject().Select(kv => kv.Key).ToHashSet();
         var quizSchema = schemaDoc["card_schema"]!["properties"]!["quiz"]!["items"]!;
         var quizProps = quizSchema["properties"]!.AsObject().Select(kv => kv.Key).ToHashSet();
@@ -1990,6 +2018,60 @@ try
             Check(!help.Contains("WYSIWYG") && !help.Contains("Zertifikat"), "Hilfeseite: dokumentiert keine späteren Funktionen (Editor, Zertifikate) als verfügbar");
         }
         finally { StopProcess(statRun.Proc); }
+    }
+
+    // zuletzt: veröffentlicht ein globales Modul, das die früheren Prüfungen (genau ein globales Modul) nicht stören darf
+    await TopicTransferTests.RunAsync(LoginAsync, () => NewClient(false), admin, mcpUrl, Check);   // Themenmodule, JSON, Klonen, MCP (ADR 0028)
+    await TransferHardeningTests.RunAsync(LoginAsync, () => NewClient(false), mcpUrl, McpKey, PngLike, Check);   // Referenzen parallel, große Dateien, MCP-Matrix (ADR 0028)
+
+    // Migration modules.reference_id: Altbestand ohne Spalte wird beim Start ergänzt (idempotent), Daten bleiben erhalten, Referenzen sind danach stabil
+    Console.WriteLine("\nMigration modules.reference_id (ADR 0028)");
+    {
+        string refModule = "", firstRef = "";
+        var first = await StartWebAsync("e2e-refmig", new());
+        try
+        {
+            var c = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseCookies = true, CookieContainer = new CookieContainer() }) { BaseAddress = new Uri(first.Url) };
+            await c.GetAsync("/auth/login?devUser=refmig");
+            var imp = await c.PostAsync("/api/modules/import", new StringContent("{\"format\":\"learny-module\",\"schema_version\":1,\"reference_id\":\"" + Guid.NewGuid() + "\",\"name\":\"RM\",\"cards\":[{\"category\":\"K\",\"term\":\"T\",\"question\":\"Q?\",\"definition\":\"D\"}]}", System.Text.Encoding.UTF8, "application/json"));
+            refModule = (await J(imp))!["id"]!.GetValue<string>();
+            firstRef = (await J(await c.GetAsync($"/api/modules/{refModule}/export")))!["reference_id"]!.GetValue<string>();
+        }
+        finally { StopProcess(first.Proc); }
+        await Task.Delay(500);
+        await using (var mdb = new LearnCards.Web.Data.SqliteDatabase(Path.Combine(tmp, "e2e-refmig", "e2e.db")))
+        {
+            await mdb.InitAsync();
+            await mdb.ExecuteAsync("DROP INDEX IF EXISTS ux_modules_owner_reference", null);
+            await mdb.ExecuteAsync("ALTER TABLE modules DROP COLUMN reference_id", null);   // Zustand vor ADR 0028
+        }
+        var seen = new List<string>();
+        for (var round = 1; round <= 2; round++)
+        {
+            var again = await StartWebAsync("e2e-refmig", new());
+            try
+            {
+                var c = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseCookies = true, CookieContainer = new CookieContainer() }) { BaseAddress = new Uri(again.Url) };
+                await c.GetAsync("/auth/login?devUser=refmig");
+                var mods = (await J(await c.GetAsync("/api/modules/")))!.AsArray();
+                var cards = (await J(await c.GetAsync($"/api/cards/?module_id={refModule}")))!.AsArray();
+                var rf1 = (await J(await c.GetAsync($"/api/modules/{refModule}/export")))!["reference_id"]!.GetValue<string>();
+                var rf2 = (await J(await c.GetAsync($"/api/modules/{refModule}/export")))!["reference_id"]!.GetValue<string>();
+                seen.Add(rf1);
+                Check(mods.Count == 1 && cards.Count == 1 && Guid.TryParse(rf1, out _) && rf1 == rf2, round == 1 ? "Migration: fehlende Spalte wird beim Start ergänzt, Module und Karten bleiben erhalten, erster Export vergibt eine GUID" : "Migration: ein weiterer Start ist idempotent, die Referenz bleibt stabil");
+            }
+            finally { StopProcess(again.Proc); }
+            await Task.Delay(300);
+        }
+        Check(seen.Distinct().Count() == 1 && seen[0] != firstRef, "Migration: die Referenz überlebt Neustarts (und ist nach dem Zurücksetzen der Spalte neu vergeben)");
+        await using (var mdb2 = new LearnCards.Web.Data.SqliteDatabase(Path.Combine(tmp, "e2e-refmig", "e2e.db")))
+        {
+            await mdb2.InitAsync();
+            var dupFailed = false;
+            await mdb2.ExecuteAsync("INSERT INTO modules (id, name, description, icon, color, owner_user_id, created_at, updated_at, reference_id) SELECT @id, 'RM-Dup', '', 'x', '#000', owner_user_id, created_at, updated_at, @r FROM modules WHERE id = @m", new (string, object?)[] { ("id", Guid.NewGuid().ToString()), ("r", Guid.NewGuid().ToString()), ("m", refModule) });
+            try { await mdb2.ExecuteAsync("INSERT INTO modules (id, name, description, icon, color, owner_user_id, created_at, updated_at, reference_id) SELECT @id, 'RM-Dup2', '', 'x', '#000', owner_user_id, created_at, updated_at, @r FROM modules WHERE id = @m", new (string, object?)[] { ("id", Guid.NewGuid().ToString()), ("r", seen[0]), ("m", refModule) }); } catch (Exception) { dupFailed = true; }
+            Check(dupFailed, "Migration: der Unique-Index (Eigentümer, Referenz) besteht nach der Migration");
+        }
     }
 
     if (perfRows.Count > 0)

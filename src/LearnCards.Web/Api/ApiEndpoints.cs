@@ -59,7 +59,7 @@ public static partial class ApiEndpoints
                 if (valid is null)
                     return Results.Json(new { detail = "Ungültiges, abgelaufenes oder widerrufenes MCP-Token." }, statusCode: 401);
                 var path = http.Request.Path.Value ?? "";
-                if (!TokenAllowedPrefixes.Any(p => path.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
+                if (!TokenAllowedPrefixes.Any(p => path.StartsWith(p, StringComparison.OrdinalIgnoreCase)) && !TokenMayReadTopics(http))
                     return Results.Json(new { detail = "Dieser Endpunkt ist für MCP-Tokens nicht verfügbar." }, statusCode: 403);
                 http.Items[UserItem] = valid.Value.User;
                 http.Items[ViaTokenItem] = true;
@@ -76,6 +76,8 @@ public static partial class ApiEndpoints
 
         // Benutzerunabhängig: Import-Schema; Code-Tausch nur für den MCP-Server (Dienstschlüssel)
         api.MapGet("/schema/import/cards", () => Results.Ok(CardImportSchema.Document()));
+        api.MapGet("/schema/import/module", () => Results.Ok(TransferSchema.ModuleDocument()));   // ADR 0028
+        api.MapGet("/schema/import/topic", () => Results.Ok(TransferSchema.TopicDocument()));
 
         api.MapPost("/mcp/link/exchange", async (McpCodeExchangeRequest req, HttpContext http, McpLinkService links) =>
         {
@@ -148,6 +150,7 @@ public static partial class ApiEndpoints
 
         MapAdminEndpoints(secured);
         MapSharingEndpoints(secured);
+        MapTopicEndpoints(secured);   // Themen (ADR 0027)
         MapGlobalReviewEndpoints(secured);
         MapCertificateEndpoints(app, secured);
 
