@@ -617,7 +617,7 @@ jobs:
           [IO.File]::WriteAllText($tmp, (($lines -join "`n") + "`n"), (New-Object Text.UTF8Encoding($false)))
           Set-StrictAcl -Path $tmp -PoolRights "R" -Container $false
           if (Test-Path -LiteralPath $envFile) { Set-StrictAcl -Path $envFile -PoolRights "R" -Container $false }   # bekannte ACL, damit der atomare Austausch möglich ist
-          if (Test-Path -LiteralPath $envFile) { [IO.File]::Replace($tmp, $envFile, $null) } else { [IO.File]::Move($tmp, $envFile) }
+          if (Test-Path -LiteralPath $envFile) { [IO.File]::Replace($tmp, $envFile, [NullString]::Value) } else { [IO.File]::Move($tmp, $envFile) }
           Write-Host ".env geschützt abgelegt ($envFile); $keep vorhandene Werte statt leerer Platzhalter beibehalten."
 
           # 5. App-Pool: Benutzerprofil laden (CNG), Pfad der .env als Umgebungsvariable (kein Geheimnis)
