@@ -208,3 +208,15 @@ MCP-Werkzeug ─► REST (/api/topics/import, /api/topics/{id}/definition, /api/
 ```
 
 Schemas: `/api/schema/import/module`, `/api/schema/import/topic` (`Api/TransferSchema.cs`); Vorlagen: `wwwroot/templates/module-template.json`, `topic-template.json`. MCP-Tokens dürfen nur Themen importieren und den eigenen Entwurf aktualisieren (`TokenMayReadTopics`); Veröffentlichen, Freigaben, Zuweisungen und Administration bleiben gesperrt.
+
+### Themenzugriff, Pflichtzuweisungen und Themenadministration (ADR 0029)
+
+```
+Thema veröffentlicht ─► Version (unveränderlich) ─► eingefrorene Modulkopien (scope=topic)
+ Lernrecht: Eigentum │ Freigabe (alle Versionen) │ Zuweisung (konkrete Version) │ aktive globale Version   → alle Module der Version im Themenkontext
+ Pflicht:   nur Zuweisung mit mandatory=1 (Admin/Themen-Admin) ─► Startseite „Meine verpflichtenden Themen“
+ Status:    Kartenstatus + Themenprüfungen ─► not_started | in_progress | completed (+ überfällig bei offener Pflicht)
+ Verwaltung: /topic-admin (Admin/Themen-Admin zuweisen; Auditor/Themen-Admin/Admin Status lesen) ─ /api/topic-admin/* (nie für MCP-Tokens)
+```
+
+Das private Ursprungsmodul bleibt geschützt; Widerruf entfernt nur das abgeleitete Recht. Das IIS-Deployment stoppt den MCP-HTTP-Server (geplante Aufgabe bzw. Windows-Dienst) vor dem Dateiaustausch, startet ihn danach, prüft Prozess und Health-URL und bricht bei Fehlstart ab.

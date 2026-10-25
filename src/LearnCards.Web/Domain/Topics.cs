@@ -306,6 +306,15 @@ public class TopicSummary
     public bool NewerVersionAvailable { get; set; }
     public int SharedWithCount { get; set; }
     public int AssignedCount { get; set; }
+    /// <summary><see cref="TopicRelations"/> aus Sicht des Betrachters.</summary>
+    public string Relation { get; set; } = TopicRelations.GlobalVoluntary;
+    /// <summary>Nur bei ausdrücklicher, aktiver Zuweisung gesetzt; globale Veröffentlichung und Freigabe erzeugen nie eine Pflicht.</summary>
+    public bool Mandatory { get; set; }
+    public DateTime? AssignedAt { get; set; }
+    public DateTime? DueAt { get; set; }
+    public bool Overdue { get; set; }
+    /// <summary>Zugewiesene Version (NULL im Altbestand).</summary>
+    public int? AssignedVersion { get; set; }
 }
 
 public class TopicShareInfo
@@ -327,6 +336,74 @@ public class TopicAssignmentInfo
     public string AssignedBy { get; set; } = "";
     public DateTime AssignedAt { get; set; }
     public TopicProgress? Progress { get; set; }
+    public string TopicName { get; set; } = "";
+    /// <summary>Zugewiesene Themenversion (0 = Altbestand ohne feste Version).</summary>
+    public int TopicVersion { get; set; }
+    public bool Mandatory { get; set; } = true;
+    public DateTime? DueAt { get; set; }
+    public bool Overdue { get; set; }
+    public string AssignedByName { get; set; } = "";
+}
+
+/// <summary>Zuweisbares Thema für Admin/Themen-Admin: globale Themen, eigene veröffentlichte Themen und ausdrücklich mit dem Akteur geteilte Themen.</summary>
+public class AssignableTopic
+{
+    public string TopicId { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string OwnerName { get; set; } = "";
+    /// <summary>global | own | shared — warum das Thema zuweisbar ist.</summary>
+    public string Via { get; set; } = "global";
+    public List<AssignableVersion> Versions { get; set; } = new();
+}
+
+public class AssignableVersion
+{
+    public int Version { get; set; }
+    public string GlobalStatus { get; set; } = TopicGlobalStatuses.None;
+    public DateTime? PublishedAt { get; set; }
+}
+
+/// <summary>Zeile der Statusübersicht (Datenminimierung: nur Anzeigename, keine E-Mail, keine Antworten, keine Inhalte).</summary>
+public class TopicStatusRow
+{
+    public string UserId { get; set; } = "";
+    public string UserName { get; set; } = "";
+    public string TopicId { get; set; } = "";
+    public string TopicName { get; set; } = "";
+    public int Version { get; set; }
+    /// <summary><see cref="TopicRelations"/></summary>
+    public string Relation { get; set; } = TopicRelations.GlobalVoluntary;
+    public bool Assigned { get; set; }
+    public bool Mandatory { get; set; }
+    public string Status { get; set; } = TopicLearnStatuses.NotStarted;
+    public int ProgressPercent { get; set; }
+    public int ModulesCompleted { get; set; }
+    public int ModulesTotal { get; set; }
+    public DateTime? AssignedAt { get; set; }
+    public DateTime? DueAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    public bool Overdue { get; set; }
+    public string AssignmentId { get; set; } = "";
+}
+
+/// <summary>Verwendung eines eigenen Moduls in eigenen Themen (Entwurf und veröffentlichte Versionen).</summary>
+public class ModuleTopicUsage
+{
+    public string TopicId { get; set; } = "";
+    public string TopicName { get; set; } = "";
+    public bool InDraft { get; set; }
+    /// <summary>Veröffentlichte Versionen des Themas, in denen eine eingefrorene Kopie dieses Moduls enthalten ist.</summary>
+    public List<int> Versions { get; set; } = new();
+    public bool GlobalActive { get; set; }
+}
+
+/// <summary>Herkunft einer eingefrorenen Themenmodulkopie (für die Modulseite im Themenkontext).</summary>
+public class TopicModuleOrigin
+{
+    public string TopicId { get; set; } = "";
+    public string TopicName { get; set; } = "";
+    public int Version { get; set; }
+    public string GlobalStatus { get; set; } = TopicGlobalStatuses.None;
 }
 
 // ─── Lernfortschritt ────────────────────────────────────────────────────────
@@ -367,6 +444,30 @@ public class TopicProgress
     public int SeenVersion { get; set; }
     public bool NewerVersionAvailable { get; set; }
     public List<TopicModuleProgress> Modules { get; set; } = new();
+    /// <summary>Lernstatus (ADR 0029): <see cref="TopicLearnStatuses"/> — pro Benutzer, Thema und Themenversion.</summary>
+    public string Status { get; set; } = TopicLearnStatuses.NotStarted;
+    /// <summary>Fortschritt in Prozent: abgeschlossene Module (und bestandene Abschlussprüfung, falls vorgesehen) im Verhältnis zum Gesamtumfang.</summary>
+    public int ProgressPercent { get; set; }
+    /// <summary>Zeitpunkt der letzten lernrelevanten Aktivität (Karte gelernt, Prüfung abgegeben), sobald das Thema abgeschlossen ist.</summary>
+    public DateTime? CompletedAt { get; set; }
+}
+
+/// <summary>Lernstatus eines Themas für einen Benutzer. „Überfällig“ ist kein eigener Zustand, sondern ein Merkmal offener Pflichtzuweisungen mit Fälligkeitsdatum.</summary>
+public static class TopicLearnStatuses
+{
+    public const string NotStarted = "not_started";
+    public const string InProgress = "in_progress";
+    public const string Completed = "completed";
+}
+
+/// <summary>Beziehung des Benutzers zum Thema (klar getrennt: global sichtbar, persönlich freigegeben, zugewiesen, verpflichtend).</summary>
+public static class TopicRelations
+{
+    public const string Own = "own";
+    public const string Shared = "shared";
+    public const string AssignedVoluntary = "assigned_voluntary";
+    public const string AssignedMandatory = "assigned_mandatory";
+    public const string GlobalVoluntary = "global_voluntary";
 }
 
 /// <summary>Persistierter Prüfungsversuch (Verbindung von Benutzer, Themenversion, Prüfung und verifiziertem Quizergebnis).</summary>

@@ -204,6 +204,59 @@ async function main() {
     check(impM.status === 201 && impT.status === 201, 'Hilfeseite: Beispielvorlagen (Modul, Thema) sind importierbar und aufeinander abgestimmt (module_ref)');
     check(await ev(`/module_ref/.test(document.body.textContent) && /Anzeigename/.test(document.body.textContent)`), 'Hilfeseite erklärt module_ref und Anzeigename');
 
+    // ── Pflichtthemen, Themenzuweisung, Modulverwendung, Themenmodul-Seite (ADR 0029)
+    const cookieOf = async name => { const r = await fetch(BASE + '/auth/login?devUser=' + name, { redirect: 'manual' }); return r.headers.getSetCookie().map(c => c.split(';')[0]).join('; '); };
+    const apiAs = (ck, p, method = 'GET', body) => fetch(BASE + '/api' + p, { method, headers: { 'Content-Type': 'application/json', Cookie: ck }, body: body ? JSON.stringify(body) : undefined });
+    const taCookie = await cookieOf('browserta'); const leaCookie = await cookieOf('browserlea'); const plainCookie = await cookieOf('browserplain');
+    const idOf = async ck => (await json(await apiAs(ck, '/me'))).id;
+    const taId = await idOf(taCookie); const leaId2 = await idOf(leaCookie);
+    await api(`/admin/users/${taId}/roles`, 'PUT', { roles: ['themen_admin'] });
+    const sg = await api(`/topics/${topic.id}/versions/2/submit-global`, 'POST', {});
+    const pend = (await json(await api('/admin/topics/pending'))).find(v => v.topic_id === topic.id);
+    const appr = pend ? (await api(`/admin/topics/versions/${pend.id}/approve`, 'POST', {})).status : 0;
+    check(sg.status === 204 && appr === 204, 'Seed: Thema global veröffentlicht');
+    const due = new Date(Date.now() + 5 * 86400000).toISOString();
+    const asg = await apiAs(taCookie, '/topic-admin/assignments', 'POST', { topic_id: topic.id, user_id: leaId2, mandatory: true, due_at: due });
+    check(asg.status === 201, 'Themen-Admin weist das globale Thema verpflichtend zu');
+
+    // Lernender: Pflichtbereich auf der Startseite
+    await send('Page.navigate', { url: BASE + '/auth/login?devUser=browserlea' }); await sleep(1500);
+    await go('/');
+    check(await waitFor(`/Meine verpflichtenden Themen/.test(document.body.textContent) && /Browser M365 Grundlagen/.test(document.querySelector('.mandatory-box')?.textContent || '')`), 'Startseite zeigt „Meine verpflichtenden Themen“ mit dem zugewiesenen Thema');
+    check(await ev(`/Version 2/.test(document.querySelector('.mandatory-box').textContent) && /fällig/.test(document.querySelector('.mandatory-box').textContent) && /Beginnen|Fortsetzen/.test(document.querySelector('.mandatory-box').textContent)`), 'Pflichtthema: Version, Fälligkeit und Aktion „Beginnen“/„Fortsetzen“');
+    await shot('08-pflichtthema');
+    check(await ev(`!!document.querySelector('.tab-row') && !!document.querySelector('.topbar')`), 'Die Pflichtanzeige blockiert keine anderen Funktionen (Navigation und Modulbereiche bleiben)');
+    await click('.mandatory-box a', 'Beginnen');
+    check(await waitFor(`location.pathname.startsWith('/topics/') && /Lernpfad/.test(document.body.textContent)`), 'Aktion öffnet die Themenseite der zugewiesenen Version');
+    check(await waitFor(`document.querySelectorAll('.topic-module').length === 3`), 'Alle Module der Version sind aufgeführt');
+    const learnHref2 = await ev(`[...document.querySelectorAll('.topic-module a')].find(x => x.textContent.includes('Lernen')).getAttribute('href')`);
+    await go(learnHref2);
+    check(await waitFor(`/Themenmodul/.test(document.body.textContent) && !!document.querySelector('.module-hero')`), 'Themenmodul öffnet sich für den berechtigten Lernenden (Kennzeichnung „Themenmodul“, eingefrorener Versionsstand)');
+    check(await ev(`![...document.querySelectorAll('button')].some(b => b.textContent.includes('Quiz starten')) && [...document.querySelectorAll('a')].some(a => a.textContent.includes('Zum Thema'))`), 'Themenmodul: kein modulweites Quiz, stattdessen Verweis auf die Prüfungen im Thema');
+    await shot('09-themenmodul');
+
+    // Zuweisungsverwaltung: Themen-Admin sieht sie, normale Benutzer nicht; Themeneditor ohne Zuweisung
+    await send('Page.navigate', { url: BASE + '/auth/login?devUser=browserta' }); await sleep(1500);
+    await go('/topic-admin');
+    check(await waitFor(`/Thema zuweisen/.test(document.body.textContent) && !!document.querySelector('select')`), 'Themen-Admin: Verwaltungsansicht „Themenzuweisungen“ mit Zuweisungsformular');
+    check(await ev(`[...document.querySelectorAll('.topbar-actions a')].some(a => a.getAttribute('href') === '/topic-admin')`), 'Navigation zeigt „Zuweisungen“ nur mit Rolle');
+    check(await click('.tab-row .chip', 'Lernstatus') && await waitFor(`/Lernstatus/.test(document.body.textContent) && !!document.querySelector('table')`), 'Lernstatus-Tabelle sichtbar');
+    check(await ev(`!/@/.test(document.querySelector('table').textContent)`), 'Lernstatus enthält keine E-Mail-Adressen');
+    await send('Page.navigate', { url: BASE + '/auth/login?devUser=browserplain' }); await sleep(1500);
+    await go('/topic-admin');
+    check(await waitFor(`/fehlen die Rechte/.test(document.body.textContent) && !document.querySelector('select')`), 'Normaler Benutzer: keine Zuweisungsoberfläche');
+    check(await ev(`![...document.querySelectorAll('.topbar-actions a')].some(a => a.getAttribute('href') === '/topic-admin')`), 'Navigation blendet die Zuweisungen für normale Benutzer aus');
+    await go('/');
+    check(await ev(`!document.querySelector('.mandatory-box')`), 'Ohne Pflichtzuweisung erscheint keine Pflichtmeldung');
+
+    await send('Page.navigate', { url: BASE + '/auth/login?devUser=topicowner' }); await sleep(1500);
+    await go(`/topics/${topic.id}/edit`);
+    check(await waitFor(`!!document.querySelector('.topic-module-row')`) && await ev(`!/Zuweisen/.test([...document.querySelectorAll('button')].map(b => b.textContent).join(' '))`), 'Themeneditor enthält keine personenbezogene Zuweisungsfunktion');
+    check(await ev(`/Themenzuweisungen/.test(document.body.textContent)`), 'Themeneditor verweist auf die getrennte Zuweisungsverwaltung');
+    await go('/');
+    check(await waitFor(`[...document.querySelectorAll('.module-usage')].some(u => /Verwendet in/.test(u.textContent) && /Browser M365 Grundlagen/.test(u.textContent))`), 'Eigene Module zeigen, in welchen Themen sie verwendet werden (Entwurf/Version)');
+    await shot('10-modulverwendung');
+
     check(consoleErrors.length === 0, 'Keine Konsolenfehler (' + consoleErrors.slice(0, 3).join(' | ') + ')');
   } finally {
     try { chrome?.kill(); } catch { }

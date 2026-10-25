@@ -380,6 +380,25 @@ Hier sind meine Folien / Notizen:
             <li><strong>Neue Version veröffentlichen</strong> friert den Stand ein. Lernende sehen nur veröffentlichte Versionen; spätere Änderungen wirken erst mit der nächsten Version, bestandene Prüfungen unveränderter Module bleiben erhalten.</li>
             <li>Mit <strong>Teilen</strong> erlaubst du anderen das Lernen, mit <strong>Zuweisen</strong> erteilst du eine Lernaufgabe. Für die globale Veröffentlichung reichst du eine Version ein; ein Administrator gibt sie frei oder lehnt sie ab (die bisherige globale Version bleibt bis dahin aktiv).</li>
         </ol>
+        <h3>Global, freigegeben, zugewiesen, verpflichtend</h3>
+        <div class="help-grid">
+            <div class="help-block">
+                <h3>Global</h3>
+                <p class="muted">Ein vom Administrator freigegebenes Thema ist für <strong>alle</strong> angemeldeten Benutzer sichtbar und <strong>freiwillig</strong> lernbar (eingefrorene Version, alle Module, Karten, Bilder, Modul- und Abschlussprüfungen). Eine globale Veröffentlichung erzeugt nie eine Pflicht und macht die privaten Ursprungsmodule nicht öffentlich.</p>
+            </div>
+            <div class="help-block">
+                <h3>Freigegeben</h3>
+                <p class="muted">Der Eigentümer erlaubt bestimmten Benutzern das Lernen. Sie dürfen alle Module der veröffentlichten Version lernen und prüfen; das private Ursprungsmodul bleibt geschützt. Ein Widerruf entfernt nur dieses Lernrecht — Ergebnisse und eigenständige Modulfreigaben bleiben.</p>
+            </div>
+            <div class="help-block">
+                <h3>Zugewiesen und verpflichtend</h3>
+                <p class="muted">Nur <strong>Administratoren und Themen-Admins</strong> weisen Themen unter <a href="/topic-admin">Zuweisungen</a> zu — an eine konkrete Version, verpflichtend oder freiwillig, optional mit Fälligkeit. Verpflichtende Themen erscheinen nach der Anmeldung auf der Startseite unter „Meine verpflichtenden Themen“ (Beginnen/Fortsetzen); abgeschlossene bleiben im Verlauf. Der Themeneditor enthält keine Zuweisung.</p>
+            </div>
+            <div class="help-block">
+                <h3>Lernstatus</h3>
+                <p class="muted">Nicht begonnen, In Bearbeitung, Abgeschlossen (alle Module abgeschlossen, Modulprüfungen und – falls vorgesehen – Abschlussprüfung bestanden); „überfällig“ nur bei offener Pflicht mit abgelaufener Fälligkeit. Du siehst deinen eigenen Status; Auditoren, Themen-Admins und Administratoren sehen nur Status und Termine — keine Inhalte, Chats oder Antworten.</p>
+            </div>
+        </div>
         <h3>MCP-Werkzeuge für Themen und Module</h3>
         <p class="muted">Ein KI-Client arbeitet nur mit seinem Benutzertoken und nur mit eigenen Inhalten: <code>get_topic_import_schema</code> → <code>list_modules</code> → <code>create_topic</code> (oder <code>import_topic</code>) → <code>get_topic</code>; Anpassungen mit <code>update_topic</code> (ersetzt den Entwurf), Sicherung mit <code>export_topic</code>. Für Module: <code>get_module_import_schema</code>, <code>export_module</code>, <code>import_module</code> und <code>clone_global_module</code>. Lesen: <code>list_topics</code>, <code>get_topic</code>, <code>get_topic_exam_structure</code>. Nicht über MCP möglich: Veröffentlichen, globale Freigaben, Administration, Freigaben und Zuweisungen an andere Benutzer.</p>
         <p class="muted">Prüfungen werden serverseitig bewertet und funktionieren auch ohne KI-Schlüssel.</p>

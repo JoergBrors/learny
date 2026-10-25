@@ -1,0 +1,219 @@
+@page "/topic-admin"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject TopicService Topics
+@inject AuthenticationStateProvider AuthState
+
+<PageTitle>Themenzuweisungen — LearnCards</PageTitle>
+
+<div class="container">
+    <div class="page-head">
+        <div>
+            <h1>Themenzuweisungen und Lernstatus</h1>
+            <p class="muted">
+                <strong>Global</strong> = für alle sichtbar und freiwillig lernbar · <strong>Freigegeben</strong> = für ausdrücklich berechtigte Benutzer ·
+                <strong>Zugewiesen</strong> = administrativ zugeordnet (verpflichtend oder freiwillig, mit konkreter Version). Eine globale Veröffentlichung erzeugt nie eine Pflicht.
+            </p>
+        </div>
+        <div class="page-head-actions"><a class="btn btn-ghost" href="/topics">← Themen</a></div>
+    </div>
+
+    @if (!_canAssign && !_canRead)
+    {
+        <div class="alert alert-error" role="status">Für diese Seite fehlen die Rechte (Administrator, Themen-Admin oder Auditor).</div>
+    }
+    else
+    {
+        @if (_message is not null)
+        {
+            <div class="alert @(_error ? "alert-error" : "alert-ok")" role="status">@_message</div>
+        }
+        <div class="tab-row" role="tablist" aria-label="Bereich wählen">
+            @if (_canAssign) { <button class="chip @(_tab == "assign" ? "chip-active" : "")" role="tab" aria-selected="@(_tab == "assign")" @onclick='() => _tab = "assign"'>Zuweisungen</button> }
+            <button class="chip @(_tab == "status" ? "chip-active" : "")" role="tab" aria-selected="@(_tab == "status")" @onclick='() => _tab = "status"'>Lernstatus</button>
+        </div>
+
+        @if (_tab == "assign" && _canAssign)
+        {
+            <div class="card panel">
+                <h2 class="panel-title">Thema zuweisen</h2>
+                <p class="muted">Zuweisbar sind globale Themen, eigene veröffentlichte Themen und mit dir geteilte Themen. Es wird immer eine konkrete veröffentlichte Version zugewiesen.</p>
+                <div class="form-row">
+                    <select class="input" @bind="_topicId" @bind:after="OnTopicChanged" aria-label="Thema">
+                        <option value="">Thema wählen …</option>
+                        @foreach (var t in _topics) { <option value="@t.TopicId">@t.Name (@ViaLabel(t.Via))</option> }
+                    </select>
+                    <select class="input" @bind="_version" aria-label="Themenversion" disabled="@(_versions.Count == 0)">
+                        @foreach (var v in _versions) { <option value="@v.Version">Version @v.Version@(v.GlobalStatus == "active" ? " · global aktiv" : "")</option> }
+                    </select>
+                </div>
+                <div class="form-row">
+                    <input class="input" placeholder="Benutzer suchen (mindestens 3 Zeichen)" @bind="_userQuery" @bind:event="oninput" @onkeyup="SearchUsersAsync" aria-label="Benutzer suchen" />
+                    <input class="input" type="date" @bind="_due" aria-label="Fälligkeitsdatum (optional)" title="Fälligkeitsdatum (optional)" />
+                    <label class="chip-check"><input type="checkbox" @bind="_mandatory" /> verpflichtend</label>
+                </div>
+                @if (_userResults.Count > 0)
+                {
+                    <ul class="topic-search-results">
+                        @foreach (var u in _userResults)
+                        {
+                            <li>@u.DisplayName <button class="btn btn-primary btn-sm" @onclick="() => AssignAsync(u.Id)" disabled="@(string.IsNullOrEmpty(_topicId) || _busy)">@(_mandatory ? "Verpflichtend zuweisen" : "Freiwillig zuweisen")</button></li>
+                        }
+                    </ul>
+                }
+            </div>
+
+            <div class="card panel">
+                <h2 class="panel-title">Bestehende Zuweisungen</h2>
+                @if (_assignments.Count == 0) { <p class="muted">Keine aktiven Zuweisungen.</p> }
+                else
+                {
+                    <div class="table-wrap">
+                        <table class="table">
+                            <caption class="sr-only">Aktive Themenzuweisungen</caption>
+                            <thead><tr><th>Benutzer</th><th>Thema</th><th>Version</th><th>Art</th><th>Status</th><th>Fortschritt</th><th>Zugewiesen</th><th>Fällig</th><th></th></tr></thead>
+                            <tbody>
+                                @foreach (var a in _assignments)
+                                {
+                                    <tr>
+                                        <td>@a.UserName</td><td>@a.TopicName</td><td>@a.TopicVersion</td>
+                                        <td>@(a.Mandatory ? "verpflichtend" : "freiwillig")</td>
+                                        <td>@StatusLabel(a.Progress?.Status)@(a.Overdue ? " · überfällig" : "")</td>
+                                        <td>@(a.Progress?.ProgressPercent ?? 0) %</td>
+                                        <td>@a.AssignedAt.ToLocalTime().ToString("dd.MM.yyyy") <span class="muted">von @a.AssignedByName</span></td>
+                                        <td>@(a.DueAt?.ToLocalTime().ToString("dd.MM.yyyy") ?? "—")</td>
+                                        <td><button class="btn btn-ghost btn-sm" @onclick="() => RevokeAsync(a.Id)" disabled="@_busy">Widerrufen</button></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+        }
+        else
+        {
+            <div class="card panel">
+                <h2 class="panel-title">Lernstatus</h2>
+                <p class="muted">Nur Status, Fortschritt und Termine — keine Karteninhalte, Chats oder Prüfungsantworten. Erfasst sind Zuweisungen und freiwillige Bearbeitungen globaler Themen.</p>
+                <div class="form-row">
+                    <select class="input" @bind="_fStatus" @bind:after="LoadStatusAsync" aria-label="Status filtern">
+                        <option value="">Alle Status</option>
+                        <option value="not_started">Nicht begonnen</option>
+                        <option value="in_progress">In Bearbeitung</option>
+                        <option value="completed">Abgeschlossen</option>
+                        <option value="overdue">Überfällig</option>
+                    </select>
+                    <label class="chip-check"><input type="checkbox" @bind="_fMandatory" @bind:after="LoadStatusAsync" /> nur verpflichtend</label>
+                </div>
+                @if (_status.Count == 0) { <p class="muted">Keine Einträge.</p> }
+                else
+                {
+                    <div class="table-wrap">
+                        <table class="table">
+                            <caption class="sr-only">Lernstatus je Benutzer und Thema</caption>
+                            <thead><tr><th>Benutzer</th><th>Thema</th><th>Version</th><th>Beziehung</th><th>Status</th><th>Fortschritt</th><th>Zugewiesen</th><th>Fällig</th><th>Abgeschlossen</th></tr></thead>
+                            <tbody>
+                                @foreach (var r in _status)
+                                {
+                                    <tr class="@(r.Overdue ? "row-overdue" : "")">
+                                        <td>@r.UserName</td><td>@r.TopicName</td><td>@r.Version</td><td>@RelationLabel(r.Relation)</td>
+                                        <td>@StatusLabel(r.Status)@(r.Overdue ? " · überfällig" : "")</td>
+                                        <td>@r.ProgressPercent % (@r.ModulesCompleted/@r.ModulesTotal)</td>
+                                        <td>@(r.AssignedAt?.ToLocalTime().ToString("dd.MM.yyyy") ?? "—")</td>
+                                        <td>@(r.DueAt?.ToLocalTime().ToString("dd.MM.yyyy") ?? "—")</td>
+                                        <td>@(r.CompletedAt?.ToLocalTime().ToString("dd.MM.yyyy") ?? "—")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private string _userId = "";
+    private bool _canAssign, _canRead, _busy, _error, _mandatory = true, _fMandatory;
+    private string _tab = "status";
+    private string? _message;
+    private List<AssignableTopic> _topics = new();
+    private List<AssignableVersion> _versions = new();
+    private List<TopicAssignmentInfo> _assignments = new();
+    private List<TopicStatusRow> _status = new();
+    private List<UserSearchResult> _userResults = new();
+    private string _topicId = "", _userQuery = "", _fStatus = "";
+    private int _version;
+    private DateTime? _due;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _userId = auth.User.GetUserId() ?? throw new UnauthorizedAccessException();
+        // nur zur Anzeige; jede Aktion prüft der Service gegen die Rollen in der Datenbank
+        _canAssign = auth.User.IsInRole(Roles.Admin) || auth.User.IsInRole(Roles.TopicAdmin);
+        _canRead = _canAssign || auth.User.IsInRole(Roles.Auditor);
+        if (_canAssign) _tab = "assign";
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        try
+        {
+            if (_canAssign) { _topics = await Topics.ListAssignableTopicsAsync(_userId); _assignments = await Topics.ListAssignmentsAsync(_userId); }
+            await LoadStatusAsync();
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or InvalidOperationException) { Fail(ex.Message); }
+    }
+
+    private async Task LoadStatusAsync()
+    {
+        try { _status = await Topics.ListStatusAsync(_userId, new TopicService.StatusFilter { Status = string.IsNullOrEmpty(_fStatus) ? null : _fStatus, MandatoryOnly = _fMandatory }); }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or InvalidOperationException) { Fail(ex.Message); }
+    }
+
+    private void OnTopicChanged()
+    {
+        _versions = _topics.FirstOrDefault(t => t.TopicId == _topicId)?.Versions ?? new();
+        _version = _versions.FirstOrDefault()?.Version ?? 0;
+    }
+
+    private async Task SearchUsersAsync()
+    {
+        try { _userResults = _userQuery.Trim().Length >= 3 ? await Topics.SearchUsersForAssignmentAsync(_userId, _userQuery) : new(); }
+        catch (Exception ex) when (ex is UnauthorizedAccessException) { Fail(ex.Message); }
+    }
+
+    private async Task AssignAsync(string targetUserId)
+    {
+        _busy = true; _message = null;
+        try
+        {
+            await Topics.AssignAsync(_userId, _topicId, targetUserId, _version > 0 ? _version : null, _mandatory, _due is DateTime d ? d.Date.AddHours(23).AddMinutes(59).ToUniversalTime() : null);
+            _message = _mandatory ? "Thema verpflichtend zugewiesen." : "Thema freiwillig zugewiesen."; _error = false;
+            await ReloadAsync();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException or UnauthorizedAccessException) { Fail(ex.Message); }
+        _busy = false;
+    }
+
+    private async Task RevokeAsync(string id)
+    {
+        _busy = true; _message = null;
+        try { await Topics.RevokeAssignmentAsync(_userId, id); _message = "Zuweisung widerrufen. Ergebnisse bleiben erhalten."; _error = false; await ReloadAsync(); }
+        catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException) { Fail(ex.Message); }
+        _busy = false;
+    }
+
+    private void Fail(string text) { _message = text; _error = true; }
+
+    private static string ViaLabel(string via) => via switch { "own" => "eigenes Thema", "shared" => "mit dir geteilt", _ => "global" };
+    private static string StatusLabel(string? s) => s switch { "completed" => "Abgeschlossen", "in_progress" => "In Bearbeitung", _ => "Nicht begonnen" };
+    private static string RelationLabel(string r) => r switch
+    {
+        "assigned_mandatory" => "Pflicht (zugewiesen)", "assigned_voluntary" => "zugewiesen, freiwillig", "shared" => "freigegeben", "own" => "eigenes Thema", _ => "global, freiwillig",
+    };
+}

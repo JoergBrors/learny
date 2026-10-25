@@ -10,7 +10,10 @@ public static class Roles
     /// <summary>Global Learny Auditor: Leserechte auf globale Inhalte/Ergebnisse (ab Freigabe-/Global-Funktion), keine Änderungsrechte.</summary>
     public const string Auditor = "auditor";
 
-    public static readonly string[] All = { User, Admin, Auditor };
+    /// <summary>Themen-Admin: verwaltet Themenzuweisungen und sieht den Lernstatus (ADR 0029); keine Einsicht in fremde private Inhalte, keine Veröffentlichung, keine Benutzerverwaltung.</summary>
+    public const string TopicAdmin = "themen_admin";
+
+    public static readonly string[] All = { User, Admin, Auditor, TopicAdmin };
 }
 
 /// <summary>Anwendungsbenutzer mit stabiler interner ID (unabhängig vom Identity Provider).</summary>
@@ -28,6 +31,7 @@ public class AppUser
     public bool IsActive => Status == "active";
     public bool IsAdmin => Roles.Contains(Domain.Roles.Admin);
     public bool IsAuditor => Roles.Contains(Domain.Roles.Auditor);
+    public bool IsTopicAdmin => Roles.Contains(Domain.Roles.TopicAdmin);
 }
 
 /// <summary>Zugeordnete externe Identität (z. B. Entra-ID-Subject).</summary>

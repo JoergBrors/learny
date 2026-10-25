@@ -4,6 +4,7 @@
 @inject CardRepository Repo
 @inject CertificateService Certs
 @inject ModuleTransferService Transfer
+@inject TopicService TopicSvc
 @inject NavigationManager Nav
 @inject AuthenticationStateProvider AuthState
 
@@ -107,6 +108,30 @@
         </div>
     }
 
+    @if (_mandatory.Count > 0)
+    {
+        <section class="card panel mandatory-box" aria-labelledby="mandatory-title">
+            <h2 class="panel-title" id="mandatory-title">Meine verpflichtenden Themen</h2>
+            <p class="muted">Diese Themen wurden dir ausdrücklich zugewiesen. Alle anderen Funktionen bleiben nutzbar.</p>
+            <ul class="mandatory-list">
+                @foreach (var t in _mandatory)
+                {
+                    var st = t.Progress?.Status ?? "not_started";
+                    <li class="mandatory-item @(t.Overdue ? "mandatory-overdue" : st == "in_progress" ? "mandatory-active" : "")">
+                        <div>
+                            <strong>@t.Topic.Name</strong> <span class="badge">Version @t.Version</span>
+                            <span class="badge @(st == "in_progress" ? "badge-warn" : "")">@(st == "in_progress" ? "In Bearbeitung" : "Nicht begonnen")</span>
+                            @if (t.DueAt is DateTime due) { <span class="badge @(t.Overdue ? "badge-warn" : "")">fällig @due.ToLocalTime().ToString("dd.MM.yyyy")@(t.Overdue ? " · überfällig" : "")</span> }
+                            <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="@(t.Progress?.ProgressPercent ?? 0)" aria-label="Lernfortschritt"><div class="progress-fill" style="width:@(t.Progress?.ProgressPercent ?? 0)%"></div></div>
+                            <span class="muted">@(t.Progress?.ProgressPercent ?? 0) % · @(t.Progress?.ModulesCompleted ?? 0) von @(t.Progress?.ModulesTotal ?? 0) Modulen abgeschlossen</span>
+                        </div>
+                        <a class="btn btn-primary btn-sm" href="/topics/@t.Topic.Id?version=@t.Version">@(st == "in_progress" ? "Fortsetzen" : "Beginnen")</a>
+                    </li>
+                }
+            </ul>
+        </section>
+    }
+
     <div class="tab-row" role="tablist" aria-label="Modulbereich wählen">
         <button class="chip @(_tab == "private" ? "chip-active" : "")" role="tab" aria-selected="@(_tab == "private")" @onclick='() => _tab = "private"'>Meine Module (@_modules.Count)</button>
         <button class="chip @(_tab == "shared" ? "chip-active" : "")" role="tab" aria-selected="@(_tab == "shared")" @onclick='() => _tab = "shared"'>Mit mir geteilt (@_shared.Count)</button>
@@ -182,6 +207,17 @@
                             <span class="pill">@mod.ActiveCount Karten</span>
                         </div>
                         <h2>@mod.Name</h2>
+                        @if (_tab == "private" && _usage.TryGetValue(mod.Id, out var uses) && uses.Count > 0)
+                        {
+                            <div class="module-usage" @onclick:stopPropagation="true">
+                                <span class="muted">Verwendet in @uses.Count @(uses.Count == 1 ? "Thema" : "Themen"):</span>
+                                @foreach (var u in uses)
+                                {
+                                    <a class="badge" href="@UsageHref(u)"
+                                       title="@UsageTitle(u)">@u.TopicName@(u.InDraft ? " · Entwurf" : "")@(u.Versions.Count > 0 ? " · V" + string.Join("/", u.Versions) : "")</a>
+                                }
+                            </div>
+                        }
                         @if (_certs.TryGetValue(mod.Id, out var cert))
                         {
                             <p class="module-pass">
@@ -237,6 +273,10 @@
     private int _importProgressPercent;
     private string _importProgressLabel = "";
     private string? _pendingDeleteModuleId;
+    private static string UsageHref(ModuleTopicUsage u) => u.Versions.Count > 0 ? "/topics/" + u.TopicId + "?version=" + u.Versions.Max() : "/topics/" + u.TopicId + "/edit";
+    private static string UsageTitle(ModuleTopicUsage u) => (u.InDraft ? "im Entwurf" : "nur in veröffentlichten Versionen") + (u.Versions.Count > 0 ? ", veröffentlicht in Version " + string.Join(", ", u.Versions) : "") + (u.GlobalActive ? ", global aktiv" : "");
+    private List<TopicSummary> _mandatory = new();
+    private Dictionary<string, List<ModuleTopicUsage>> _usage = new(StringComparer.OrdinalIgnoreCase);
     private ModuleDefinition? _pendingModule;
     private string _pendingModuleJson = "";
     private bool _cloning;
@@ -261,6 +301,13 @@
         _shared = await Repo.ListSharedWithMeAsync(_userId);
         _global = await Repo.ListGlobalModulesAsync();
         // bestandene Module: jüngstes Zertifikat je Modul (bei globalen Modulen gehört es zur jeweiligen Version)
+        try
+        {
+            // Pflichtthemen und Modulverwendung: ausschließlich serverseitig für den angemeldeten Benutzer; ein Fehler blockiert die Startseite nie
+            _mandatory = (await TopicSvc.ListOverviewAsync(_userId)).Mandatory;
+            _usage = await TopicSvc.ListModuleUsageAsync(_userId);
+        }
+        catch (Exception) { _mandatory = new(); _usage = new(StringComparer.OrdinalIgnoreCase); }
         _certs = (await Certs.ListForUserAsync(_userId)).Where(c => !c.IsRevoked).GroupBy(c => c.ModuleId, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.OrderByDescending(c => c.IssuedAt).First(), StringComparer.OrdinalIgnoreCase);
         _loading = false;

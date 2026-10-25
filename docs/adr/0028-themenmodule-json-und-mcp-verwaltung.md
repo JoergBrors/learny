@@ -1,6 +1,6 @@
 # 0028 — Eigene Themenmodule, portable JSON-Definitionen und MCP-Verwaltung von Themenentwürfen
 
-- **Status:** Akzeptiert (ersetzt Punkt 2 und Punkt 10 von [0027](0027-themen-lernpfade-versionierung-und-abschlusspruefungen.md); dessen übrige Entscheidungen gelten unverändert)
+- **Status:** Akzeptiert (ergänzt durch [0029](0029-themenzugriff-pflichtzuweisungen-und-themenadministration.md); ersetzt Punkt 2 und Punkt 10 von [0027](0027-themen-lernpfade-versionierung-und-abschlusspruefungen.md); dessen übrige Entscheidungen gelten unverändert)
 - **Datum:** 2026-10-25
 - **Anlass:** Module und Themen wurden in der Oberfläche leicht verwechselt; Themen konnten globale Originale direkt verwenden, Module und Themen ließen sich nicht vollständig als JSON sichern oder übertragen, und MCP konnte Themen nur lesen.
 - **Bezug:** [0002](0002-keine-nuget-pakete.md), [0004](0004-datenbank-abstraktion.md), [0006](0006-kanonisches-karten-json.md), [0007](0007-mcp-server.md), [0011](0011-mehrbenutzerarchitektur.md), [0013](0013-mcp-benutzergebundene-anmeldung.md), [0015](0015-freigaben-globale-lernmodule.md), [0016](0016-bilder-in-lernkarten.md), [0019](0019-einheitliches-quizsystem.md), [0027](0027-themen-lernpfade-versionierung-und-abschlusspruefungen.md)

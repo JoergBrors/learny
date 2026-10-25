@@ -165,11 +165,25 @@ Bei einem neuen Tag:
    - gerenderte `mcpsettings.json` → `<MCP_PHYSICAL_PATH>\mcpsettings.json`
    Falls die MCP-Datei im Repository fehlt, greift die Pipeline auf die bestehende Datei oder
    notfalls auf `mcpsettings.example.json` zurück.
-11. Falls `mcpsettings.json` vorhanden ist und `transports.http.enabled=true` setzt, legt die Action
-   zusätzlich einen Windows-Dienst für den MCP-Server an oder aktualisiert ihn.
+11. Falls `mcpsettings.json` vorhanden ist und `transports.http.enabled=true` setzt, richtet die Action den MCP-HTTP-Server
+   als **geplante Aufgabe** (Start beim Systemstart, SYSTEM) ein bzw. aktualisiert sie; ist unter `MCP_SERVICE_NAME` bereits ein
+   **Windows-Dienst** vorhanden, wird stattdessen dieser Dienst neu gestartet (kein Dienst wird angelegt). Details: Abschnitt „MCP-Neustart beim Deployment“.
 12. App Pool und Website werden wieder gestartet.
 13. Optional wird `/health` geprüft, wenn `IIS_BINDING_URL` gesetzt ist.
 14. Optional wird der MCP-HTTP-Endpunkt geprüft, wenn `MCP_HTTP_HEALTH_URL` gesetzt ist.
+
+## MCP-Neustart beim Deployment (ADR 0029)
+
+Der MCP-HTTP-Server ist ein **eigener Prozess** (nicht der IIS-App-Pool). Bei jedem Deployment mit gesetztem `MCP_PHYSICAL_PATH`:
+
+1. **Betriebsart ermitteln:** vorhandener Windows-Dienst `MCP_SERVICE_NAME` (Standard `LearnCardsMcpServer`) oder geplante Aufgabe gleichen Namens; der Zustand wird protokolliert.
+2. **Kontrolliert stoppen:** Dienst stoppen (bis 60 s warten), geplante Aufgabe beenden, übrige `LearnCards.McpServer.exe` aus dem Zielverzeichnis beenden; **warten (bis 45 s), bis kein MCP-Prozess mehr läuft** — sonst bricht der Job ab, **ohne** Dateien zu ersetzen.
+3. **Dateien aktualisieren** (`robocopy /MIR`); `mcpsettings.json` wird gesichert und danach aus dem sicheren Rendering (oder dem Bestand) wiederhergestellt; Geheimnisse werden nie protokolliert.
+4. **Starten:** Windows-Dienst vorhanden → `Start-Service`, auf `Running` und einen MCP-Prozess warten. Sonst geplante Aufgabe neu anlegen und starten, bis 45 s auf den Prozess warten. HTTP-Transport deaktiviert (reiner stdio-Modus) → es wird nichts gestartet, die Aufgabe entfernt. Ein nicht vorhandener Dienst wird nie gestartet oder angelegt.
+5. **Betriebsbereitschaft:** bei gesetzter `MCP_HTTP_HEALTH_URL` Healthcheck mit bis zu 12 Versuchen (je 5 s) plus Prüfung der OAuth-Metadaten. **Fehlstart oder fehlende Antwort lassen das Deployment fehlschlagen** (kein stiller Erfolg).
+6. **Wiederholbar:** Der Ablauf ist idempotent; ein erneuter Lauf (Tag/`workflow_dispatch`) stoppt, aktualisiert und startet wieder.
+
+**Wiederanlauf/Rollback:** Das vorherige MCP-Verzeichnis liegt im Runner-Temp (`backup-mcp\<Zeitstempel>`); bei Fehlstart den Dienst/die Aufgabe stoppen, Inhalt zurückkopieren (`robocopy <Backup> <MCP_PHYSICAL_PATH> /MIR`), `mcpsettings.json` prüfen und Dienst bzw. Aufgabe (`schtasks /Run /TN <Name>`) starten. Externe stdio-Clients werden nicht neu gestartet.
 
 ## Tag-basiertes Auslösen
 
@@ -192,8 +206,8 @@ Danach startet der Workflow automatisch.
   passende Runtime auf dem IIS-Server vorhanden sein oder durch das Hosting Bundle installiert werden.
 - Der MCP-Server wird ebenfalls framework-dependent veröffentlicht.
 - Im reinen `stdio`-Modus bleibt der MCP-Server clientgesteuert und wird nicht als Dienst verwendet.
-- Sobald `mcpsettings.json` den HTTP-Transport aktiviert, erzeugt und startet die Pipeline zusätzlich
-  einen Windows-Dienst für den MCP-HTTP-Server.
+- Sobald `mcpsettings.json` den HTTP-Transport aktiviert, richtet die Pipeline den MCP-HTTP-Server als geplante Aufgabe
+  (bzw. vorhandenen Windows-Dienst gleichen Namens) ein und startet ihn nach jedem Deployment neu.
 - Unabhängig davon erzeugt die Pipeline ein fertiges Launcher-Skript. Ein Client wie Claude Desktop kann dieses
   Skript automatisch starten, sodass auch im `stdio`-Modus kein manueller Konsolenstart nötig ist.
 

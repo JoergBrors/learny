@@ -865,16 +865,31 @@ jobs:
           }
           New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
 
+          # 1. Zustand ermitteln (nur Protokoll; keine Geheimnisse)
+          $mcpService = Get-Service -Name $taskName -ErrorAction SilentlyContinue
+          $mcpMode = if ($null -ne $mcpService) { "Windows-Dienst" } else { "geplante Aufgabe" }
+          Write-Host ("MCP-Betriebsart: {0} '{1}' (Zustand vor dem Update: {2})" -f $mcpMode, $taskName, $(if ($null -ne $mcpService) { $mcpService.Status } else { "-" }))
+
+          # 2. Kontrolliert stoppen: Dienst (falls vorhanden) und geplante Aufgabe beenden, danach alle MCP-Prozesse aus dem Zielverzeichnis
+          if ($null -ne $mcpService -and $mcpService.Status -ne "Stopped") {
+            Stop-Service -Name $taskName -Force -ErrorAction Stop
+            $mcpService.WaitForStatus("Stopped", [TimeSpan]::FromSeconds(60))
+          }
           cmd.exe /c "schtasks /End /TN ""$taskName"" >nul 2>nul"
           $global:LASTEXITCODE = 0
-
-          $mcpProcesses = Get-CimInstance Win32_Process -Filter "Name = 'LearnCards.McpServer.exe'" -ErrorAction SilentlyContinue
-          foreach ($process in @($mcpProcesses)) {
-            if ($process.ExecutablePath -and $process.ExecutablePath.StartsWith($env:MCP_PHYSICAL_PATH, [System.StringComparison]::OrdinalIgnoreCase)) {
-              Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
-            }
+          function Get-McpProcesses {
+            Get-CimInstance Win32_Process -Filter "Name = 'LearnCards.McpServer.exe'" -ErrorAction SilentlyContinue |
+              Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($env:MCP_PHYSICAL_PATH, [System.StringComparison]::OrdinalIgnoreCase) }
           }
-          Start-Sleep -Seconds 2
+          foreach ($process in @(Get-McpProcesses)) { Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue }
+
+          # 3. Warten, bis kein MCP-Prozess mehr läuft; erst danach werden Dateien ersetzt (sonst bleiben gesperrte Dateien oder die alte Version aktiv)
+          $stopDeadline = (Get-Date).AddSeconds(45)
+          while (@(Get-McpProcesses).Count -gt 0 -and (Get-Date) -lt $stopDeadline) { Start-Sleep -Seconds 1 }
+          if (@(Get-McpProcesses).Count -gt 0) {
+            throw "Der MCP-Server konnte nicht beendet werden (Prozess läuft nach 45 s weiter). Die Programmdateien wurden NICHT ersetzt."
+          }
+          Write-Host "MCP-Server ist vollständig beendet."
 
           New-Item -ItemType Directory -Path $backupPath -Force | Out-Null
           if (Test-Path -LiteralPath $env:MCP_PHYSICAL_PATH) {
@@ -1011,6 +1026,27 @@ jobs:
             exit 0
           }
 
+          function Get-McpProcesses {
+            Get-CimInstance Win32_Process -Filter "Name = 'LearnCards.McpServer.exe'" -ErrorAction SilentlyContinue |
+              Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($env:MCP_PHYSICAL_PATH, [System.StringComparison]::OrdinalIgnoreCase) }
+          }
+
+          # Ist der HTTP-MCP-Server als echter Windows-Dienst eingerichtet, wird genau dieser Dienst gestartet (nicht die geplante Aufgabe); ein nicht vorhandener Dienst wird nie angelegt oder gestartet
+          $mcpService = Get-Service -Name $taskName -ErrorAction SilentlyContinue
+          if ($null -ne $mcpService) {
+            if ($mcpService.Status -ne "Stopped") { Stop-Service -Name $taskName -Force -ErrorAction Stop; $mcpService.WaitForStatus("Stopped", [TimeSpan]::FromSeconds(60)) }
+            Start-Service -Name $taskName -ErrorAction Stop
+            try { $mcpService.WaitForStatus("Running", [TimeSpan]::FromSeconds(60)) }
+            catch { throw "Der MCP-Windows-Dienst '$taskName' erreicht den Zustand 'Running' nicht innerhalb von 60 s (Status: $((Get-Service -Name $taskName).Status))." }
+            $svcDeadline = (Get-Date).AddSeconds(30)
+            while (@(Get-McpProcesses).Count -eq 0 -and (Get-Date) -lt $svcDeadline) { Start-Sleep -Seconds 1 }
+            if (@(Get-McpProcesses).Count -eq 0) { throw "Der MCP-Windows-Dienst '$taskName' läuft, aber es gibt keinen MCP-Prozess aus '$($env:MCP_PHYSICAL_PATH)'." }
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ""
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "## MCP Windows service"
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ("- Dienst: {0} (Running), Prozess gestartet: {1}" -f $taskName, (@(Get-McpProcesses)[0].CreationDate))
+            exit 0
+          }
+
           $serviceLauncherPath = Join-Path $env:MCP_PHYSICAL_PATH "learncards-mcp-http.cmd"
           if (-not (Test-Path -LiteralPath $serviceLauncherPath)) {
             throw "MCP-Service-Launcher wurde nicht gefunden: $serviceLauncherPath"
@@ -1055,13 +1091,16 @@ jobs:
           }
           $global:LASTEXITCODE = 0
 
-          Start-Sleep -Seconds 3
-          $startedProcess = Get-CimInstance Win32_Process -Filter "Name = 'LearnCards.McpServer.exe'" -ErrorAction SilentlyContinue |
-            Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($env:MCP_PHYSICAL_PATH, [System.StringComparison]::OrdinalIgnoreCase) } |
-            Select-Object -First 1
-          if (-not $startedProcess) {
-            throw "MCP-Prozess wurde nicht gestartet."
+          $startDeadline = (Get-Date).AddSeconds(45)
+          $startedProcess = $null
+          while ($null -eq $startedProcess -and (Get-Date) -lt $startDeadline) {
+            Start-Sleep -Seconds 2
+            $startedProcess = @(Get-McpProcesses) | Select-Object -First 1
           }
+          if (-not $startedProcess) {
+            throw "MCP-Prozess wurde nach dem Start der geplanten Aufgabe '$taskName' innerhalb von 45 s nicht gestartet. Das Deployment gilt als fehlgeschlagen; die vorherige Version liegt im Backup des Runners (Installationsschritt, backup-mcp)."
+          }
+          Write-Host ("MCP-Prozess gestartet: PID {0}" -f $startedProcess.ProcessId)
 
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ""
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "## MCP background task"
@@ -1162,10 +1201,23 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $response = Invoke-WebRequest -Uri $env:MCP_HTTP_HEALTH_URL -UseBasicParsing -TimeoutSec 30
-          if ($response.StatusCode -lt 200 -or $response.StatusCode -ge 300) {
-            throw "MCP-Health-Check fehlgeschlagen: $($response.StatusCode)"
+          # Der Prozess braucht einen Moment, bis er lauscht: bis zu 12 Versuche im Abstand von 5 s; kein stiller Erfolg bei dauerhaftem Fehler
+          $response = $null
+          $lastError = ""
+          for ($attempt = 1; $attempt -le 12; $attempt++) {
+            try {
+              $response = Invoke-WebRequest -Uri $env:MCP_HTTP_HEALTH_URL -UseBasicParsing -TimeoutSec 15
+              if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 300) { break }
+              $lastError = "HTTP $($response.StatusCode)"
+            }
+            catch { $lastError = $_.Exception.Message }
+            $response = $null
+            Start-Sleep -Seconds 5
           }
+          if ($null -eq $response) {
+            throw "MCP-Health-Check fehlgeschlagen (12 Versuche): $lastError. Dienststatus prüfen (Windows-Dienst bzw. geplante Aufgabe '$($env:MCP_SERVICE_NAME)') und das Backup des vorherigen Stands wiederherstellen."
+          }
+          Write-Host "MCP-Health-Check bestanden."
 
           # OAuth-Metadaten: Jede veröffentlichte URL muss auf denselben öffentlichen Host zeigen und erreichbar sein (sonst scheitert die Registrierung in Claude)
           $publicBase = ([Uri]$env:MCP_HTTP_HEALTH_URL).GetLeftPart([UriPartial]::Authority)

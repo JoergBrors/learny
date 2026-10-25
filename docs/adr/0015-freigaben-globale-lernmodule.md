@@ -1,6 +1,6 @@
 # 0015 — Benutzerfreigaben, globale Lernmodule und Ergebniszuordnung
 
-- **Status:** Akzeptiert
+- **Status:** Akzeptiert (ergänzt durch [0029](0029-themenzugriff-pflichtzuweisungen-und-themenadministration.md): themenbezogene Modulrechte, Pflichtzuweisungen)
 - **Datum:** 2026-10-24
 - **Baut auf:** [0011](0011-mehrbenutzerarchitektur.md) (Eigentum), [0012](0012-rollen-aus-entra-app-roles.md) (Rollen), [0013](0013-mcp-benutzergebundene-anmeldung.md) (MCP)
 - **Differenziert:** die Aussage „es gibt keinen gemeinsamen Kartenbestand“ — private Bestände bleiben isoliert, zusätzlich existieren **explizit verwaltete** freigegebene und globale Bereiche.

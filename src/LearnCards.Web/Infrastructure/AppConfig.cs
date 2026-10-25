@@ -113,7 +113,7 @@ public class AppConfig
                 var external = pair[..eq].Trim();
                 var internalRole = pair[(eq + 1)..].Trim().ToLowerInvariant();
                 // "user" besitzt jeder; nur bekannte, privilegierte interne Rollen sind abbildbar
-                if (external.Length > 0 && internalRole is "admin" or "auditor") cfg.RoleMap[external] = internalRole;
+                if (external.Length > 0 && internalRole is "admin" or "auditor" or "themen_admin") cfg.RoleMap[external] = internalRole;
             }
         }
 

@@ -1,6 +1,6 @@
 # 0012 — Rollen aus Entra-ID-App-Rollen
 
-- **Status:** Akzeptiert
+- **Status:** Akzeptiert (ergänzt durch [0029](0029-themenzugriff-pflichtzuweisungen-und-themenadministration.md): `themen_admin` ist über `OIDC_ROLE_MAP` abbildbar)
 - **Datum:** 2026-10-24
 - **Ergänzt:** [0011](0011-mehrbenutzerarchitektur.md) (Rollen), [0005](0005-authentifizierung.md) (OIDC)
 

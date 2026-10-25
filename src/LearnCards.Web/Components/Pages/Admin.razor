@@ -57,6 +57,7 @@
                                 <td class="actions">
                                     <button class="btn btn-ghost btn-sm" @onclick="() => ToggleRole(u, Roles.Admin)">Admin @(u.IsAdmin ? "entziehen" : "vergeben")</button>
                                     <button class="btn btn-ghost btn-sm" @onclick="() => ToggleRole(u, Roles.Auditor)">Auditor @(u.IsAuditor ? "entziehen" : "vergeben")</button>
+                                    <button class="btn btn-ghost btn-sm" @onclick="() => ToggleRole(u, Roles.TopicAdmin)">Themen-Admin @(u.IsTopicAdmin ? "entziehen" : "vergeben")</button>
                                     <button class="btn btn-ghost btn-sm" @onclick="() => ToggleStatus(u)">@(u.IsActive ? "Sperren" : "Entsperren")</button>
                                 </td>
                             </tr>

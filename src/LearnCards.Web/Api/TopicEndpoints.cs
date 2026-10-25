@@ -92,6 +92,9 @@ public static partial class ApiEndpoints
         t.MapGet("/users", (string? q, HttpContext http, TopicService topics) =>
             GuardTopic(async () => Results.Ok((await topics.SearchUsersAsync(Uid(http), q)).Select(u => new { id = u.Id, display_name = u.DisplayName, email = u.Email }))));
 
+        // Verwendung der eigenen Module in eigenen Themen (Entwurf/Versionen) — nur eigene Themen, nie fremde (ADR 0029)
+        t.MapGet("/module-usage", (HttpContext http, TopicService topics) => GuardTopic(async () => Results.Ok(await topics.ListModuleUsageAsync(Uid(http)))));
+
         t.MapGet("/{id}", (string id, int? version, HttpContext http, TopicService topics) =>
             GuardTopic(async () => Results.Ok(await topics.GetDetailAsync(Uid(http), id, version))));
         t.MapPut("/{id}", (string id, TopicWriteRequest req, HttpContext http, TopicService topics) =>
@@ -150,12 +153,7 @@ public static partial class ApiEndpoints
             GuardTopic(async () => { await topics.GrantShareAsync(Uid(http), id, req.UserId); return Results.NoContent(); }));
         t.MapDelete("/{id}/shares/{userId}", (string id, string userId, HttpContext http, TopicService topics) =>
             GuardTopic(async () => await topics.RevokeShareAsync(Uid(http), id, userId) ? Results.NoContent() : Results.Json(new { detail = "Freigabe nicht gefunden." }, statusCode: 404)));
-        t.MapGet("/{id}/assignments", (string id, HttpContext http, TopicService topics) =>
-            GuardTopic(async () => Results.Ok(await topics.ListAssignmentsAsync(Uid(http), id))));
-        t.MapPost("/{id}/assignments", (string id, TopicUserRequest req, HttpContext http, TopicService topics) =>
-            GuardTopic(async () => { await topics.AssignAsync(Uid(http), id, req.UserId); return Results.NoContent(); }));
-        t.MapDelete("/{id}/assignments/{userId}", (string id, string userId, HttpContext http, TopicService topics) =>
-            GuardTopic(async () => await topics.UnassignAsync(Uid(http), id, userId) ? Results.NoContent() : Results.Json(new { detail = "Zuweisung nicht gefunden." }, statusCode: 404)));
+        // Zuweisungen gibt es hier nicht mehr: ausschließlich administrativ unter /api/topic-admin (ADR 0029)
 
         // Lernfortschritt und Prüfungen (Lernende und Eigentümer; Abgabe über /api/quiz/submit mit der Sitzung)
         t.MapGet("/{id}/progress", (string id, int? version, HttpContext http, TopicService topics) =>
@@ -168,6 +166,20 @@ public static partial class ApiEndpoints
             GuardTopic(async () => Results.Ok(StartDto(await topics.StartModuleExamAsync(Uid(http), id, req.ModuleId, req.Version, http.RequestAborted), null))));
         t.MapPost("/{id}/exams/final", (string id, TopicExamRequest? req, HttpContext http, TopicService topics) =>
             GuardTopic(async () => Results.Ok(StartDto(await topics.StartFinalExamAsync(Uid(http), id, req?.Version, http.RequestAborted), null))));
+
+        // Themenzuweisungen und Lernstatus (ADR 0029): Rollen prüft der Service gegen die Datenbank (Admin/Themen-Admin schreiben, Auditor liest Status). Der Pfad liegt
+        // bewusst außerhalb von /api/topics* — MCP-Tokens erreichen ihn nie (TokenAllowedPrefixes/TokenMayReadTopics).
+        var ta = secured.MapGroup("/topic-admin");
+        ta.MapGet("/topics", (HttpContext http, TopicService topics) => GuardTopic(async () => Results.Ok(await topics.ListAssignableTopicsAsync(Uid(http)))));
+        ta.MapGet("/users", (string? q, HttpContext http, TopicService topics) =>
+            GuardTopic(async () => Results.Ok((await topics.SearchUsersForAssignmentAsync(Uid(http), q)).Select(u => new { id = u.Id, display_name = u.DisplayName }))));
+        ta.MapGet("/assignments", (string? topic_id, HttpContext http, TopicService topics) => GuardTopic(async () => Results.Ok(await topics.ListAssignmentsAsync(Uid(http), topic_id))));
+        ta.MapPost("/assignments", (TopicAssignRequest req, HttpContext http, TopicService topics) =>
+            GuardTopic(async () => Results.Json(await topics.AssignAsync(Uid(http), req.TopicId, req.UserId, req.Version, req.Mandatory ?? true, req.DueAt), statusCode: 201)));
+        ta.MapDelete("/assignments/{assignmentId}", (string assignmentId, HttpContext http, TopicService topics) =>
+            GuardTopic(async () => await topics.RevokeAssignmentAsync(Uid(http), assignmentId) ? Results.NoContent() : Results.Json(new { detail = "Zuweisung nicht gefunden." }, statusCode: 404)));
+        ta.MapGet("/status", (string? topic_id, string? user_id, string? status, HttpContext http, TopicService topics, bool mandatory_only = false) =>
+            GuardTopic(async () => Results.Ok(await topics.ListStatusAsync(Uid(http), new TopicService.StatusFilter { TopicId = topic_id, UserId = user_id, Status = status, MandatoryOnly = mandatory_only }))));
 
         // Administration der globalen Themenversionen (Rolle wird im Service gegen die DB geprüft; für MCP-Tokens gesperrt)
         var a = secured.MapGroup("/admin/topics");
@@ -193,6 +205,7 @@ public class TopicArchiveRequest { public bool Archived { get; set; } = true; }
 public class TopicModuleRequest { public string ModuleId { get; set; } = ""; }
 public class TopicOrderRequest { public List<string>? ModuleIds { get; set; } }
 public class TopicUserRequest { public string UserId { get; set; } = ""; }
+public class TopicAssignRequest { public string TopicId { get; set; } = ""; public string UserId { get; set; } = ""; public int? Version { get; set; } public bool? Mandatory { get; set; } public DateTime? DueAt { get; set; } }
 public class TopicPublishRequest { public bool SubmitGlobal { get; set; } }
 public class TopicSeenRequest { public int Version { get; set; } }
 public class TopicExamRequest { public string ModuleId { get; set; } = ""; public int? Version { get; set; } }

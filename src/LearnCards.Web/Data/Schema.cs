@@ -524,6 +524,9 @@ public static class Schema
                 assigned_at TEXT NOT NULL,
                 status      TEXT NOT NULL DEFAULT 'active',
                 revoked_at  TEXT NULL,
+                topic_version INTEGER NULL,
+                mandatory   INTEGER NOT NULL DEFAULT 1,
+                due_at      TEXT NULL,
                 UNIQUE (topic_id, user_id)
             )
             """;

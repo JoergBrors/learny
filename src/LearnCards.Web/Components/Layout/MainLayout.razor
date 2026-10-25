@@ -18,6 +18,14 @@
                     <div class="topbar-actions">
                         <a class="btn btn-ghost btn-sm" href="/" aria-label="Module">Module</a>
                         <a class="btn btn-ghost btn-sm" href="/topics" aria-label="Themen">Themen</a>
+                        @if (context.User.IsInRole(Roles.Admin) || context.User.IsInRole(Roles.TopicAdmin))
+                        {
+                            <a class="btn btn-ghost btn-sm" href="/topic-admin">Zuweisungen</a>
+                        }
+                        else if (context.User.IsInRole(Roles.Auditor))
+                        {
+                            <a class="btn btn-ghost btn-sm" href="/topic-admin">Lernstatus</a>
+                        }
                         <a class="btn btn-ghost btn-sm" href="/help">Hilfe</a>
                         @if (context.User.IsInRole(Roles.Admin))
                         {

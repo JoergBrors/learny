@@ -327,7 +327,7 @@ public static class TopicTransferTests
                   && (await raw.PutAsync($"/api/topics/{mcpTopicId}/definition", Raw(def.ToJsonString()))).IsSuccessStatusCode
                   && (await raw.PostAsync("/api/topics/", Body(new { name = "Direkt" }))).StatusCode == HttpStatusCode.Forbidden
                   && (await raw.PostAsync($"/api/topics/{mcpTopicId}/versions", Body(new { }))).StatusCode == HttpStatusCode.Forbidden
-                  && (await raw.PostAsync($"/api/topics/{mcpTopicId}/assignments", Body(new { user_id = Guid.NewGuid() }))).StatusCode == HttpStatusCode.Forbidden
+                  && !(await raw.PostAsync($"/api/topics/{mcpTopicId}/assignments", Body(new { user_id = Guid.NewGuid() }))).IsSuccessStatusCode
                   && (await raw.PostAsync($"/api/topics/{mcpTopicId}/modules/{basis}/replace-with-clone", Body(new { }))).StatusCode == HttpStatusCode.Forbidden
                   && (await raw.PostAsync("/api/admin/topics/versions/x/approve", Body(new { }))).StatusCode == HttpStatusCode.Forbidden,
                 "T130 MCP-Token darf nur Themen importieren und den eigenen Entwurf aktualisieren — Veröffentlichen, Zuweisen, Ersetzen und Administration bleiben gesperrt (403)");

@@ -448,61 +448,7 @@ public partial class TopicService
 
     public Task<List<UserSearchResult>> SearchUsersAsync(string userId, string? query) => _users.SearchUsersAsync(userId, query);
 
-    // ─── Zuweisungen ────────────────────────────────────────────────────────
-
-    /// <summary>Weist ein veröffentlichtes Thema einem aktiven Benutzer als Lernaufgabe zu. Wiederholtes Zuweisen reaktiviert eine zurückgenommene Zuweisung.</summary>
-    public async Task AssignAsync(string ownerId, string topicId, string targetUserId)
-    {
-        var topic = await RequireOwnTopicAsync(ownerId, topicId);
-        if (!UserService.IsGuid(targetUserId)) throw new KeyNotFoundException("Benutzer nicht gefunden.");
-        var target = await _users.GetAsync(targetUserId);
-        if (target is null || !target.IsActive) throw new KeyNotFoundException("Benutzer nicht gefunden.");
-        if (topic.LatestVersion == 0) throw new InvalidOperationException("Veröffentliche zuerst eine Version des Themas — nur veröffentlichte Versionen können zugewiesen werden.");
-
-        var existing = await _db.QueryAsync("SELECT id FROM topic_assignments WHERE topic_id = @t AND user_id = @u", new (string, object?)[] { ("t", topic.Id), ("u", target.Id) });
-        if (existing.Count > 0)
-            await _db.ExecuteAsync("UPDATE topic_assignments SET status = 'active', revoked_at = NULL, assigned_by = @o, assigned_at = @n WHERE topic_id = @t AND user_id = @u",
-                new (string, object?)[] { ("o", ownerId), ("n", DateTime.UtcNow), ("t", topic.Id), ("u", target.Id) });
-        else
-            await _db.ExecuteAsync("INSERT INTO topic_assignments (id, topic_id, user_id, assigned_by, assigned_at, status) VALUES (@id, @t, @u, @o, @n, 'active')",
-                new (string, object?)[] { ("id", Guid.NewGuid().ToString()), ("t", topic.Id), ("u", target.Id), ("o", ownerId), ("n", DateTime.UtcNow) });
-        await _users.WriteAuditAsync(ownerId, "topic.assign", topic.Id, $"user={target.Id}");
-    }
-
-    public async Task<bool> UnassignAsync(string ownerId, string topicId, string targetUserId)
-    {
-        var topic = await RequireOwnTopicAsync(ownerId, topicId, allowArchived: true);
-        if (!UserService.IsGuid(targetUserId)) return false;
-        var n = await _db.ExecuteAsync("UPDATE topic_assignments SET status = 'revoked', revoked_at = @n WHERE topic_id = @t AND user_id = @u AND status = 'active'",
-            new (string, object?)[] { ("n", DateTime.UtcNow), ("t", topic.Id), ("u", targetUserId) });
-        if (n > 0) await _users.WriteAuditAsync(ownerId, "topic.unassign", topic.Id, $"user={targetUserId}");
-        return n > 0;
-    }
-
-    /// <summary>
-    /// Zuweisungen mit Bearbeitungsstand. Der Eigentümer sieht den Fortschritt (Module, Prüfungsstatus) der <b>zugewiesenen</b> Benutzer — das ist der Zweck einer Lernaufgabe;
-    /// Antworten, Chats und Einzelergebnisse bleiben privat.
-    /// </summary>
-    public async Task<List<TopicAssignmentInfo>> ListAssignmentsAsync(string ownerId, string topicId)
-    {
-        var topic = await RequireOwnTopicAsync(ownerId, topicId, allowArchived: true);
-        var rows = await _db.QueryAsync("""
-            SELECT a.id, a.user_id, a.assigned_by, a.assigned_at, u.display_name
-            FROM topic_assignments a JOIN users u ON u.id = a.user_id
-            WHERE a.topic_id = @t AND a.status = 'active' ORDER BY u.display_name
-            """, new[] { ("t", (object?)topic.Id) });
-        var list = new List<TopicAssignmentInfo>();
-        foreach (var r in rows)
-        {
-            var uid = r["user_id"] ?? "";
-            list.Add(new TopicAssignmentInfo
-            {
-                Id = r["id"] ?? "", TopicId = topic.Id, UserId = uid, UserName = r.GetValueOrDefault("display_name") ?? "", AssignedBy = r.GetValueOrDefault("assigned_by") ?? "",
-                AssignedAt = DbValue.ToDateTime(r.GetValueOrDefault("assigned_at")), Progress = await ComputeProgressForUserAsync(uid, topic, requireAccess: false),
-            });
-        }
-        return list;
-    }
+    // Zuweisungen: ausschließlich administrativ (Admin/Themen-Admin) in TopicService.Assignments.cs (ADR 0029); der Eigentümer weist nicht mehr zu.
 
     // ─── Überblick ──────────────────────────────────────────────────────────
 
@@ -512,6 +458,10 @@ public partial class TopicService
         public List<TopicSummary> Shared { get; set; } = new();
         public List<TopicSummary> Assigned { get; set; } = new();
         public List<TopicSummary> Global { get; set; } = new();
+        /// <summary>Offene Pflichtzuweisungen des Benutzers (nicht abgeschlossen), überfällige zuerst.</summary>
+        public List<TopicSummary> Mandatory { get; set; } = new();
+        /// <summary>Abgeschlossene Pflichtzuweisungen (Lernverlauf; keine offene Pflicht mehr).</summary>
+        public List<TopicSummary> MandatoryDone { get; set; } = new();
     }
 
     /// <summary>Vier Bereiche: meine Themen, mit mir geteilte, mir zugewiesene und globale Themen. Archivierte Themen erscheinen nur mit <paramref name="includeArchived"/>.</summary>
@@ -539,6 +489,13 @@ public partial class TopicService
             assignedIds.Add(s.Topic.Id);
             overview.Assigned.Add(s);
         }
+        var ownAssigned = new List<TopicSummary>();
+        // Pflicht auch für Themen, die der Benutzer selbst besitzt oder die global sind: eine ausdrückliche Zuweisung bleibt eine Zuweisung
+        foreach (var r in await _db.QueryAsync(TopicSelect + " JOIN topic_assignments a ON a.topic_id = t.id AND a.user_id = @u AND a.status = 'active' WHERE t.owner_user_id = @u" + archivedFilter, new[] { ("u", (object?)userId) }))
+        {
+            var s = await LearnerSummaryAsync(userId, MapTopic(r), TopicSections.Assigned);
+            if (s is not null) { assignedIds.Add(s.Topic.Id); ownAssigned.Add(s); }   // erscheint in „Meine Themen“, zusätzlich nur als Pflicht
+        }
         foreach (var r in await _db.QueryAsync(TopicSelect + " JOIN topic_shares sh ON sh.topic_id = t.id AND sh.target_user_id = @u AND sh.revoked_at IS NULL WHERE t.owner_user_id <> @u" + archivedFilter + " ORDER BY t.name",
                      new[] { ("u", (object?)userId) }))
         {
@@ -552,6 +509,9 @@ public partial class TopicService
             var s = await LearnerSummaryAsync(userId, MapTopic(r), TopicSections.Global, globalOnly: true);
             if (s is not null) overview.Global.Add(s);
         }
+        foreach (var s in overview.Assigned.Concat(ownAssigned).Where(x => x.Mandatory))
+            (s.Progress?.Status == TopicLearnStatuses.Completed ? overview.MandatoryDone : overview.Mandatory).Add(s);
+        overview.Mandatory = overview.Mandatory.OrderByDescending(x => x.Overdue).ThenBy(x => x.DueAt ?? DateTime.MaxValue).ThenBy(x => x.Topic.Name).ToList();
         return overview;
     }
 
@@ -562,6 +522,18 @@ public partial class TopicService
         var summary = new TopicSummary { Topic = topic, Section = section, Version = version.VersionNumber, GlobalStatus = version.GlobalStatus, Stats = version.Stats };
         summary.Progress = await ComputeProgressForUserAsync(userId, topic, requireAccess: false, version);
         summary.NewerVersionAvailable = summary.Progress?.NewerVersionAvailable ?? false;
+        // Beziehung: ausdrückliche Zuweisung (verpflichtend oder freiwillig) > persönliche Freigabe > globale Sichtbarkeit; global allein ist nie Pflicht
+        var asg = (await _db.QueryAsync("SELECT mandatory, due_at, assigned_at, topic_version FROM topic_assignments WHERE topic_id = @t AND user_id = @u AND status = 'active'", new (string, object?)[] { ("t", topic.Id), ("u", userId) })).FirstOrDefault();
+        if (asg is not null)
+        {
+            summary.Mandatory = DbValue.ToBool(asg.GetValueOrDefault("mandatory"));
+            summary.Relation = summary.Mandatory ? TopicRelations.AssignedMandatory : TopicRelations.AssignedVoluntary;
+            summary.AssignedAt = DbValue.ToDateTime(asg.GetValueOrDefault("assigned_at"));
+            summary.DueAt = asg.GetValueOrDefault("due_at") is { Length: > 0 } d ? DbValue.ToDateTime(d) : null;
+            summary.AssignedVersion = asg.GetValueOrDefault("topic_version") is { Length: > 0 } av ? DbValue.ToInt(av) : null;
+            summary.Overdue = summary.Mandatory && summary.DueAt is DateTime due && due < DateTime.UtcNow && summary.Progress?.Status != TopicLearnStatuses.Completed;
+        }
+        else summary.Relation = section == TopicSections.Shared ? TopicRelations.Shared : TopicRelations.GlobalVoluntary;
         return summary;
     }
 

@@ -1,6 +1,6 @@
 # 0011 — Mehrbenutzerarchitektur: Identität, Besitz, Rollen, Migration
 
-- **Status:** Akzeptiert
+- **Status:** Akzeptiert (ergänzt durch [0029](0029-themenzugriff-pflichtzuweisungen-und-themenadministration.md): Rolle `themen_admin`)
 - **Datum:** 2026-10-24
 - **Teilweise ersetzt durch:** [0013](0013-mcp-benutzergebundene-anmeldung.md) (`MCP_LINKED_USER_ID` entfällt; MCP-Zugriff läuft über benutzergebundene Tokens)
 - **Differenziert durch:** [0015](0015-freigaben-globale-lernmodule.md) (freigegebene und globale Module als explizit verwaltete Ausnahmen vom reinen Privateigentum; Rolle `auditor` erhält dort lesende Rechte)

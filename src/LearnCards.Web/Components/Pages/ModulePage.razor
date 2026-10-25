@@ -4,6 +4,7 @@
 @inject CardRepository Repo
 @inject NavigationManager Nav
 @inject SharingService Sharing
+@inject TopicService TopicSvc
 @inject AuthenticationStateProvider AuthState
 
 <PageTitle>@(_module?.Name ?? "Modul") — LearnCards</PageTitle>
@@ -24,7 +25,16 @@
     else
     {
         <section class="module-hero card">
-            <nav class="breadcrumb"><a href="/">Module</a> <span aria-hidden="true">›</span> <span>@_module.Name</span></nav>
+            @if (_context == "topic")
+            {
+                <nav class="breadcrumb"><a href="/topics">Themen</a> <span aria-hidden="true">›</span>
+                    @if (_origin is not null) { <a href="/topics/@_origin.TopicId?version=@_origin.Version">@_origin.TopicName</a><span aria-hidden="true"> › </span> }
+                    <span>@_module.Name</span></nav>
+            }
+            else
+            {
+                <nav class="breadcrumb"><a href="/">Module</a> <span aria-hidden="true">›</span> <span>@_module.Name</span></nav>
+            }
 
             <div class="page-head module-page-head">
                 <div class="module-head">
@@ -37,20 +47,32 @@
                             <p class="muted context-note">
                                 @(_context == "shared"
                                     ? $"Freigegeben von {_module.OwnerName} — du kannst lernen und Quizze machen, das Original aber nicht ändern."
-                                    : $"Globales Modul (Version {_module.GlobalVersion}, Herkunft: {_module.OwnerName}) — zum Lernen, nicht zum Bearbeiten.")
+                                    : _context == "topic"
+                                        ? $"Themenmodul — eingefrorener Versionsstand{(_origin is null ? "" : $" (Thema „{_origin.TopicName}“, Version {_origin.Version})")}. Lernen und Kartenstatus funktionieren hier; Modul- und Abschlussprüfungen startest du über das Thema. Das private Ursprungsmodul bleibt geschützt."
+                                        : $"Globales Modul (Version {_module.GlobalVersion}, Herkunft: {_module.OwnerName}) — zum Lernen, nicht zum Bearbeiten.")
                             </p>
                         }
                     </div>
                 </div>
                 <div class="page-head-actions">
-                    <button class="btn btn-primary" @onclick="() => _quizOpen = true" disabled="@(_cards.Count == 0)">🎓 Quiz starten</button>
+                    @if (_context == "topic")
+                    {
+                        @if (_origin is not null) { <a class="btn btn-primary" href="/topics/@_origin.TopicId?version=@_origin.Version">🎓 Zum Thema (Prüfungen)</a> }
+                    }
+                    else
+                    {
+                        <button class="btn btn-primary" @onclick="() => _quizOpen = true" disabled="@(_cards.Count == 0)">🎓 Quiz starten</button>
+                    }
                     @if (_hasSlideMode)
                     {
                         <button class="btn @(_slideMode ? "btn-primary" : "btn-ghost")" @onclick="ToggleSlideMode">
                             @(_slideMode ? "🃏 Kartenmodus" : "📑 Folienmodus")
                         </button>
                     }
-                    <button class="btn btn-ghost" @onclick="() => _quizConfigOpen = !_quizConfigOpen">⚙ Quiz-Einstellungen</button>
+                    @if (_context != "topic")
+                    {
+                        <button class="btn btn-ghost" @onclick="() => _quizConfigOpen = !_quizConfigOpen">⚙ Quiz-Einstellungen</button>
+                    }
                     @if (_canEdit)
                     {
                         <button class="btn btn-ghost" @onclick="ToggleArchive">@(_showArchive ? "← Aktive Karten" : $"🗂 Archiv ({_archivedCount})")</button>
@@ -186,7 +208,8 @@
     private bool _canEdit;
     private bool _isAdmin;
     private bool _shareOpen;
-    private string ContextLabel => _context switch { "shared" => "Freigegeben", "global" => "Global", _ => "Privat" };
+    private string ContextLabel => _context switch { "shared" => "Freigegeben", "global" => "Global", "topic" => "Themenmodul", _ => "Privat" };
+    private TopicModuleOrigin? _origin;
     private List<Card> ActiveCards => _slideMode ? _slideCards : _cards;
     private int CurrentIndex => _slideMode ? _slideIndex : _index;
     private Card CurrentCard => ActiveCards[CurrentIndex];
@@ -203,6 +226,7 @@
         _module = access?.Module;
         _context = access?.Context ?? "private";
         _canEdit = access?.CanEdit ?? false;
+        _origin = _context == "topic" ? await TopicSvc.GetModuleOriginAsync(ModuleId) : null;
         _isAdmin = auth.User.IsInRole(Roles.Admin);
         if (_module is not null)
         {

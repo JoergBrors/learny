@@ -210,6 +210,7 @@ try
     RichTextUnitTests.Run(Check);
     await BlockchainUnitTests.RunAsync(Check, tmp);
     await TransferIntegrityUnitTests.RunAsync(Check, tmp);   // Fehlerinjektion, Referenzen, Altbestand (ADR 0028)
+    WorkflowStructureTests.Run(Check, repoRoot);   // IIS-Workflow: MCP-Neustart (ADR 0029)
     await McpTokenUnitTests.RunAsync(Check, tmp);   // Schutz der MCP-Tokens bei Datenbankzugriff (ADR 0025)
     AuthModeTests.Run(Check);   // Betriebsmodus fail closed (ADR 0026)
     DockerConfigTests.Run(Check, repoRoot);   // Docker-Hub-Veröffentlichung (ADR 0024)
@@ -2023,6 +2024,7 @@ try
     // zuletzt: veröffentlicht ein globales Modul, das die früheren Prüfungen (genau ein globales Modul) nicht stören darf
     await TopicTransferTests.RunAsync(LoginAsync, () => NewClient(false), admin, mcpUrl, Check);   // Themenmodule, JSON, Klonen, MCP (ADR 0028)
     await TransferHardeningTests.RunAsync(LoginAsync, () => NewClient(false), mcpUrl, McpKey, PngLike, Check);   // Referenzen parallel, große Dateien, MCP-Matrix (ADR 0028)
+    await TopicGovernanceTests.RunAsync(LoginAsync, () => NewClient(false), admin, mcpUrl, Check);   // Themenfreigaben, Pflicht, Themen-Admin, Lernstatus (ADR 0029)
 
     // Migration modules.reference_id: Altbestand ohne Spalte wird beim Start ergänzt (idempotent), Daten bleiben erhalten, Referenzen sind danach stabil
     Console.WriteLine("\nMigration modules.reference_id (ADR 0028)");
@@ -2044,11 +2046,12 @@ try
             await mdb.InitAsync();
             await mdb.ExecuteAsync("DROP INDEX IF EXISTS ux_modules_owner_reference", null);
             await mdb.ExecuteAsync("ALTER TABLE modules DROP COLUMN reference_id", null);   // Zustand vor ADR 0028
+            foreach (var col in new[] { "topic_version", "mandatory", "due_at" }) await mdb.ExecuteAsync($"ALTER TABLE topic_assignments DROP COLUMN {col}", null);   // Zustand vor ADR 0029
         }
         var seen = new List<string>();
         for (var round = 1; round <= 2; round++)
         {
-            var again = await StartWebAsync("e2e-refmig", new());
+            var again = await StartWebAsync("e2e-refmig", new() { ["ADMIN_SUBJECTS"] = "dev-refmig" });
             try
             {
                 var c = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseCookies = true, CookieContainer = new CookieContainer() }) { BaseAddress = new Uri(again.Url) };
@@ -2057,6 +2060,19 @@ try
                 var cards = (await J(await c.GetAsync($"/api/cards/?module_id={refModule}")))!.AsArray();
                 var rf1 = (await J(await c.GetAsync($"/api/modules/{refModule}/export")))!["reference_id"]!.GetValue<string>();
                 var rf2 = (await J(await c.GetAsync($"/api/modules/{refModule}/export")))!["reference_id"]!.GetValue<string>();
+                // ADR 0029: Altbestand ohne die neuen Spalten von topic_assignments — der Start ergänzt sie, Zuweisungen funktionieren (Version, Pflicht, Fälligkeit)
+                if (round == 1)
+                {
+                    var def = new JsonObject { ["format"] = "learny-topic", ["schema_version"] = 1, ["name"] = "RM-Thema", ["modules"] = new JsonArray(new JsonObject { ["module_name"] = "RM" }) };
+                    var topicRes = await c.PostAsync("/api/topics/import", new StringContent(def.ToJsonString(), System.Text.Encoding.UTF8, "application/json"));
+                    var topicIdRm = (await J(topicRes))!["id"]!.GetValue<string>();
+                    await c.PostAsync($"/api/topics/{topicIdRm}/versions", Body(new { }));
+                    var myId = (await J(await c.GetAsync("/api/me")))!["id"]!.GetValue<string>();
+                    var asg = await c.PostAsync("/api/topic-admin/assignments", Body(new { topic_id = topicIdRm, user_id = myId, mandatory = true, due_at = DateTime.UtcNow.AddDays(5) }));
+                    Check(asg.StatusCode == HttpStatusCode.Created, "Migration (ADR 0029): nach dem Ergänzen der Spalten (topic_version, mandatory, due_at) lassen sich Themen zuweisen");
+                }
+                var mandatoryNow = (await J(await c.GetAsync("/api/topics/")))!["mandatory"]!.AsArray().Count;
+                Check(mandatoryNow == 1, round == 1 ? "Migration (ADR 0029): die Pflichtzuweisung erscheint" : "Migration (ADR 0029): ein weiterer Start ist idempotent, die Pflichtzuweisung bleibt erhalten");
                 seen.Add(rf1);
                 Check(mods.Count == 1 && cards.Count == 1 && Guid.TryParse(rf1, out _) && rf1 == rf2, round == 1 ? "Migration: fehlende Spalte wird beim Start ergänzt, Module und Karten bleiben erhalten, erster Export vergibt eine GUID" : "Migration: ein weiterer Start ist idempotent, die Referenz bleibt stabil");
             }

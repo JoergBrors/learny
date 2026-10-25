@@ -85,6 +85,7 @@
         {
             <div class="card panel">
                 <h2 class="panel-title">Mein Fortschritt</h2>
+                <p>Status: <strong>@(_progress.Status == "completed" ? "Abgeschlossen" : _progress.Status == "in_progress" ? "In Bearbeitung" : "Nicht begonnen")</strong> · @_progress.ProgressPercent % @(d.GlobalStatus == "active" ? "· globales, freiwilliges Lernangebot" : "")</p>
                 <p>
                     Module: <strong>@_progress.ModulesStarted</strong> begonnen · <strong>@_progress.ModulesCompleted</strong> von @_progress.ModulesTotal abgeschlossen ·
                     Modulprüfungen: <strong>@_progress.ModuleExamsPassed</strong> von @_progress.ModuleExamsTotal bestanden ·

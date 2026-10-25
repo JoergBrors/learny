@@ -232,7 +232,7 @@
         @* ─── Freigaben ─── *@
         <div class="card panel">
             <h2 class="panel-title">Freigaben (Lernen und Prüfungen, keine Bearbeitung)</h2>
-            @if (_d.Topic.LatestVersion == 0) { <p class="muted">Veröffentliche zuerst eine Version — Freigaben und Zuweisungen beziehen sich auf veröffentlichte Versionen.</p> }
+            @if (_d.Topic.LatestVersion == 0) { <p class="muted">Veröffentliche zuerst eine Version — Freigaben beziehen sich auf veröffentlichte Versionen.</p> }
             <input class="input" placeholder="Benutzer suchen (mindestens 3 Zeichen: Name oder E-Mail)" @bind="_userQuery" @bind:event="oninput" @onkeyup="SearchUsersAsync" aria-label="Benutzer suchen" />
             @if (_userResults.Count > 0)
             {
@@ -240,8 +240,7 @@
                     @foreach (var u in _userResults)
                     {
                         <li>@u.DisplayName <span class="muted">@u.Email</span>
-                            <button class="btn btn-ghost btn-sm" @onclick="() => ShareAsync(u.Id)" disabled="@(_d.Topic.LatestVersion == 0)">Freigeben</button>
-                            <button class="btn btn-ghost btn-sm" @onclick="() => AssignAsync(u.Id)" disabled="@(_d.Topic.LatestVersion == 0)">Zuweisen</button></li>
+                            <button class="btn btn-ghost btn-sm" @onclick="() => ShareAsync(u.Id)" disabled="@(_d.Topic.LatestVersion == 0)">Freigeben</button></li>
                     }
                 </ul>
             }
@@ -253,17 +252,7 @@
                     <li><span>@s.UserName</span><button class="btn btn-ghost btn-sm" @onclick="() => RevokeShareAsync(s.UserId)">Widerrufen</button></li>
                 }
             </ul>
-            <h3>Zugewiesen an (Bearbeitungsstand)</h3>
-            @if (_assignments.Count == 0) { <p class="muted">Niemand.</p> }
-            <ul class="topic-questions">
-                @foreach (var a in _assignments)
-                {
-                    <li>
-                        <span><strong>@a.UserName</strong> — @(a.Progress is null ? "noch kein Fortschritt" : $"{a.Progress.ModulesCompleted}/{a.Progress.ModulesTotal} Module abgeschlossen, Modulprüfungen {a.Progress.ModuleExamsPassed}/{a.Progress.ModuleExamsTotal}, Abschlussprüfung {(a.Progress.FinalExamPassed ? "bestanden" : a.Progress.FinalExamAvailable ? "verfügbar" : "offen")}, Version {a.Progress.Version}")</span>
-                        <button class="btn btn-ghost btn-sm" @onclick="() => UnassignAsync(a.UserId)">Zurücknehmen</button>
-                    </li>
-                }
-            </ul>
+            <p class="muted">Pflicht- und Lernzuweisungen an Benutzer vergeben ausschließlich Administratoren und Themen-Admins unter <a href="/topic-admin">Themenzuweisungen</a>.</p>
         </div>
 
         @* ─── Versionen ─── *@
@@ -323,7 +312,6 @@
     private TopicExamConfig? _cfg;
     private List<TopicQuestion> _questions = new();
     private List<TopicShareInfo> _shares = new();
-    private List<TopicAssignmentInfo> _assignments = new();
     private List<TopicVersionInfo> _versions = new();
     private List<ModuleInfo> _addable = new();
     private List<UserSearchResult> _userResults = new();
@@ -350,7 +338,6 @@
             _cfg = await Topics.GetExamConfigAsync(_userId, Id);
             _questions = await Topics.ListQuestionsAsync(_userId, Id);
             _shares = await Topics.ListSharesAsync(_userId, Id);
-            _assignments = await Topics.ListAssignmentsAsync(_userId, Id);
             _versions = await Topics.ListVersionsAsync(_userId, Id);
             await SearchModulesAsync();
         }
@@ -434,9 +421,7 @@
 
     private async Task SearchUsersAsync() => _userResults = _userQuery.Trim().Length >= 3 ? await Topics.SearchUsersAsync(_userId, _userQuery) : new();
     private Task ShareAsync(string userId) => RunAsync(() => Topics.GrantShareAsync(_userId, Id, userId), "Thema freigegeben.");
-    private Task AssignAsync(string userId) => RunAsync(() => Topics.AssignAsync(_userId, Id, userId), "Thema zugewiesen.");
     private Task RevokeShareAsync(string userId) => RunAsync(async () => { await Topics.RevokeShareAsync(_userId, Id, userId); }, "Freigabe widerrufen.");
-    private Task UnassignAsync(string userId) => RunAsync(async () => { await Topics.UnassignAsync(_userId, Id, userId); }, "Zuweisung zurückgenommen.");
 
     private Task PublishAsync(bool global) => RunAsync(async () => { await Topics.PublishAsync(_userId, Id, global); }, global ? "Version veröffentlicht und zur globalen Freigabe eingereicht." : "Neue Version veröffentlicht.");
     private Task SubmitGlobalAsync(int version) => RunAsync(() => Topics.SubmitGlobalAsync(_userId, Id, version), $"Version {version} zur globalen Freigabe eingereicht.");

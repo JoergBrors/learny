@@ -82,6 +82,15 @@
                         else if (t.GlobalStatus == "pending_approval") { <span class="badge badge-warn">Freigabe offen</span> }
                         else if (t.GlobalStatus == "rejected") { <span class="badge badge-warn">global abgelehnt</span> }
                         @if (t.NewerVersionAvailable) { <span class="badge badge-warn">neue Version verfügbar</span> }
+                        @if (t.Section != "own")
+                        {
+                            @if (t.Mandatory) { <span class="badge badge-warn">Pflicht</span> }
+                            else if (t.Relation == "assigned_voluntary") { <span class="badge">zugewiesen · freiwillig</span> }
+                            else if (t.Relation == "shared") { <span class="badge">freigegeben</span> }
+                            else { <span class="badge">global · freiwillig</span> }
+                            @if (t.DueAt is DateTime due) { <span class="badge @(t.Overdue ? "badge-warn" : "")">fällig @due.ToLocalTime().ToString("dd.MM.yyyy")@(t.Overdue ? " · überfällig" : "")</span> }
+                            @if (t.Progress is { } sp) { <span class="badge @(sp.Status == "completed" ? "badge-pass" : "")">@(sp.Status == "completed" ? "abgeschlossen" : sp.Status == "in_progress" ? "in Bearbeitung" : "nicht begonnen")</span> }
+                        }
                         @if (t.Section != "own" && t.Topic.OwnerName.Length > 0) { <span class="muted">von @t.Topic.OwnerName</span> }
                     </p>
                     <ul class="topic-stats" aria-label="Umfang">

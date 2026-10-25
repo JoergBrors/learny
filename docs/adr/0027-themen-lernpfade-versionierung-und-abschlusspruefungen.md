@@ -1,6 +1,6 @@
 # 0027 — Themen, Lernpfade, Versionierung und Abschlussprüfungen
 
-- **Status:** Teilweise ersetzt durch [0028](0028-themenmodule-json-und-mcp-verwaltung.md) (Punkt 2: nur eigene private Module; Punkt 10: schreibender MCP-Zugriff auf eigene Themenentwürfe). Die übrigen Entscheidungen gelten weiter.
+- **Status:** Teilweise ersetzt durch [0028](0028-themenmodule-json-und-mcp-verwaltung.md) (Punkt 2: nur eigene private Module; Punkt 10: schreibender MCP-Zugriff auf eigene Themenentwürfe). Punkt 5 (Zuweisungen durch den Eigentümer) ist durch [0029](0029-themenzugriff-pflichtzuweisungen-und-themenadministration.md) ersetzt: Zuweisungen vergeben nur Admin und Themen-Admin, an eine konkrete Version. Die übrigen Entscheidungen gelten weiter.
 - **Datum:** 2026-10-25
 - **Anlass:** Die Hierarchie Thema → Lernmodule → Lernkarten/Modulprüfungen → Abschlussprüfung soll Lernpfade abbilden (z. B. „Microsoft 365 Administration“ aus Entra, Exchange, Teams), ohne Module zu duplizieren.
 - **Bezug:** [0004](0004-datenbank-abstraktion.md), [0011](0011-mehrbenutzerarchitektur.md), [0015](0015-freigaben-globale-lernmodule.md), [0019](0019-einheitliches-quizsystem.md), [0021](0021-zertifikate-und-open-badges.md), [0022](0022-polygon-verankerung-und-kostenschranke.md)

@@ -24,15 +24,14 @@ public partial class TopicService
 {
     // ─── Zugriff und Versionsauflösung ──────────────────────────────────────
 
-    private async Task<bool> HasPrivateAccessAsync(string userId, TopicInfo topic)
+    /// <summary>Zugriffsart des Benutzers auf das Thema: Eigentum/Freigabe (alle veröffentlichten Versionen), Zuweisung (nur die zugewiesene Version) oder keine.</summary>
+    private async Task<(bool Full, bool Assigned, int? PinnedVersion)> PrivateAccessAsync(string userId, TopicInfo topic)
     {
-        if (string.Equals(topic.OwnerUserId, userId, StringComparison.OrdinalIgnoreCase)) return true;
-        var rows = await _db.QueryAsync("""
-            SELECT 1 FROM topic_shares WHERE topic_id = @t AND target_user_id = @u AND revoked_at IS NULL
-            UNION ALL
-            SELECT 1 FROM topic_assignments WHERE topic_id = @t AND user_id = @u AND status = 'active'
-            """, new (string, object?)[] { ("t", topic.Id), ("u", userId) });
-        return rows.Count > 0;
+        if (string.Equals(topic.OwnerUserId, userId, StringComparison.OrdinalIgnoreCase)) return (true, false, null);
+        if ((await _db.QueryAsync("SELECT 1 FROM topic_shares WHERE topic_id = @t AND target_user_id = @u AND revoked_at IS NULL", new (string, object?)[] { ("t", topic.Id), ("u", userId) })).Count > 0) return (true, false, null);
+        var a = (await _db.QueryAsync("SELECT topic_version FROM topic_assignments WHERE topic_id = @t AND user_id = @u AND status = 'active'", new (string, object?)[] { ("t", topic.Id), ("u", userId) })).FirstOrDefault();
+        if (a is null) return (false, false, null);
+        return (false, true, a.GetValueOrDefault("topic_version") is { Length: > 0 } v ? DbValue.ToInt(v) : null);
     }
 
     private async Task<string> SectionForAsync(string userId, TopicInfo topic)
@@ -51,14 +50,16 @@ public partial class TopicService
     /// </summary>
     private async Task<TopicVersionInfo?> ResolveVersionForLearnerAsync(string userId, TopicInfo topic, string section, int? requestedVersion)
     {
-        var privateAccess = section != TopicSections.Global && await HasPrivateAccessAsync(userId, topic);
+        var (full, assigned, pinned) = section == TopicSections.Global ? (false, false, (int?)null) : await PrivateAccessAsync(userId, topic);
         if (requestedVersion is int rv && rv > 0)
         {
             var ver = await LoadVersionAsync(topic.Id, rv);
             if (ver is null) return null;
-            return privateAccess || ver.GlobalStatus == TopicGlobalStatuses.Active ? ver : null;
+            if (full || (assigned && (pinned is null || pinned == rv)) || ver.GlobalStatus == TopicGlobalStatuses.Active) return ver;
+            return null;
         }
-        if (privateAccess) return await LoadLatestPublishedAsync(topic.Id);
+        if (full) return await LoadLatestPublishedAsync(topic.Id);
+        if (assigned) return pinned is int p ? await LoadVersionAsync(topic.Id, p) : await LoadLatestPublishedAsync(topic.Id);
         var rows = await _db.QueryAsync(VersionSelect + " WHERE v.topic_id = @t AND v.status = 'published' AND v.global_status = 'active' LIMIT 1", new[] { ("t", (object?)topic.Id) });
         return rows.Count == 0 ? null : MapVersion(rows[0]);
     }
@@ -113,9 +114,10 @@ public partial class TopicService
             SELECT kind, module_id, topic_version, percent, passed, completed_at FROM topic_exam_attempts WHERE user_id = @u AND topic_id = @t AND completed_at IS NOT NULL
             """, new (string, object?)[] { ("u", userId), ("t", topic.Id) })).ToList();
 
-        DateTime? last = null;
+        DateTime? last = null, learningLast = null;
         void Seen(DateTime? t) { if (t is DateTime d && (last is null || d > last)) last = d; }
-        foreach (var a in attempts) Seen(DbValue.ToDateTime(a.GetValueOrDefault("completed_at")));
+        void Learned(DateTime? t) { if (t is DateTime d && (learningLast is null || d > learningLast)) learningLast = d; Seen(t); }
+        foreach (var a in attempts) Learned(DbValue.ToDateTime(a.GetValueOrDefault("completed_at")));
 
         TopicModuleProgress? previous = null;
         TopicModuleExamConfig? previousCfg = null;
@@ -128,7 +130,7 @@ public partial class TopicService
                 WHERE c.module_id = @m AND c.archived = 0
                 """, new (string, object?)[] { ("u", userId), ("m", m.ModuleId) }))[0];
             var total = DbValue.ToInt(state["total"]); var checkedCount = DbValue.ToInt(state.GetValueOrDefault("checked"));
-            if (state.GetValueOrDefault("last") is { Length: > 0 } l) Seen(DbValue.ToDateTime(l));
+            if (state.GetValueOrDefault("last") is { Length: > 0 } l) Learned(DbValue.ToDateTime(l));
             var exams = attempts.Where(a => a["kind"] == TopicExamKinds.Module && string.Equals(a["module_id"], m.ModuleId, StringComparison.OrdinalIgnoreCase)).ToList();
             var passed = exams.Any(a => DbValue.ToBool(a.GetValueOrDefault("passed")));
             var best = exams.Count == 0 ? (double?)null : exams.Max(a => DbValue.ToDouble(a.GetValueOrDefault("percent")));
@@ -169,6 +171,15 @@ public partial class TopicService
         if (state2?.GetValueOrDefault("last_activity_at") is { Length: > 0 } la) Seen(DbValue.ToDateTime(la));
         progress.LastActivityAt = last;
         progress.NewerVersionAvailable = progress.SeenVersion > 0 && ver.VersionNumber > progress.SeenVersion;
+
+        // Lernstatus (ADR 0029) ausschließlich aus Kartenstatus und bestehenden Prüfungsergebnissen; ein bloßer Aufruf (seen_version) zählt nie
+        var examsOk = progress.ModuleExamsPassed == progress.ModuleExamsTotal && (!progress.FinalExamEnabled || progress.FinalExamPassed);
+        var done = progress.ModulesTotal > 0 && progress.ModulesCompleted == progress.ModulesTotal && examsOk;
+        var anyWork = progress.ModulesStarted > 0 || progress.FinalExamAttempts > 0 || attempts.Any(a => a["kind"] == TopicExamKinds.Final && DbValue.ToInt(a.GetValueOrDefault("topic_version")) == ver.VersionNumber);
+        progress.Status = done ? TopicLearnStatuses.Completed : anyWork ? TopicLearnStatuses.InProgress : TopicLearnStatuses.NotStarted;
+        var units = progress.ModulesTotal + (progress.FinalExamEnabled ? 1 : 0);
+        progress.ProgressPercent = units == 0 ? 0 : (int)Math.Round((progress.ModulesCompleted + (progress.FinalExamEnabled && progress.FinalExamPassed ? 1 : 0)) * 100d / units);
+        if (done) progress.CompletedAt = learningLast;
         return progress;
     }
 

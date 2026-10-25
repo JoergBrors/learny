@@ -30,7 +30,7 @@ public partial class CardRepository
             WHERE vm.module_id = @m AND v.status = 'published'
               AND ( t.owner_user_id = @u
                     OR EXISTS (SELECT 1 FROM topic_shares s WHERE s.topic_id = t.id AND s.target_user_id = @u AND s.revoked_at IS NULL)
-                    OR EXISTS (SELECT 1 FROM topic_assignments a WHERE a.topic_id = t.id AND a.user_id = @u AND a.status = 'active')
+                    OR EXISTS (SELECT 1 FROM topic_assignments a WHERE a.topic_id = t.id AND a.user_id = @u AND a.status = 'active' AND (a.topic_version IS NULL OR a.topic_version = v.version_number))
                     OR v.global_status = 'active' )
             LIMIT 1
             """, new (string, object?)[] { ("m", moduleId), ("u", userId) });

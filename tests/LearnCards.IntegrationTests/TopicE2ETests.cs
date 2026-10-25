@@ -224,15 +224,23 @@ public static class TopicE2ETests
         // ─── Zuweisungen ───
         var assignTopic = S(await J(await tina.PostAsync("/api/topics/", Body(new { name = "TE Lernaufgabe" }))), "id");
         await tina.PostAsync($"/api/topics/{assignTopic}/modules", Body(new { module_id = A }));
-        check((await tina.PostAsync($"/api/topics/{assignTopic}/assignments", Body(new { user_id = leoId }))).StatusCode == HttpStatusCode.Conflict, "T49 Zuweisung ohne veröffentlichte Version → 409 (Hinweis, zuerst zu veröffentlichen)");
+        var adminId = S(await J(await admin.GetAsync("/api/me")), "id");
+        async Task<HttpResponseMessage> AdminAssignAsync(string topic, string user, object? extra = null) =>
+            await admin.PostAsync("/api/topic-admin/assignments", Body(new { topic_id = topic, user_id = user, version = (int?)null, mandatory = true }));
+        check((await AdminAssignAsync(assignTopic, leoId)).StatusCode == HttpStatusCode.NotFound
+              && !(await tina.PostAsync($"/api/topics/{assignTopic}/assignments", Body(new { user_id = leoId }))).IsSuccessStatusCode,
+            "T49 Nicht veröffentlichtes (und nicht zuweisbares) Thema kann nicht zugewiesen werden; der Eigentümer hat keine Zuweisungsfunktion mehr (ADR 0029)");
         await tina.PostAsync($"/api/topics/{assignTopic}/versions", Body(new { }));
-        check((await tina.PostAsync($"/api/topics/{assignTopic}/assignments", Body(new { user_id = leoId }))).StatusCode == HttpStatusCode.NoContent, "T50 Thema einem Benutzer zugewiesen");
+        check((await AdminAssignAsync(assignTopic, leoId)).StatusCode == HttpStatusCode.NotFound, "T49a Auch ein veröffentlichtes privates Thema ist für den Administrator nicht zuweisbar, solange es weder global noch mit ihm geteilt ist");
+        await tina.PostAsync($"/api/topics/{assignTopic}/shares", Body(new { user_id = adminId }));
+        var assignRes = await AdminAssignAsync(assignTopic, leoId);
+        check(assignRes.StatusCode == HttpStatusCode.Created && S(await J(assignRes), "topic_version") == "1", "T50 Administrator weist das mit ihm geteilte Thema einem Benutzer zu (konkrete Version 1)");
         var leoAssigned = await J(await leo.GetAsync("/api/topics/"));
         check(leoAssigned!["assigned"]!.AsArray().Any(t => S(t, "topic.id") == assignTopic) && S(leoAssigned, "assigned.0.progress.modules_total") == "1", "T51 Zugewiesenes Thema erscheint bei „Mir zugewiesen“ mit Lernfortschritt");
-        var assignments = await J(await tina.GetAsync($"/api/topics/{assignTopic}/assignments"));
-        check(assignments!.AsArray().Count == 1 && S(assignments, "0.user_id") == leoId && S(assignments, "0.progress.modules_total") == "1", "T52 Eigentümer sieht Zuweisungen mit Bearbeitungsstand");
-        check((await tina.DeleteAsync($"/api/topics/{assignTopic}/assignments/{leoId}")).StatusCode == HttpStatusCode.NoContent
-              && (await leo.GetAsync($"/api/topics/{assignTopic}")).StatusCode == HttpStatusCode.NotFound, "T53 Zuweisung zurückgenommen: Zugriff endet");
+        var assignments = await J(await admin.GetAsync($"/api/topic-admin/assignments?topic_id={assignTopic}"));
+        check(assignments!.AsArray().Count == 1 && S(assignments, "0.user_id") == leoId && S(assignments, "0.progress.modules_total") == "1", "T52 Administrator sieht Zuweisungen mit Bearbeitungsstand");
+        check((await admin.DeleteAsync($"/api/topic-admin/assignments/{S(assignments, "0.id")}")).StatusCode == HttpStatusCode.NoContent
+              && (await leo.GetAsync($"/api/topics/{assignTopic}")).StatusCode == HttpStatusCode.NotFound, "T53 Zuweisung widerrufen: Zugriff endet");
         check((await tina.DeleteAsync($"/api/topics/{topicId}/shares/{samId}")).StatusCode == HttpStatusCode.NotFound
               && (await tina.DeleteAsync($"/api/topics/{topicId}/shares/{leoId}")).StatusCode == HttpStatusCode.NoContent
               && (await leo.GetAsync($"/api/topics/{topicId}")).StatusCode == HttpStatusCode.NotFound
@@ -306,7 +314,7 @@ public static class TopicE2ETests
         check((await mcp.PostAsync("/api/topics/", Body(new { name = "MCP-Thema" }))).StatusCode == HttpStatusCode.Forbidden
               && (await mcp.PostAsync($"/api/topics/{topicId}/versions", Body(new { }))).StatusCode == HttpStatusCode.Forbidden
               && (await mcp.GetAsync($"/api/topics/{topicId}/shares")).StatusCode == HttpStatusCode.Forbidden
-              && (await mcp.GetAsync($"/api/topics/{topicId}/assignments")).StatusCode == HttpStatusCode.Forbidden
+              && !(await mcp.GetAsync($"/api/topics/{topicId}/assignments")).IsSuccessStatusCode
               && (await mcp.GetAsync("/api/admin/topics/pending")).StatusCode == HttpStatusCode.Forbidden
               && (await mcp.PostAsync($"/api/topics/{topicId}/exams/final", Body(new { }))).StatusCode == HttpStatusCode.Forbidden, "T74 MCP-Token: keine Schreib-, Freigabe-, Zuweisungs-, Prüfungs- oder Administrationsaktionen");
         var mcpSam = newClient();

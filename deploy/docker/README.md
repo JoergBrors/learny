@@ -200,7 +200,7 @@ Pflicht: **PostgreSQL-Betrieb** → `POSTGRES_PASSWORD`; **OIDC-Betrieb** → `O
 | `OIDC_CLIENT_SECRET` | web | **ja** bei `oidc` | — | Geheimer Clientschlüssel der App-Registrierung (läuft ab). |
 | `OIDC_AUDIENCE` | web | nein | leer | Erwartete Audience (üblich: Client-ID). |
 | `OIDC_WEB_SCOPE` | web | nein | `openid profile email` | Angeforderte Scopes. |
-| `OIDC_ROLE_MAP` | web | nein | `Admin.All=admin` | Entra-App-Rolle → Learny-Rolle (`admin`/`auditor`), z. B. `Admin.All=admin,Auditor=auditor`. |
+| `OIDC_ROLE_MAP` | web | nein | `Admin.All=admin` | Entra-App-Rolle → Learny-Rolle (`admin`/`auditor`/`themen_admin`), z. B. `Admin.All=admin,Auditor=auditor`. |
 | `ADMIN_SUBJECTS` | web | nein | leer | Subjects (`sub`), die beim Login Administrator werden (Bootstrap). |
 | `MCP_API_KEY` | web, mcp | **ja** bei MCP | leer | Dienstschlüssel zwischen Web und MCP; gewährt nie Datenzugriff. |
 | `MCP_PUBLIC_URL` | web | **ja** bei MCP (Produktion) | leer | Erlaubte öffentliche MCP-URL(n) für die Rückleitung, kommagetrennt, ohne `/` am Ende. |

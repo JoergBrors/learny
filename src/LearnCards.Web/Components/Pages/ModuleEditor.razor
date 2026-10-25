@@ -3,6 +3,7 @@
 @rendermode InteractiveServer
 @inject CardRepository Repo
 @inject QuizService Quiz
+@inject TopicService TopicSvc
 @inject NavigationManager Nav
 @inject AuthenticationStateProvider AuthState
 @inject IJSRuntime JS
@@ -35,6 +36,17 @@
                     <button class="btn btn-primary" @onclick="NewCardAsync">+ Neue Karte</button>
                 </div>
             </div>
+            @if (_usage.Count > 0)
+            {
+                <div class="module-usage">
+                    <span class="muted">Verwendet in @_usage.Count @(_usage.Count == 1 ? "Thema" : "Themen"):</span>
+                    @foreach (var u in _usage)
+                    {
+                        <a class="badge" href="@UsageHref(u)">@u.TopicName@(u.InDraft ? " · Entwurf" : "")@(u.Versions.Count > 0 ? " · veröffentlicht in V" + string.Join("/", u.Versions) : "")</a>
+                    }
+                    <span class="muted">Änderungen am Modul wirken auf Themen erst mit der nächsten Themenversion.</span>
+                </div>
+            }
         </section>
 
         @if (_configOpen)
@@ -339,6 +351,8 @@
     }
 
     private ModuleInfo? _module;
+    private List<ModuleTopicUsage> _usage = new();
+    private static string UsageHref(ModuleTopicUsage u) => u.Versions.Count > 0 ? "/topics/" + u.TopicId + "?version=" + u.Versions.Max() : "/topics/" + u.TopicId + "/edit";
     private string _userSub = "";
     private bool _loading = true, _configOpen, _showArchived, _preview, _saving, _conflict, _quizPreviewOpen;
     private List<Card> _cards = new();
@@ -356,7 +370,8 @@
     {
         var auth = await AuthState.GetAuthenticationStateAsync();
         _userSub = auth.User.GetUserId() ?? throw new UnauthorizedAccessException();
-        _module = await Repo.GetModuleAsync(ModuleId, _userSub);   // nur eigene Module (Besitzprüfung in der SQL-Abfrage)
+        _module = await Repo.GetModuleAsync(ModuleId, _userSub);
+        _usage = _module is null ? new() : (await TopicSvc.ListModuleUsageAsync(_userSub)).GetValueOrDefault(_module.Id) ?? new();   // nur eigene Module (Besitzprüfung in der SQL-Abfrage)
         if (_module is not null)
         {
             await LoadCardsAsync();

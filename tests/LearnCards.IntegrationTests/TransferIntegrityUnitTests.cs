@@ -255,6 +255,24 @@ public static class TransferIntegrityUnitTests
         var v2Mods = (await e.Raw.QueryAsync("SELECT module_id FROM topic_version_modules WHERE version_id = @v AND role = 'module' ORDER BY position", new[] { ("v", (object?)v2.Id) })).Select(r => r["module_id"]).ToList();
         check(v2.VersionNumber == 2 && v2Mods.Count == 2 && v1Mods.Split(',').Contains(v2Mods[0]) && (await e.Raw.QueryAsync("SELECT 1 FROM topic_version_modules WHERE version_id = @v AND module_id = @m", new (string, object?)[] { ("v", v1.Id), ("m", v2Mods[1]) })).Count == 0,
             "I23 danach lässt sich Version 2 veröffentlichen; das unveränderte eigene Modul teilt die eingefrorene Kopie mit Version 1, das neue erhält eine eigene");
+
+        // ─── Lernstatus und Überfälligkeit (ADR 0029): Fälligkeit nur bei offener Pflichtzuweisung ───
+        var adminU = await e.AddUserAsync("ti-admin");
+        await e.Raw.ExecuteAsync("INSERT INTO user_roles (user_id, role, granted_by, granted_at) VALUES (@u, 'admin', 'test', @t)", new (string, object?)[] { ("u", adminU), ("t", DateTime.UtcNow) });
+        var learner = await e.AddUserAsync("ti-learner"); var volunteer = await e.AddUserAsync("ti-volunteer");
+        await e.Raw.ExecuteAsync("UPDATE topic_versions SET global_status = 'active' WHERE id = @id", new (string, object?)[] { ("id", v2.Id) });
+        var mand = await e.Topics.AssignAsync(adminU, topic.Id, learner, null, true, DateTime.UtcNow.AddDays(3));
+        var vol = await e.Topics.AssignAsync(adminU, topic.Id, volunteer, null, false, DateTime.UtcNow.AddDays(3));
+        check(mand.Mandatory && mand.TopicVersion == 2 && !mand.Overdue && !vol.Mandatory, "I24 Zuweisung: konkrete Version (aktive globale Version 2), verpflichtend bzw. freiwillig, Fälligkeit in der Zukunft ist nicht überfällig");
+        await e.Raw.ExecuteAsync("UPDATE topic_assignments SET due_at = @d", new (string, object?)[] { ("d", DateTime.UtcNow.AddDays(-2)) });
+        var overdue = await e.Topics.ListStatusAsync(adminU, new TopicService.StatusFilter { Status = "overdue" });
+        var learnerOv = await e.Topics.ListOverviewAsync(learner);
+        var volunteerOv = await e.Topics.ListOverviewAsync(volunteer);
+        check(overdue.Count == 1 && overdue[0].UserId == learner && overdue[0].Overdue && overdue[0].Status == "not_started" && learnerOv.Mandatory.Count == 1 && learnerOv.Mandatory[0].Overdue
+              && volunteerOv.Mandatory.Count == 0 && !volunteerOv.Assigned[0].Overdue, "I25 Überfälligkeit entsteht nur bei offener Pflichtzuweisung mit abgelaufener Fälligkeit; freiwillige Zuweisungen werden nie überfällig");
+        var denied = false; try { await e.Topics.ListStatusAsync(learner); } catch (UnauthorizedAccessException) { denied = true; }
+        var deniedAssign = false; try { await e.Topics.AssignAsync(learner, topic.Id, volunteer); } catch (UnauthorizedAccessException) { deniedAssign = true; }
+        check(denied && deniedAssign, "I26 Rollenprüfung im Dienst: ohne Rolle weder Status noch Zuweisung (UnauthorizedAccessException)");
         _ = v1Cards;
     }
 
