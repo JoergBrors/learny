@@ -99,6 +99,11 @@ async function main() {
     await go(`/topics/${topic.id}?version=1`);
     check(await waitFor(`document.querySelectorAll('.topic-module').length === 3`), 'Themenseite listet die drei Module im Lernpfad');
     check(await waitFor(`!!document.querySelector('.topic-final')`), 'Abschlussprüfung ist Teil des Lernpfads');
+    check(await ev(`[...document.querySelectorAll('.topic-module a')].filter(x => x.textContent.includes('Lernen')).every(x => x.getAttribute('href').startsWith('/module/'))`), 'Themenseite: „Lernen“ verweist auf die Modulseite (/module/{id})');
+    const learnHref = await ev(`[...document.querySelectorAll('.topic-module a')].find(x => x.textContent.includes('Lernen')).getAttribute('href')`);
+    await go(learnHref);
+    check(await waitFor(`!/Seite nicht gefunden/.test(document.body.textContent) && !!document.querySelector('h1, .module-hero')`), 'Lernen aus dem Thema öffnet das Modul (kein „Seite nicht gefunden“)');
+    await go(`/topics/${topic.id}?version=1`);
     await shot('02-thema');
     const started = await click('.topic-module .btn-primary', 'Modulprüfung starten');
     if (!started) console.log('DEBUG ' + await ev(`document.querySelector('.topic-actions')?.outerHTML.slice(0,400) + ' | ' + document.querySelector('.topic-module')?.textContent.slice(0,300)`));
@@ -146,6 +151,59 @@ async function main() {
     await ev(`document.querySelector('.topic-card').focus()`);
     console.log('FOCUS ' + await ev(`document.activeElement.className + ' ' + getComputedStyle(document.activeElement).outlineStyle + ' ' + getComputedStyle(document.activeElement).boxShadow`));
     check(await ev(`document.activeElement.classList.contains('topic-card') && (getComputedStyle(document.activeElement).outlineStyle !== 'none' || getComputedStyle(document.activeElement).boxShadow !== 'none')`), 'Tastatur: Themenkarte ist fokussierbar und zeigt einen Fokusrahmen');
+    // ── JSON-Import/-Export über die Oberfläche, Referenzfehler, Hilfeseite (ADR 0028)
+    const upload = async (selector, file) => {
+      const doc = await send('DOM.getDocument', { depth: -1 });
+      const q = await send('DOM.querySelector', { nodeId: doc.result.root.nodeId, selector });
+      if (!q.result.nodeId) return false;
+      await send('DOM.setFileInputFiles', { files: [file], nodeId: q.result.nodeId });
+      return true;
+    };
+    const writeJson = (name, obj) => { const f = path.join(OUT, name); fs.writeFileSync(f, JSON.stringify(obj, null, 2)); return f; };
+    const importRef = '5b0e2d7c-1f3a-4a8e-9c64-0d2f7e8a1b33';
+    const modFile = writeJson('modul-import.json', { format: 'learny-module', schema_version: 1, reference_id: importRef, name: 'Browser-Import-Modul', cards: [{ category: 'K', term: 'Import-1', question: 'Frage?', definition: 'Definition' }, { category: 'K', term: 'Import-2', question: 'Frage 2?', definition: 'Definition 2' }] });
+    await go('/');
+    check(await waitFor(`!!document.querySelector('label.file-btn input[type=file]')`), 'Home: Schaltfläche „JSON importieren“ vorhanden');
+    check(await upload('label.file-btn input[type=file]', modFile), 'Modul-JSON auswählen');
+    check(await waitFor(`/Modul-Import/.test(document.body.textContent) && /Browser-Import-Modul/.test(document.body.textContent)`), 'Modul-JSON wird erkannt und als Vorschau (Modul-Import) angezeigt, noch nichts importiert');
+    check(await click('button', 'Import bestätigen'), 'Modul-Import bestätigen');
+    check(await waitFor(`/Modul „Browser-Import-Modul“ importiert/.test(document.body.textContent)`), 'Modul-Import meldet Erfolg');
+    check(await waitFor(`[...document.querySelectorAll('.module-card h2')].some(h => h.textContent.trim() === 'Browser-Import-Modul')`), 'Der importierte Modulname wird unverändert dargestellt');
+    await shot('06-modul-import');
+    const badModFile = writeJson('modul-kaputt.json', { format: 'learny-module', schema_version: 1, reference_id: 'keine-guid', name: 'Kaputt', cards: [] });
+    await upload('label.file-btn input[type=file]', badModFile);
+    check(await waitFor(`/GUID/.test(document.querySelector('.alert')?.textContent || '')`), 'Ungültige reference_id: verständliche Fehlermeldung statt Import');
+
+    const topicFile = writeJson('thema-import.json', { format: 'learny-topic', schema_version: 1, name: 'Browser-JSON-Thema', modules: [{ module_ref: importRef, module_name: 'Beliebiger Anzeigename' }] });
+    await go('/topics');
+    check(await upload('label.file-btn input[type=file]', topicFile), 'Thema-JSON auswählen');
+    check(await waitFor(`location.pathname.endsWith('/edit')`), 'Thema aus JSON wird als Entwurf angelegt und im Editor geöffnet (Referenz löst trotz abweichendem Anzeigenamen auf)');
+    check(await waitFor(`[...document.querySelectorAll('.topic-module-row strong')].some(x => x.textContent.trim() === 'Browser-Import-Modul')`), 'Editor zeigt den tatsächlichen Modulnamen, nicht den Anzeigenamen aus der Datei');
+    const badTopicFile = writeJson('thema-falsche-ref.json', { format: 'learny-topic', schema_version: 1, name: 'Browser-JSON-Thema', modules: [{ module_ref: '9c9c9c9c-1111-4222-8333-444455556666', module_name: 'Browser-Import-Modul' }] });
+    const inputs = `[...document.querySelectorAll('label.file-btn')].find(l => l.textContent.includes('Thema aus JSON aktualisieren'))`;
+    await ev(`${inputs}.querySelector('input').setAttribute('id', 'upd-json')`);
+    check(await upload('#upd-json', badTopicFile), 'Thema-JSON zur Aktualisierung auswählen');
+    check(await waitFor(`/Entwurf aktualisieren/.test(document.body.textContent)`), 'Gültige Datei: Bestätigung „Entwurf aktualisieren“ erscheint');
+    await click('button', 'Entwurf aktualisieren');
+    check(await waitFor(`/module_ref/.test(document.querySelector('.alert-error')?.textContent || '')`), 'Unbekannte module_ref: Fehlermeldung nennt die Referenz, der Entwurf bleibt unverändert');
+    check(await ev(`[...document.querySelectorAll('.topic-module-row strong')].some(x => x.textContent.trim() === 'Browser-Import-Modul')`), 'Entwurf nach dem Fehler unverändert (Modul weiterhin zugeordnet)');
+    const invalidGuid = writeJson('thema-ungueltig.json', { format: 'learny-topic', schema_version: 1, name: 'X', modules: [{ module_ref: 'abc', module_name: 'Y' }] });
+    await upload('#upd-json', invalidGuid);
+    check(await waitFor(`/GUID/.test(document.querySelector('.alert-error')?.textContent || '')`), 'Ungültige module_ref (keine GUID) wird sofort mit verständlicher Meldung abgewiesen');
+    await shot('07-referenzfehler');
+
+    await go('/help');
+    check(await waitFor(`!!document.querySelector('#topics')`), 'Hilfeseite: Abschnitt „Module und Themen“ vorhanden');
+    const helpLinks = await ev(`[...document.querySelectorAll('a[href^="/templates/"]')].map(a => a.getAttribute('href'))`);
+    let helpOk = helpLinks.length >= 6;
+    for (const l of helpLinks) { const r = await fetch(BASE + l, { headers: { Cookie: cookie } }); try { JSON.parse(await r.text()); } catch { helpOk = false; } if (!r.ok) helpOk = false; }
+    check(helpOk && helpLinks.some(l => l.includes('module-template')) && helpLinks.some(l => l.includes('topic-template')), 'Hilfeseite: alle Vorlagen-Links (inkl. Modul- und Themenvorlage) liefern gültiges JSON');
+    const tplMod = await (await fetch(BASE + '/templates/module-template.json', { headers: { Cookie: cookie } })).json();
+    const tplTop = await (await fetch(BASE + '/templates/topic-template.json', { headers: { Cookie: cookie } })).json();
+    const impM = await api('/modules/import', 'POST', tplMod); const impT = await api('/topics/import', 'POST', tplTop);
+    check(impM.status === 201 && impT.status === 201, 'Hilfeseite: Beispielvorlagen (Modul, Thema) sind importierbar und aufeinander abgestimmt (module_ref)');
+    check(await ev(`/module_ref/.test(document.body.textContent) && /Anzeigename/.test(document.body.textContent)`), 'Hilfeseite erklärt module_ref und Anzeigename');
+
     check(consoleErrors.length === 0, 'Keine Konsolenfehler (' + consoleErrors.slice(0, 3).join(' | ') + ')');
   } finally {
     try { chrome?.kill(); } catch { }

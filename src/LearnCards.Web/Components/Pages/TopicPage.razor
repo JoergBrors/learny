@@ -129,7 +129,7 @@
                         <div class="topic-actions">
                             @if (!m.Unavailable && (mp is null || mp.Unlocked))
                             {
-                                <a class="btn btn-ghost btn-sm" href="/modules/@m.ModuleId">📖 Lernen</a>
+                                <a class="btn btn-ghost btn-sm" href="/module/@m.ModuleId">📖 Lernen</a>
                             }
                             @if (!d.IsDraft && m.Exam.Enabled && (mp is null || mp.Unlocked))
                             {
