@@ -1,0 +1,91 @@
+@* Visueller Texteditor (contenteditable) für formatierte Kartentexte (ADR 0020). Speichert nie HTML, sondern das begrenzte Markup; Anzeige und Editor nutzen dieselbe Klasse „rt“. *@
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<div class="rte">
+    <label class="form-label" id="@(_id)-label">@Label</label>
+    <div class="rte-toolbar" role="toolbar" aria-label="Formatierung: @Label">
+        <select class="input rte-select" aria-label="Absatzformat" @onchange='e => BlockAsync(e.Value?.ToString() ?? "p")'>
+            <option value="p">Absatz</option>
+            <option value="h1">Überschrift 1</option>
+            <option value="h2">Überschrift 2</option>
+            <option value="h3">Überschrift 3</option>
+        </select>
+        <button type="button" class="btn btn-ghost btn-sm" title="Fett" aria-label="Fett" data-rte="bold" @onmousedown:preventDefault @onclick='() => ExecAsync("bold")'><strong>B</strong></button>
+        <button type="button" class="btn btn-ghost btn-sm" title="Kursiv" aria-label="Kursiv" data-rte="italic" @onmousedown:preventDefault @onclick='() => ExecAsync("italic")'><em>I</em></button>
+        <button type="button" class="btn btn-ghost btn-sm" title="Unterstrichen" aria-label="Unterstrichen" data-rte="underline" @onmousedown:preventDefault @onclick='() => ExecAsync("underline")'><u>U</u></button>
+        <button type="button" class="btn btn-ghost btn-sm" title="Aufzählung" aria-label="Aufzählung" data-rte="ul" @onmousedown:preventDefault @onclick='() => ExecAsync("insertUnorderedList")'>• Liste</button>
+        <button type="button" class="btn btn-ghost btn-sm" title="Nummerierte Liste" aria-label="Nummerierte Liste" data-rte="ol" @onmousedown:preventDefault @onclick='() => ExecAsync("insertOrderedList")'>1. Liste</button>
+        <button type="button" class="btn btn-ghost btn-sm" title="Link einfügen" aria-label="Link einfügen" data-rte="link" @onmousedown:preventDefault @onclick="() => _linkOpen = !_linkOpen">🔗 Link</button>
+        <button type="button" class="btn btn-ghost btn-sm" title="Formatierung entfernen" aria-label="Formatierung entfernen" data-rte="clear" @onmousedown:preventDefault @onclick="ClearAsync">✕ Format</button>
+    </div>
+    @if (_linkOpen)
+    {
+        <div class="rte-link">
+            <input class="input" type="url" placeholder="https://…" aria-label="Link-Adresse" @bind="_linkUrl" @bind:event="oninput" />
+            <button type="button" class="btn btn-primary btn-sm" @onclick="ApplyLinkAsync">Link setzen</button>
+            <button type="button" class="btn btn-ghost btn-sm" @onclick="() => _linkOpen = false">Abbrechen</button>
+            @if (_linkError is not null) { <span class="rte-error" role="alert">@_linkError</span> }
+        </div>
+    }
+    <div id="@_id" class="rte-surface rt" contenteditable="true" role="textbox" aria-multiline="true" aria-labelledby="@(_id)-label" spellcheck="true"></div>
+    <p class="muted rte-hint">Erlaubt: Überschriften, Absätze, fett, kursiv, unterstrichen, Listen und Links (http/https). Eingefügter Text wird als Klartext übernommen.</p>
+</div>
+
+@code {
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+    [Parameter] public string Label { get; set; } = "Text";
+
+    private readonly string _id = "rte-" + Guid.NewGuid().ToString("N")[..10];
+    private DotNetObjectReference<RichTextEditor>? _ref;
+    private string _lastKnown = "";
+    private bool _ready, _linkOpen;
+    private string _linkUrl = "";
+    private string? _linkError;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _ref = DotNetObjectReference.Create(this);
+            _lastKnown = Value ?? "";
+            await JS.InvokeVoidAsync("lcRte.init", _id, RichText.ToHtml(Value), _ref);
+            _ready = true;
+        }
+        else if (_ready && (Value ?? "") != _lastKnown)
+        {
+            // Wert wurde von außen geändert (z. B. Änderungen verworfen, andere Karte geladen)
+            _lastKnown = Value ?? "";
+            await JS.InvokeVoidAsync("lcRte.setHtml", _id, RichText.ToHtml(Value));
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnEditorChanged(string markup)
+    {
+        if (markup == _lastKnown) return;
+        _lastKnown = markup;
+        Value = markup;
+        await ValueChanged.InvokeAsync(markup);
+    }
+
+    private Task ExecAsync(string cmd) => JS.InvokeVoidAsync("lcRte.exec", _id, cmd).AsTask();
+    private Task BlockAsync(string tag) => JS.InvokeVoidAsync("lcRte.block", _id, tag).AsTask();
+    private Task ClearAsync() => JS.InvokeVoidAsync("lcRte.clear", _id).AsTask();
+
+    private async Task ApplyLinkAsync()
+    {
+        _linkError = null;
+        var url = (_linkUrl ?? "").Trim();
+        if (!RichText.IsSafeLinkUrl(url)) { _linkError = "Nur absolute http(s)-Adressen ohne Leerzeichen sind erlaubt."; return; }
+        if (await JS.InvokeAsync<bool>("lcRte.link", _id, url)) { _linkOpen = false; _linkUrl = ""; }
+        else _linkError = "Der Link konnte nicht gesetzt werden.";
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try { if (_ready) await JS.InvokeVoidAsync("lcRte.dispose", _id); } catch (JSDisconnectedException) { } catch (InvalidOperationException) { }
+        _ref?.Dispose();
+    }
+}

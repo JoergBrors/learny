@@ -53,20 +53,20 @@
                 <div class="back-sections">
                     <section aria-label="Definition">
                         <h4>Definition</h4>
-                        <p>@Card.Definition</p>
+                        <RichTextView Value="@Card.Definition" />
                     </section>
                     @if (!string.IsNullOrEmpty(Card.HowItWorks))
                     {
                         <section aria-label="Wie es funktioniert">
                             <h4>⚙️ Wie es funktioniert</h4>
-                            <p>@Card.HowItWorks</p>
+                            <RichTextView Value="@Card.HowItWorks" />
                         </section>
                     }
                     @if (!string.IsNullOrEmpty(Card.Context))
                     {
                         <section aria-label="Kontext">
                             <h4>🧭 Kontext</h4>
-                            <p>@Card.Context</p>
+                            <RichTextView Value="@Card.Context" />
                         </section>
                     }
                     @if (_flipped && Images.Count > 0)
@@ -89,7 +89,7 @@
                     }
                     @if (!string.IsNullOrEmpty(Card.KeyFact))
                     {
-                        <div class="keyfact">🎯 <strong>Key Fact:</strong> @Card.KeyFact</div>
+                        <div class="keyfact">🎯 <strong>Key Fact:</strong> <RichTextView Value="@Card.KeyFact" CssClass="rt-inline" /></div>
                     }
                     @if (Card.OfficialSources.Count > 0)
                     {
@@ -123,6 +123,10 @@
         <div class="action-group">
             <button class="btn btn-ghost btn-sm" @onclick="() => OnPageQuizCard.InvokeAsync(Card.Id)" aria-label="Quiz zu dieser Seite starten">📝 Quiz für diese Seite</button>
             <button class="btn btn-ghost btn-sm" @onclick="() => OnQuizCard.InvokeAsync(Card.Id)" aria-label="Quiz nur zu dieser Karte starten">🎯 Karten-Quiz</button>
+            @if (CanEdit)
+            {
+                <a class="btn btn-ghost btn-sm" href="/module/@Card.ModuleId/edit?card=@Card.Id" aria-label="Diese Karte bearbeiten">✏ Bearbeiten</a>
+            }
             <button class="btn btn-primary btn-sm" @onclick="() => _chatOpen = !_chatOpen" aria-label="KI-Chatbot zu dieser Karte öffnen">💬 Chat</button>
             <button class="btn btn-sm @(MarkedKnown ? "btn-known-active" : "btn-known")" @onclick="() => OnMarkKnown.InvokeAsync(Card.Id)"
                     aria-pressed="@MarkedKnown" aria-label="Als geprüft markieren">✔ Check</button>

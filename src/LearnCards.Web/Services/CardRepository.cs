@@ -230,10 +230,21 @@ public partial class CardRepository
                 @archived, @sort_order, @created_at, @updated_at)
         """, CardArgs(c));
 
-    public async Task<Card?> UpdateCardAsync(string id, CardJson data, string ownerId)
+    /// <summary>Die Karte wurde seit dem Laden im Editor von anderer Stelle geändert (optimistische Sperre).</summary>
+    public sealed class CardConflictException : InvalidOperationException
+    {
+        public CardConflictException() : base("Die Karte wurde inzwischen an anderer Stelle geändert. Lade sie neu, bevor du speicherst — deine Änderungen würden sonst fremde überschreiben.") { }
+    }
+
+    /// <summary>
+    /// Aktualisiert eine eigene Karte. Mit <paramref name="expectedUpdatedAt"/> (Stand beim Laden im Editor) wird erkannt, ob die Karte inzwischen
+    /// anderswo geändert wurde (<see cref="CardConflictException"/>) — ohne den Wert gilt das bisherige „letzter Schreibzugriff gewinnt“ (Import, REST).
+    /// </summary>
+    public async Task<Card?> UpdateCardAsync(string id, CardJson data, string ownerId, DateTime? expectedUpdatedAt = null)
     {
         var card = await GetCardAsync(id, ownerId);
         if (card is null) return null;
+        if (expectedUpdatedAt is { } expected && card.UpdatedAt != expected) throw new CardConflictException();
         card.Category = data.Category;
         card.Term = data.Term;
         card.Question = data.Question;
@@ -264,7 +275,52 @@ public partial class CardRepository
             WHERE id=@id AND owner_user_id=@owner_user_id
             """, CardArgs(card));
         await _quizPool.SyncCardQuizAsync(card);   // quiz[] → Fragenpool (ADR 0019)
-        return card;
+        return await GetCardAsync(card.Id, ownerId) ?? card;   // aus der Datenbank: exakter Zeitstempel für die Konflikterkennung (X-Card-Updated-At)
+    }
+
+    /// <summary>Kartenfelder als Import-/Schreibformat (für Editor und Duplizieren). <c>Images</c> bleibt null (= vorhandene Bilder behalten), <c>Quiz</c> enthält nur die Karten-Fragen aus <c>quiz[]</c>.</summary>
+    public static CardJson ToCardJson(Card c, string moduleName) => new()
+    {
+        Id = c.Id, Module = moduleName, Category = c.Category, Term = c.Term, Question = c.Question, Definition = c.Definition, HowItWorks = c.HowItWorks,
+        Context = c.Context, KeyFact = c.KeyFact, ReferenceAnswer = c.ReferenceAnswer, ChatPrompt = c.ChatPrompt, OfficialSources = c.OfficialSources.ToList(),
+        SlideNumber = c.SlideNumber, TargetTimeSec = c.TargetTimeSec, Quiz = c.Quiz.ToList(), Images = null, Archived = c.Archived, SortOrder = c.SortOrder,
+    };
+
+    /// <summary>
+    /// Dupliziert eine eigene Karte (gleiches Modul): Felder, <c>quiz[]</c>, Bilder (gleiche Binärdaten, neue Bild-IDs) und die Editor-/KI-Fragen des Fragenpools.
+    /// Die Kopie ist aktiv, hat den Titel „… (Kopie)“ und steht direkt hinter dem Original.
+    /// </summary>
+    public async Task<Card?> DuplicateCardAsync(string id, string ownerId)
+    {
+        var src = await GetCardAsync(id, ownerId);
+        if (src is null) return null;
+        var module = await GetModuleAsync(src.ModuleId, ownerId);
+        if (module is null) return null;
+        var data = ToCardJson(src, module.Name);
+        data.Id = null; data.Archived = false; data.Term = (src.Term + " (Kopie)").Trim();
+        data.SortOrder = src.SortOrder + 1;
+        var copy = await CreateCardAsync(data, ownerId);
+        await _images.CopyForCardAsync(src.Id, copy.Id);
+        await _quizPool.CopyCardQuestionsAsync(src.Id, copy.Id);
+        return await GetCardAsync(copy.Id, ownerId);
+    }
+
+    /// <summary>
+    /// Setzt die Reihenfolge der Karten eines eigenen Moduls (<c>sort_order</c> = Position). Alle IDs müssen zu Karten des Moduls gehören.
+    /// Die Anzeige sortiert nach Kategorie, dann <c>sort_order</c>.
+    /// </summary>
+    public async Task<int> ReorderCardsAsync(string moduleId, IReadOnlyList<string> orderedCardIds, string ownerId)
+    {
+        if (!UserService.IsGuid(moduleId) || await GetModuleAsync(moduleId, ownerId) is null) throw new KeyNotFoundException("Modul nicht gefunden.");
+        if (orderedCardIds.Count != orderedCardIds.Distinct(StringComparer.OrdinalIgnoreCase).Count()) throw new ArgumentException("Karten-IDs dürfen nicht doppelt vorkommen.");
+        var own = (await _db.QueryAsync("SELECT id FROM cards WHERE module_id = @m AND owner_user_id = @o", new (string, object?)[] { ("m", moduleId), ("o", ownerId) }))
+            .Select(r => r["id"] ?? "").ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (orderedCardIds.Any(x => !own.Contains(x))) throw new ArgumentException("Eine Karten-ID gehört nicht zu diesem Modul.");
+        var now = DateTime.UtcNow;
+        for (var i = 0; i < orderedCardIds.Count; i++)
+            await _db.ExecuteAsync("UPDATE cards SET sort_order = @s, updated_at = @n WHERE id = @id AND module_id = @m AND owner_user_id = @o",
+                new (string, object?)[] { ("s", i + 1), ("n", now), ("id", orderedCardIds[i]), ("m", moduleId), ("o", ownerId) });
+        return orderedCardIds.Count;
     }
 
     public async Task<Card?> SetArchivedAsync(string id, bool archived, string ownerId)

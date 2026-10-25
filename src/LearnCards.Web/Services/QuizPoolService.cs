@@ -263,6 +263,26 @@ public class QuizPoolService
         }
     }
 
+    /// <summary>Kopiert die Editor- und KI-Fragen einer Karte auf eine andere Karte desselben Moduls (Duplizieren). <c>card_json</c>-Fragen entstehen über das <c>quiz[]</c> der Kopie.</summary>
+    public async Task<int> CopyCardQuestionsAsync(string sourceCardId, string targetCardId, CancellationToken ct = default)
+    {
+        if (!UserService.IsGuid(sourceCardId) || !UserService.IsGuid(targetCardId)) return 0;
+        var rows = await _db.QueryAsync("SELECT * FROM quiz_questions WHERE card_id = @c AND source <> @s", new (string, object?)[] { ("c", sourceCardId), ("s", QuizSources.CardJson) }, ct);
+        var n = 0;
+        foreach (var q in rows.Select(Map))
+        {
+            var copy = new QuizPoolQuestion
+            {
+                ModuleId = q.ModuleId, CardId = targetCardId, Type = q.Type, Question = q.Question, Options = q.Options.ToList(), CorrectIndexes = q.CorrectIndexes.ToList(),
+                Explanation = q.Explanation, Origin = q.Origin, Source = q.Source, Active = q.Active, ModuleVersion = q.ModuleVersion, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+            };
+            copy.Fingerprint = Fingerprint(targetCardId, ToInput(copy));
+            await InsertAsync(copy, ct);
+            n++;
+        }
+        return n;
+    }
+
     // ─── Quizsitzungen (Lösungen nur serverseitig) ─────────────────────────
 
     public Task SaveSessionAsync(QuizSessionRecord s) => _db.ExecuteAsync("""

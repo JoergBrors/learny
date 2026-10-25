@@ -6,13 +6,21 @@ public static class CardImportSchema
 {
     public static JsonObject Document() => new()
     {
-        ["schema_version"] = "2026-10-25",
+        ["schema_version"] = "2026-10-26",
         ["name"] = "learncards-import-batch",
         ["grounding_rules"] = new JsonArray(
             "Use only facts contained in the cards themselves and their official sources.",
             "Do not invent missing fields or unsupported facts.",
             "If a source-backed answer cannot be formed, ask for clarification instead of guessing.",
             "Only add images that were actually provided to you. Never invent, guess or fabricate Base64 image data."),
+        ["rich_text_rules"] = new JsonArray(
+            "The text fields definition, how_it_works, context, key_fact and reference_answer accept a small, safe formatting syntax (Markdown subset). Plain text without markup stays valid and unchanged. Never send HTML — it is shown as plain text.",
+            "Paragraphs: blank line. Line break: single newline. Headings: '# ', '## ', '### ' at line start.",
+            "Emphasis: **bold**, *italic* or _italic_, ++underline++ (combinations such as **_both_** work).",
+            "Lists: '- ' for bullet lists, '1. ' for numbered lists at line start.",
+            "Links: [text](https://example.com) — only http and https are rendered as links.",
+            "Escape a literal marker with a backslash: \\*, \\+, \\[, \\], \\#, \\-.",
+            "Each of these fields is limited to 20000 characters and must not contain control characters (except newline and tab)."),
         ["quiz_rules"] = new JsonArray(
             "quiz[] holds the FIXED quiz questions of a card; it is optional (omit it or send [] for none). Old imports that only use single_choice stay valid.",
             "single_choice (default type): exactly 4 non-empty options and a 0-based correct_index.",
@@ -61,11 +69,11 @@ public static class CardImportSchema
             ["category"] = Property("string", "Category or learning track"),
             ["term"] = Property("string", "Term shown on the card"),
             ["question"] = Property("string", "Prompt shown in learn and quiz mode"),
-            ["definition"] = Property("string", "Correct compact answer"),
-            ["how_it_works"] = Property("string", "Technical explanation"),
-            ["context"] = Property("string", "Operational or architectural context"),
-            ["key_fact"] = Property("string", "One memorable fact or exam gotcha"),
-            ["reference_answer"] = Property("string", "Source-bound reference solution for quiz grading"),
+            ["definition"] = Property("string", "Correct compact answer. Supports a small formatting syntax (see rich_text_rules); plain text stays valid. Max 20000 characters."),
+            ["how_it_works"] = Property("string", "Technical explanation. Supports a small formatting syntax (see rich_text_rules); plain text stays valid. Max 20000 characters."),
+            ["context"] = Property("string", "Operational or architectural context. Supports a small formatting syntax (see rich_text_rules); plain text stays valid. Max 20000 characters."),
+            ["key_fact"] = Property("string", "One memorable fact or exam gotcha. Supports a small formatting syntax (see rich_text_rules); plain text stays valid. Max 20000 characters."),
+            ["reference_answer"] = Property("string", "Source-bound reference solution for quiz grading. Supports a small formatting syntax (see rich_text_rules); plain text stays valid. Max 20000 characters."),
             ["chat_prompt"] = Property("string", "Optional system prompt bound to this card"),
             ["slide_number"] = new JsonObject
             {
@@ -213,7 +221,7 @@ public static class CardImportSchema
             ["definition"] = "Bewegliche Tags wie :latest sind nicht reproduzierbar.",
             ["how_it_works"] = "Ein Digest pinnt exakt das ausgelieferte Image.",
             ["context"] = "Wichtig für CI/CD, Rollbacks und Incident Analysis.",
-            ["key_fact"] = "Deployments sollten auf immutable Digests zeigen.",
+            ["key_fact"] = "Deployments sollten auf **immutable Digests** zeigen.",
             ["reference_answer"] = "In Produktion sollte kein beweglicher Tag wie :latest verwendet werden, weil sich der referenzierte Inhalt ändern kann. Stattdessen wird das Image per SHA-Digest gepinnt, damit Deployments reproduzierbar, nachvollziehbar und sicher bleiben.",
             ["slide_number"] = 3,
             ["target_time_sec"] = 90,

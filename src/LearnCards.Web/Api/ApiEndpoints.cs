@@ -234,15 +234,30 @@ public static class ApiEndpoints
 
         secured.MapPut("/cards/{cardId}", async (string cardId, CardJson data, CardRepository repo, HttpContext http) =>
         {
+            var (valid, validationError) = data.Validate();
+            if (!valid) return Results.Json(new { detail = validationError }, statusCode: 400);
             try
             {
-                return await repo.UpdateCardAsync(cardId, data, Uid(http)) is { } card
+                // Optional: X-Card-Updated-At = updated_at beim Laden → Konflikt (409), wenn die Karte inzwischen geändert wurde (Editor, mehrere Fenster)
+                DateTime? expected = DateTime.TryParse(http.Request.Headers["X-Card-Updated-At"].ToString(), System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var exp) ? exp : null;
+                return await repo.UpdateCardAsync(cardId, data, Uid(http), expected) is { } card
                     ? Results.Ok(CardDto(card))
                     : Results.Json(new { detail = "Card not found" }, statusCode: 404);
             }
+            catch (CardRepository.CardConflictException e) { return Results.Json(new { detail = e.Message, code = "card_conflict" }, statusCode: 409); }
             catch (ArgumentException e) { return Results.Json(new { detail = e.Message }, statusCode: 400); }
             catch (ImageStorageException e) { return ImageError(e); }
         });
+
+        // Karte duplizieren (Felder, quiz[], Bilder, Editor-/KI-Fragen) und Reihenfolge der Karten eines Moduls setzen
+        secured.MapPost("/cards/{cardId}/duplicate", async (string cardId, CardRepository repo, HttpContext http) =>
+            await repo.DuplicateCardAsync(cardId, Uid(http)) is { } copy
+                ? Results.Json(CardDto(copy), statusCode: 201)
+                : Results.Json(new { detail = "Card not found" }, statusCode: 404));
+
+        secured.MapPut("/modules/{moduleId}/cards/order", (string moduleId, CardOrderRequest req, CardRepository repo, HttpContext http) =>
+            Guard(async () => { await repo.ReorderCardsAsync(moduleId, req.CardIds, Uid(http)); return Results.NoContent(); }));
 
         secured.MapPatch("/cards/{cardId}/archive", async (string cardId, CardRepository repo, HttpContext http) =>
             await repo.SetArchivedAsync(cardId, true, Uid(http)) is { } card
@@ -742,6 +757,7 @@ public static class ApiEndpoints
     };
 }
 
+public class CardOrderRequest { public List<string> CardIds { get; set; } = new(); }
 public class ApproveRequest { public string? ReplacePublicationId { get; set; } }
 public class ImageMigrateRequest { public string Source { get; set; } = ""; public string Target { get; set; } = ""; public int Limit { get; set; } = 200; public string? Cursor { get; set; } public bool DryRun { get; set; } }
 public class DisplayNameUpdateRequest { public string DisplayName { get; set; } = ""; }

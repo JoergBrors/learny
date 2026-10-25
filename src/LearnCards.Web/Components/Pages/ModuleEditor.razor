@@ -1,0 +1,663 @@
+@page "/module/{ModuleId}/edit"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject CardRepository Repo
+@inject QuizService Quiz
+@inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthState
+@inject IJSRuntime JS
+@using LearnCards.Web.Services.ImageStorage
+@implements IAsyncDisposable
+
+<PageTitle>Karten bearbeiten — @(_module?.Name ?? "Modul") — LearnCards</PageTitle>
+<NavigationLock OnBeforeInternalNavigation="OnBeforeNavigateAsync" />
+
+<div class="container editor-page">
+    @if (_loading)
+    {
+        <div class="spinner-wrap" aria-busy="true"><div class="spinner" role="status"></div></div>
+    }
+    else if (_module is null)
+    {
+        <div class="alert alert-error" role="alert">Das Modul wurde nicht gefunden oder du darfst es nicht bearbeiten. Nur Eigentümer können ihre Module bearbeiten — freigegebene und globale Module sind schreibgeschützt.</div>
+        <a class="btn btn-ghost" href="/">← Zur Übersicht</a>
+    }
+    else
+    {
+        var dirty = IsDirty;
+        <section class="card panel editor-head">
+            <p class="muted breadcrumb"><a href="/">Lernmodule</a> › <a href="/module/@ModuleId">@_module.Name</a> › Bearbeiten</p>
+            <div class="editor-head-row">
+                <h1>✏ Karten bearbeiten <span class="badge badge-private">@_module.Name</span></h1>
+                <div class="page-head-actions">
+                    <a class="btn btn-ghost" href="/module/@ModuleId">← Zum Modul</a>
+                    <button class="btn btn-ghost" @onclick="ToggleConfig">⚙ Quiz-Einstellungen</button>
+                    <button class="btn btn-primary" @onclick="NewCardAsync">+ Neue Karte</button>
+                </div>
+            </div>
+        </section>
+
+        @if (_configOpen)
+        {
+            <QuizConfigPanel ModuleId="@ModuleId" OnClose="CloseConfig" />
+        }
+
+        <div class="editor-layout">
+            <aside class="card panel editor-list" aria-label="Karten des Moduls">
+                <div class="editor-list-head">
+                    <h2 class="panel-title">Karten</h2>
+                    <label class="check"><input type="checkbox" checked="@_showArchived" @onchange="ToggleArchivedAsync" /> Archiv anzeigen</label>
+                </div>
+                @if (_cards.Count == 0)
+                {
+                    <p class="muted">Noch keine Karten. Lege mit „+ Neue Karte“ die erste an.</p>
+                }
+                @foreach (var group in _cards.GroupBy(c => c.Category))
+                {
+                    <h3 class="editor-group">@(string.IsNullOrWhiteSpace(group.Key) ? "(ohne Kategorie)" : group.Key)</h3>
+                    <ul class="editor-cards">
+                        @foreach (var c in group)
+                        {
+                            var card = c;
+                            <li class="editor-card @(_draft?.Id == card.Id ? "editor-card-active" : "") @(card.Archived ? "editor-card-archived" : "")">
+                                <button type="button" class="editor-card-main" @onclick="() => SelectAsync(card.Id)" aria-current="@(_draft?.Id == card.Id ? "true" : "false")">
+                                    <strong>@card.Term</strong>
+                                    <span class="muted">@(card.Archived ? "archiviert · " : "")@(card.SlideNumber is { } sn ? $"Folie {sn} · " : "")@(card.Images.Count > 0 ? $"🖼 {card.Images.Count} · " : "")@(card.Quiz.Count > 0 ? $"❓ {card.Quiz.Count}" : "")</span>
+                                </button>
+                                <div class="editor-card-actions">
+                                    @if (!card.Archived)
+                                    {
+                                        <button type="button" class="btn btn-ghost btn-sm" aria-label="@card.Term nach oben" title="Nach oben" @onclick="() => MoveAsync(card.Id, -1)">↑</button>
+                                        <button type="button" class="btn btn-ghost btn-sm" aria-label="@card.Term nach unten" title="Nach unten" @onclick="() => MoveAsync(card.Id, 1)">↓</button>
+                                    }
+                                    <button type="button" class="btn btn-ghost btn-sm" aria-label="@card.Term duplizieren" title="Duplizieren" @onclick="() => DuplicateAsync(card.Id)">⧉</button>
+                                    <button type="button" class="btn btn-ghost btn-sm" aria-label="@card.Term @(card.Archived ? "wiederherstellen" : "archivieren")" title="@(card.Archived ? "Wiederherstellen" : "Archivieren")" @onclick="() => ArchiveAsync(card.Id, !card.Archived)">@(card.Archived ? "↩" : "🗂")</button>
+                                </div>
+                            </li>
+                        }
+                    </ul>
+                }
+            </aside>
+
+            <section class="card panel editor-main" aria-label="Karte bearbeiten">
+                @if (_draft is null)
+                {
+                    <p class="muted">Wähle links eine Karte oder lege eine neue an.</p>
+                }
+                else
+                {
+                    <div class="editor-bar" role="status" aria-live="polite">
+                        <span class="editor-state @(dirty ? "editor-state-dirty" : "editor-state-clean")">@(dirty ? "● Ungespeicherte Änderungen" : (_draft.Id is null ? "Neue Karte" : "Gespeichert"))</span>
+                        <div class="editor-bar-actions">
+                            <button class="btn btn-ghost" @onclick="TogglePreview">@(_preview ? "Bearbeiten" : "👁 Vorschau")</button>
+                            <button class="btn btn-ghost" @onclick="DiscardAsync" disabled="@(!dirty)">Änderungen verwerfen</button>
+                            <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_saving">@(_saving ? "Speichert…" : "Speichern")</button>
+                        </div>
+                    </div>
+
+                    @if (_error is not null)
+                    {
+                        <div class="alert alert-error" role="alert">@_error
+                            @if (_conflict) { <button class="btn btn-ghost btn-sm" @onclick="ReloadAsync">Neu laden (eigene Änderungen verwerfen)</button> }
+                        </div>
+                    }
+                    @if (_status is not null) { <div class="alert alert-ok" role="status">@_status</div> }
+
+                    @if (_preview)
+                    {
+                        <article class="editor-preview" aria-label="Vorschau">
+                            <span class="pill pill-brand">@_draft.Category</span>
+                            <h2>@_draft.Term</h2>
+                            <p class="editor-preview-q">@_draft.Question</p>
+                            <RichTextView Value="@_draft.Definition" />
+                            @if (!string.IsNullOrWhiteSpace(_draft.HowItWorks)) { <h3>Wie funktioniert es?</h3><RichTextView Value="@_draft.HowItWorks" /> }
+                            @if (!string.IsNullOrWhiteSpace(_draft.Context)) { <h3>Kontext</h3><RichTextView Value="@_draft.Context" /> }
+                            @if (!string.IsNullOrWhiteSpace(_draft.KeyFact)) { <div class="keyfact">🎯 <strong>Key Fact:</strong><RichTextView Value="@_draft.KeyFact" /></div> }
+                            @foreach (var img in _draft.Images)
+                            {
+                                <figure class="card-image">
+                                    <img src="@ImageSrc(img)" alt="@img.Alt" loading="lazy" />
+                                    @if (!string.IsNullOrWhiteSpace(img.Caption)) { <figcaption>@img.Caption</figcaption> }
+                                </figure>
+                            }
+                            @if (_draft.Quiz.Count + _poolQs.Count > 0)
+                            {
+                                <h3>Quizfragen (richtige Antworten markiert)</h3>
+                                <ol class="editor-quiz-preview">
+                                    @foreach (var q in _draft.Quiz) { <li>@PreviewQuestion(q)</li> }
+                                    @foreach (var q in _poolQs.Where(p => p.Active)) { <li>@PreviewQuestion(QuizPoolService.ToInput(q)) <span class="pill pill-muted">@(q.Origin == "ai" ? "KI" : "Editor")</span></li> }
+                                </ol>
+                            }
+                            @if (_draft.Id is not null)
+                            {
+                                <button class="btn btn-ghost" @onclick="OpenQuizPreview" disabled="@dirty" title="@(dirty ? "Erst speichern, dann ausprobieren" : "Quiz dieser Karte ausprobieren")">📝 Quiz dieser Karte ausprobieren</button>
+                                @if (dirty) { <span class="muted"> — erst speichern</span> }
+                            }
+                        </article>
+                    }
+                    else
+                    {
+                        <div class="editor-form">
+                            <fieldset class="editor-section">
+                                <legend>Grunddaten</legend>
+                                <div class="form-grid">
+                                    <label>Kategorie <input class="input" list="editor-categories" maxlength="200" @bind="_draft.Category" @bind:event="oninput" /></label>
+                                    <label>Begriff (Titel) <input class="input" maxlength="300" @bind="_draft.Term" @bind:event="oninput" /></label>
+                                </div>
+                                <datalist id="editor-categories">@foreach (var cat in _cards.Select(c => c.Category).Distinct()) { <option value="@cat"></option> }</datalist>
+                                <label class="form-label">Frage auf der Kartenvorderseite
+                                    <textarea class="input" rows="2" @bind="_draft.Question" @bind:event="oninput"></textarea>
+                                </label>
+                            </fieldset>
+
+                            <fieldset class="editor-section">
+                                <legend>Texte (formatierbar)</legend>
+                                <RichTextEditor Label="Antwort / Definition" Value="@_draft.Definition" ValueChanged="v => SetText(t => t.Definition = v)" />
+                                <RichTextEditor Label="Wie funktioniert es?" Value="@_draft.HowItWorks" ValueChanged="v => SetText(t => t.HowItWorks = v)" />
+                                <RichTextEditor Label="Kontext" Value="@_draft.Context" ValueChanged="v => SetText(t => t.Context = v)" />
+                                <RichTextEditor Label="Key Fact" Value="@_draft.KeyFact" ValueChanged="v => SetText(t => t.KeyFact = v)" />
+                                <RichTextEditor Label="Referenzantwort (für die Quizbewertung)" Value="@_draft.ReferenceAnswer" ValueChanged="v => SetText(t => t.ReferenceAnswer = v)" />
+                                <label class="form-label">Chat-Prompt (Anweisung für den KI-Chat dieser Karte)
+                                    <textarea class="input" rows="2" @bind="_draft.ChatPrompt" @bind:event="oninput"></textarea>
+                                </label>
+                            </fieldset>
+
+                            <fieldset class="editor-section">
+                                <legend>Offizielle Quellen</legend>
+                                @for (var i = 0; i < _draft.Sources.Count; i++)
+                                {
+                                    var src = _draft.Sources[i];
+                                    var si = i;
+                                    <div class="editor-source">
+                                        <input class="input" placeholder="Titel" aria-label="Quelle @(si + 1) Titel" @bind="src.Title" @bind:event="oninput" />
+                                        <input class="input" placeholder="https://…" aria-label="Quelle @(si + 1) Adresse" @bind="src.Url" @bind:event="oninput" />
+                                        <input class="input" placeholder="Herausgeber" aria-label="Quelle @(si + 1) Herausgeber" @bind="src.Publisher" @bind:event="oninput" />
+                                        <button type="button" class="btn btn-ghost btn-sm" aria-label="Quelle @(si + 1) entfernen" @onclick="() => RemoveSource(si)">✕</button>
+                                    </div>
+                                }
+                                <button type="button" class="btn btn-ghost btn-sm" @onclick="AddSource">+ Quelle</button>
+                            </fieldset>
+
+                            <fieldset class="editor-section">
+                                <legend>Folienmodus (optional)</legend>
+                                <div class="form-grid">
+                                    <label>Foliennummer <input class="input" type="number" min="1" @bind="_draft.SlideNumber" /></label>
+                                    <label>Zielzeit (Sekunden) <input class="input" type="number" min="1" @bind="_draft.TargetTimeSec" /></label>
+                                </div>
+                            </fieldset>
+
+                            <fieldset class="editor-section">
+                                <legend>Bilder (@_draft.Images.Count von @CardImageLimits.MaxImagesPerCard)</legend>
+                                <p class="muted">PNG, JPEG oder WebP, höchstens 2 MiB je Bild. Alternativtext beschreibt das Bild für Screenreader; die Bildunterschrift erscheint unter dem Bild.</p>
+                                @for (var i = 0; i < _draft.Images.Count; i++)
+                                {
+                                    var img = _draft.Images[i];
+                                    var ii = i;
+                                    <div class="editor-image">
+                                        <img src="@ImageSrc(img)" alt="@(string.IsNullOrWhiteSpace(img.Alt) ? "Bildvorschau" : img.Alt)" class="editor-image-thumb" />
+                                        <div class="editor-image-fields">
+                                            <label>Alternativtext <input class="input" maxlength="300" @bind="img.Alt" @bind:event="oninput" /></label>
+                                            <label>Bildunterschrift <input class="input" maxlength="300" @bind="img.Caption" @bind:event="oninput" /></label>
+                                            <div class="editor-image-actions">
+                                                <button type="button" class="btn btn-ghost btn-sm" aria-label="Bild @(ii + 1) nach oben" disabled="@(ii == 0)" @onclick="() => MoveImage(ii, -1)">↑</button>
+                                                <button type="button" class="btn btn-ghost btn-sm" aria-label="Bild @(ii + 1) nach unten" disabled="@(ii == _draft.Images.Count - 1)" @onclick="() => MoveImage(ii, 1)">↓</button>
+                                                @if (img.ConfirmRemove)
+                                                {
+                                                    <span class="muted">Bild wirklich entfernen?</span>
+                                                    <button type="button" class="btn btn-danger btn-sm" @onclick="() => RemoveImage(ii)">Ja, entfernen</button>
+                                                    <button type="button" class="btn btn-ghost btn-sm" @onclick="() => img.ConfirmRemove = false">Abbrechen</button>
+                                                }
+                                                else
+                                                {
+                                                    <button type="button" class="btn btn-ghost btn-sm" @onclick="() => img.ConfirmRemove = true">Bild entfernen</button>
+                                                }
+                                            </div>
+                                        </div>
+                                    </div>
+                                }
+                                @if (_draft.Images.Count < CardImageLimits.MaxImagesPerCard)
+                                {
+                                    <label class="btn btn-ghost editor-upload">🖼 Bild hinzufügen
+                                        <InputFile OnChange="OnImagesSelected" accept="image/png,image/jpeg,image/webp" class="visually-hidden" aria-label="Bild hochladen" />
+                                    </label>
+                                }
+                                @if (_imageError is not null) { <div class="alert alert-error" role="alert">@_imageError</div> }
+                            </fieldset>
+
+                            <fieldset class="editor-section">
+                                <legend>Feste Quizfragen dieser Karte (Teil des Karten-JSON)</legend>
+                                <p class="muted">Diese Fragen stehen im <code>quiz[]</code> der Karte (Import/Export) und werden <strong>mit der Karte</strong> gespeichert. Das Karten-<code>quiz[]</code> ist ihre einzige Quelle; der Fragenpool enthält davon nur eine Kopie.</p>
+                                @for (var i = 0; i < _draft.Quiz.Count; i++)
+                                {
+                                    var q = _draft.Quiz[i];
+                                    var qi = i;
+                                    <div class="editor-question">
+                                        <div class="editor-question-head"><strong>Frage @(qi + 1)</strong>
+                                            <button type="button" class="btn btn-ghost btn-sm" aria-label="Frage @(qi + 1) entfernen" @onclick="() => RemoveCardQuestion(qi)">Entfernen</button></div>
+                                        <QuizQuestionForm Model="q" FixedFourOptions="true" OnChanged="Touch" />
+                                    </div>
+                                }
+                                <button type="button" class="btn btn-ghost btn-sm" @onclick="AddCardQuestion">+ Feste Frage</button>
+                            </fieldset>
+
+                            <fieldset class="editor-section">
+                                <legend>Weitere Fragen im Fragenpool (Editor und KI)</legend>
+                                @if (_draft.Id is null)
+                                {
+                                    <p class="muted">Speichere die Karte zuerst, dann kannst du ihr Fragen aus dem Fragenpool zuordnen.</p>
+                                }
+                                else
+                                {
+                                    <p class="muted">Diese Fragen liegen im zentralen <strong>Fragenpool</strong> des Moduls (unabhängig vom Karten-JSON) und werden <strong>sofort einzeln</strong> gespeichert — nicht mit dem Button „Speichern“ der Karte. KI-generierte Fragen kannst du hier prüfen und korrigieren.</p>
+                                    @if (_poolError is not null) { <div class="alert alert-error" role="alert">@_poolError</div> }
+                                    @foreach (var pq in _poolQs)
+                                    {
+                                        var p = pq;
+                                        <div class="editor-question @(p.Active ? "" : "editor-question-off")">
+                                            <div class="editor-question-head">
+                                                <span><span class="pill pill-muted">@(p.Origin == "ai" ? "KI" : "Editor")</span> <strong>@p.Question</strong> <span class="muted">(@TypeLabel(p.Type)@(p.Active ? "" : ", deaktiviert"))</span></span>
+                                                <span class="editor-question-actions">
+                                                    <button type="button" class="btn btn-ghost btn-sm" @onclick="() => EditPoolAsync(p)">Bearbeiten</button>
+                                                    <button type="button" class="btn btn-ghost btn-sm" @onclick="() => TogglePoolActiveAsync(p)">@(p.Active ? "Deaktivieren" : "Aktivieren")</button>
+                                                </span>
+                                            </div>
+                                            @if (_poolEditId == p.Id && _poolEdit is not null)
+                                            {
+                                                <QuizQuestionForm Model="_poolEdit" />
+                                                <div class="modal-actions">
+                                                    <button class="btn btn-ghost btn-sm" @onclick="CancelPoolEdit">Abbrechen</button>
+                                                    <button class="btn btn-primary btn-sm" @onclick="SavePoolAsync">Frage speichern</button>
+                                                </div>
+                                            }
+                                        </div>
+                                    }
+                                    @if (_poolEdit is not null && _poolEditId is null)
+                                    {
+                                        <div class="editor-question">
+                                            <strong>Neue Frage</strong>
+                                            <QuizQuestionForm Model="_poolEdit" />
+                                            <div class="modal-actions">
+                                                <button class="btn btn-ghost btn-sm" @onclick="CancelPoolEdit">Abbrechen</button>
+                                                <button class="btn btn-primary btn-sm" @onclick="SavePoolAsync">Frage speichern</button>
+                                            </div>
+                                        </div>
+                                    }
+                                    else if (_poolEdit is null)
+                                    {
+                                        <button type="button" class="btn btn-ghost btn-sm" @onclick="NewPoolQuestion">+ Neue Frage im Fragenpool</button>
+                                    }
+                                }
+                            </fieldset>
+                        </div>
+                    }
+                }
+            </section>
+        </div>
+
+        @if (_quizPreviewOpen && _draft?.Id is not null)
+        {
+            <CardQuizPanel CardId="@_draft.Id" CardTerm="@_draft.Term" OnClose="CloseQuizPreview" />
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public string ModuleId { get; set; } = "";
+    [SupplyParameterFromQuery(Name = "card")] public string? CardParam { get; set; }
+
+    private sealed class DraftImage
+    {
+        public string ImageId = "";
+        public string Mime = "";
+        public string? Data;   // nur bei neu hochgeladenen Bildern (Base64); vorhandene Bilder werden über /api/images/{id} gezeigt
+        public string Alt = "", Caption = "";
+        public bool ConfirmRemove;
+    }
+
+    private sealed class Draft
+    {
+        public string? Id;
+        public DateTime? UpdatedAt;
+        public bool Archived;
+        public string Category = "", Term = "", Question = "", Definition = "", HowItWorks = "", Context = "", KeyFact = "", ReferenceAnswer = "", ChatPrompt = "";
+        public int? SlideNumber, TargetTimeSec;
+        public int SortOrder;
+        public List<OfficialSource> Sources = new();
+        public List<DraftImage> Images = new();
+        public List<QuizQuestionInput> Quiz = new();
+    }
+
+    private ModuleInfo? _module;
+    private string _userSub = "";
+    private bool _loading = true, _configOpen, _showArchived, _preview, _saving, _conflict, _quizPreviewOpen;
+    private List<Card> _cards = new();
+    private Draft? _draft;
+    private string _baseline = "";
+    private string? _error, _status, _imageError, _poolError;
+    private List<QuizPoolQuestion> _poolQs = new();
+    private QuizQuestionInput? _poolEdit;
+    private string? _poolEditId;
+    private bool _beforeUnloadSet;
+
+    // ─── Laden ──────────────────────────────────────────────────────────────
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _userSub = auth.User.GetUserId() ?? throw new UnauthorizedAccessException();
+        _module = await Repo.GetModuleAsync(ModuleId, _userSub);   // nur eigene Module (Besitzprüfung in der SQL-Abfrage)
+        if (_module is not null)
+        {
+            await LoadCardsAsync();
+            var first = !string.IsNullOrEmpty(CardParam) ? _cards.FirstOrDefault(c => c.Id == CardParam) : null;
+            if (first is not null) await LoadDraftAsync(first.Id);
+        }
+        _loading = false;
+    }
+
+    private async Task LoadCardsAsync()
+    {
+        var active = await Repo.ListCardsAsync(_userSub, ModuleId, null, archived: false);
+        var all = new List<Card>(active);
+        if (_showArchived) all.AddRange(await Repo.ListCardsAsync(_userSub, ModuleId, null, archived: true));
+        _cards = all;
+    }
+
+    private async Task LoadDraftAsync(string cardId)
+    {
+        var card = await Repo.GetCardAsync(cardId, _userSub);
+        if (card is null) { _draft = null; return; }
+        _draft = new Draft
+        {
+            Id = card.Id, UpdatedAt = card.UpdatedAt, Archived = card.Archived, Category = card.Category, Term = card.Term, Question = card.Question, Definition = card.Definition,
+            HowItWorks = card.HowItWorks, Context = card.Context, KeyFact = card.KeyFact, ReferenceAnswer = card.ReferenceAnswer, ChatPrompt = card.ChatPrompt,
+            SlideNumber = card.SlideNumber, TargetTimeSec = card.TargetTimeSec, SortOrder = card.SortOrder,
+            Sources = card.OfficialSources.Select(s => new OfficialSource { Title = s.Title, Url = s.Url, Publisher = s.Publisher }).ToList(),
+            Images = card.Images.OrderBy(i => i.SortOrder).Select(i => new DraftImage { ImageId = i.ImageId, Mime = i.MimeType, Alt = i.AltText, Caption = i.Caption }).ToList(),
+            Quiz = card.Quiz.Select(q => QuizPoolService.FromCardQuiz(card.Id, q)).ToList(),
+        };
+        await LoadPoolAsync();
+        ResetBaseline();
+    }
+
+    private void NewDraft(string category = "")
+    {
+        _draft = new Draft { Category = category };
+        _poolQs = new();
+        _poolEdit = null; _poolEditId = null;
+        ResetBaseline();
+    }
+
+    private async Task LoadPoolAsync()
+    {
+        _poolEdit = null; _poolEditId = null; _poolError = null;
+        _poolQs = _draft?.Id is null ? new() : (await Quiz.ListQuestionsAsync(ModuleId, _userSub, _draft.Id))
+            .Where(q => q.Source != QuizSources.CardJson).ToList();   // card_json-Fragen gehören dem Karten-JSON und werden oben mit der Karte bearbeitet
+    }
+
+    private void ResetBaseline() { _baseline = Snapshot(); _error = null; _status = null; _conflict = false; _imageError = null; _preview = false; }
+
+    // ─── Ungespeicherte Änderungen ─────────────────────────────────────────
+
+    private string Snapshot() => _draft is null ? "" : System.Text.Json.JsonSerializer.Serialize(new
+    {
+        _draft.Category, _draft.Term, _draft.Question, _draft.Definition, _draft.HowItWorks, _draft.Context, _draft.KeyFact, _draft.ReferenceAnswer, _draft.ChatPrompt,
+        _draft.SlideNumber, _draft.TargetTimeSec,
+        Sources = _draft.Sources.Select(s => new { s.Title, s.Url, s.Publisher }),
+        Images = _draft.Images.Select(i => new { i.ImageId, i.Mime, i.Alt, i.Caption, New = i.Data is not null, Len = i.Data?.Length ?? 0 }),
+        Quiz = _draft.Quiz,
+    });
+
+    private bool IsDirty => _draft is not null && Snapshot() != _baseline;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        var dirty = !_loading && IsDirty;
+        if (dirty != _beforeUnloadSet)
+        {
+            _beforeUnloadSet = dirty;
+            try { await JS.InvokeVoidAsync("lcRte.setBeforeUnload", dirty); } catch (JSDisconnectedException) { }
+        }
+    }
+
+    private async Task<bool> ConfirmDiscardAsync() =>
+        !IsDirty || await JS.InvokeAsync<bool>("confirm", "Es gibt ungespeicherte Änderungen. Wirklich verwerfen?");
+
+    private async Task OnBeforeNavigateAsync(LocationChangingContext context)
+    {
+        if (await JS.InvokeAsync<bool>("lcRte.wasConfirmed")) return;   // Linkklick wurde bereits bestätigt
+        if (!await ConfirmDiscardAsync()) context.PreventNavigation();
+    }
+
+    private void Touch() => StateHasChanged();
+    private void SetText(Action<Draft> set) { if (_draft is not null) set(_draft); StateHasChanged(); }
+
+    // ─── Kartenliste ───────────────────────────────────────────────────────
+
+    private async Task SelectAsync(string cardId)
+    {
+        if (_draft?.Id == cardId) return;
+        if (!await ConfirmDiscardAsync()) return;
+        await LoadDraftAsync(cardId);
+    }
+
+    private async Task NewCardAsync()
+    {
+        if (!await ConfirmDiscardAsync()) return;
+        NewDraft(_draft?.Category ?? _cards.FirstOrDefault()?.Category ?? "");
+    }
+
+    private async Task ToggleArchivedAsync(ChangeEventArgs e)
+    {
+        _showArchived = e.Value is true;
+        await LoadCardsAsync();
+    }
+
+    private async Task MoveAsync(string cardId, int delta)
+    {
+        // Reihenfolge gilt je Kategorie (Anzeige: Kategorie, dann sort_order) — vertauscht wird nur innerhalb der Kategorie
+        var active = (await Repo.ListCardsAsync(_userSub, ModuleId, null, archived: false)).ToList();
+        var card = active.FirstOrDefault(c => c.Id == cardId);
+        if (card is null) return;
+        var group = active.Where(c => c.Category == card.Category).ToList();
+        var idx = group.FindIndex(c => c.Id == cardId);
+        var target = idx + delta;
+        if (target < 0 || target >= group.Count) return;
+        (group[idx], group[target]) = (group[target], group[idx]);
+        var ordered = new List<string>();
+        foreach (var cat in active.Select(c => c.Category).Distinct())
+            ordered.AddRange(cat == card.Category ? group.Select(c => c.Id) : active.Where(c => c.Category == cat).Select(c => c.Id));
+        try { await Repo.ReorderCardsAsync(ModuleId, ordered, _userSub); await LoadCardsAsync(); if (_draft?.Id == cardId && !IsDirty) await LoadDraftAsync(cardId); }
+        catch (Exception e) when (e is ArgumentException or KeyNotFoundException) { _error = e.Message; }
+    }
+
+    private async Task DuplicateAsync(string cardId)
+    {
+        if (!await ConfirmDiscardAsync()) return;
+        var copy = await Repo.DuplicateCardAsync(cardId, _userSub);
+        await LoadCardsAsync();
+        if (copy is not null) { await LoadDraftAsync(copy.Id); _status = "Karte dupliziert."; }
+    }
+
+    private async Task ArchiveAsync(string cardId, bool archive)
+    {
+        if (_draft?.Id == cardId && !await ConfirmDiscardAsync()) return;
+        await Repo.SetArchivedAsync(cardId, archive, _userSub);
+        await LoadCardsAsync();
+        if (_draft?.Id == cardId)
+        {
+            if (archive && !_showArchived) { _draft = null; _poolQs = new(); _baseline = ""; }
+            else await LoadDraftAsync(cardId);
+            _status = archive ? "Karte archiviert." : "Karte wiederhergestellt.";
+        }
+    }
+
+    // ─── Speichern ─────────────────────────────────────────────────────────
+
+    private static CardQuizQuestion ToCardQuiz(QuizQuestionInput i) => new()
+    {
+        Type = i.Type, Question = i.Question.Trim(), Explanation = i.Explanation.Trim(),
+        Options = i.Type == QuizTypes.FreeText ? new() : i.Options.Select(o => o.Trim()).ToList(),
+        CorrectIndex = i.Type == QuizTypes.SingleChoice ? i.CorrectIndexes.FirstOrDefault() : 0,
+        CorrectIndexes = i.Type == QuizTypes.MultipleResponse ? i.CorrectIndexes.Distinct().OrderBy(x => x).ToList() : null,
+    };
+
+    private CardJson BuildJson() => new()
+    {
+        Module = _module!.Name, Category = _draft!.Category.Trim(), Term = _draft.Term.Trim(), Question = _draft.Question.Trim(),
+        Definition = RichText.Normalize(_draft.Definition).Trim(), HowItWorks = RichText.Normalize(_draft.HowItWorks).Trim(), Context = RichText.Normalize(_draft.Context).Trim(),
+        KeyFact = RichText.Normalize(_draft.KeyFact).Trim(), ReferenceAnswer = RichText.Normalize(_draft.ReferenceAnswer).Trim(), ChatPrompt = _draft.ChatPrompt.Trim(),
+        SlideNumber = _draft.SlideNumber, TargetTimeSec = _draft.TargetTimeSec, SortOrder = _draft.SortOrder, Archived = _draft.Archived,
+        OfficialSources = _draft.Sources.Where(s => !string.IsNullOrWhiteSpace(s.Title) || !string.IsNullOrWhiteSpace(s.Url))
+            .Select(s => new OfficialSource { Title = s.Title.Trim(), Url = s.Url.Trim(), Publisher = (s.Publisher ?? "").Trim() }).ToList(),
+        Quiz = _draft.Quiz.Select(ToCardQuiz).ToList(),
+        // Immer die vollständige Liste senden: vorhandene Bilder per image_id behalten (inkl. neuer Texte/Reihenfolge), neue mit Daten — so geht beim Speichern nichts verloren
+        Images = _draft.Images.Select(i => i.Data is null
+            ? new CardImage { ImageId = i.ImageId, MimeType = i.Mime, AltText = i.Alt, Caption = i.Caption }
+            : new CardImage { MimeType = i.Mime, DataBase64 = i.Data, AltText = i.Alt, Caption = i.Caption }).ToList(),
+    };
+
+    private async Task SaveAsync()
+    {
+        if (_draft is null || _module is null) return;
+        _saving = true; _error = null; _status = null; _conflict = false;
+        try
+        {
+            var data = BuildJson();
+            var (ok, error) = data.Validate();
+            if (!ok) { _error = error; return; }
+            Card? saved;
+            if (_draft.Id is null) saved = await Repo.CreateCardAsync(data, _userSub);
+            else saved = await Repo.UpdateCardAsync(_draft.Id, data, _userSub, _draft.UpdatedAt);
+            if (saved is null) { _error = "Die Karte wurde nicht gefunden."; return; }
+            await LoadCardsAsync();
+            await LoadDraftAsync(saved.Id);
+            _status = "Karte gespeichert.";
+        }
+        catch (CardRepository.CardConflictException e) { _error = e.Message; _conflict = true; }
+        catch (ArgumentException e) { _error = e.Message; }
+        catch (ImageStorageException e) { _error = "Bild konnte nicht gespeichert werden: " + e.Message; }
+        finally { _saving = false; }
+    }
+
+    private async Task DiscardAsync()
+    {
+        if (_draft is null) return;
+        if (!await JS.InvokeAsync<bool>("confirm", "Alle ungespeicherten Änderungen an dieser Karte verwerfen?")) return;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        if (_draft?.Id is { } id) await LoadDraftAsync(id); else NewDraft();
+        _status = "Änderungen verworfen.";
+    }
+
+    private void TogglePreview() => _preview = !_preview;
+    private void ToggleConfig() => _configOpen = !_configOpen;
+    private Task CloseConfig() { _configOpen = false; return Task.CompletedTask; }
+    private void OpenQuizPreview() => _quizPreviewOpen = true;
+    private Task CloseQuizPreview() { _quizPreviewOpen = false; return Task.CompletedTask; }
+
+    // ─── Quellen, Bilder, feste Fragen ─────────────────────────────────────
+
+    private void AddSource() => _draft?.Sources.Add(new OfficialSource());
+    private void RemoveSource(int i) => _draft?.Sources.RemoveAt(i);
+
+    private static string ImageSrc(DraftImage img) => img.Data is null ? "/api/images/" + img.ImageId : $"data:{img.Mime};base64,{img.Data}";
+
+    private async Task OnImagesSelected(InputFileChangeEventArgs e)
+    {
+        _imageError = null;
+        if (_draft is null) return;
+        foreach (var file in e.GetMultipleFiles(CardImageLimits.MaxImagesPerCard))
+        {
+            if (_draft.Images.Count >= CardImageLimits.MaxImagesPerCard) { _imageError = $"Höchstens {CardImageLimits.MaxImagesPerCard} Bilder pro Karte."; break; }
+            if (file.Size > CardImageLimits.MaxDecodedBytes) { _imageError = $"„{file.Name}“ ist größer als 2 MiB."; continue; }
+            try
+            {
+                await using var stream = file.OpenReadStream(CardImageLimits.MaxDecodedBytes + 1);
+                using var ms = new MemoryStream();
+                await stream.CopyToAsync(ms);
+                var candidate = new CardImage { MimeType = file.ContentType, DataBase64 = Convert.ToBase64String(ms.ToArray()), AltText = "", Caption = "" };
+                var (ok, error) = CardImageValidator.ValidateAndNormalize(new List<CardImage> { candidate });   // dieselbe Prüfung wie beim Speichern (Typ, Signatur, Größe)
+                if (!ok) { _imageError = $"„{file.Name}“: {error}"; continue; }
+                _draft.Images.Add(new DraftImage { Mime = candidate.MimeType, Data = candidate.DataBase64, Alt = "", Caption = "" });
+            }
+            catch (IOException) { _imageError = $"„{file.Name}“ konnte nicht gelesen werden."; }
+        }
+    }
+
+    private void MoveImage(int i, int delta)
+    {
+        if (_draft is null) return;
+        var t = i + delta;
+        if (t < 0 || t >= _draft.Images.Count) return;
+        (_draft.Images[i], _draft.Images[t]) = (_draft.Images[t], _draft.Images[i]);
+    }
+
+    private void RemoveImage(int i) => _draft?.Images.RemoveAt(i);
+
+    private void AddCardQuestion() => _draft?.Quiz.Add(new QuizQuestionInput { Type = QuizTypes.SingleChoice, Options = new() { "", "", "", "" }, CorrectIndexes = new() { 0 } });
+    private void RemoveCardQuestion(int i) => _draft?.Quiz.RemoveAt(i);
+
+    // ─── Fragenpool (Editor- und KI-Fragen): sofort gespeichert über QuizService/QuizPoolService ─────
+
+    private void NewPoolQuestion()
+    {
+        _poolError = null; _poolEditId = null;
+        _poolEdit = new QuizQuestionInput { CardId = _draft?.Id, Type = QuizTypes.SingleChoice, Options = new() { "", "", "", "" }, CorrectIndexes = new() { 0 } };
+    }
+
+    private Task EditPoolAsync(QuizPoolQuestion q)
+    {
+        _poolError = null; _poolEditId = q.Id;
+        _poolEdit = QuizPoolService.ToInput(q);
+        return Task.CompletedTask;
+    }
+
+    private void CancelPoolEdit() { _poolEdit = null; _poolEditId = null; _poolError = null; }
+
+    private async Task SavePoolAsync()
+    {
+        if (_poolEdit is null || _draft?.Id is null) return;
+        _poolError = null;
+        _poolEdit.CardId = _draft.Id;
+        try
+        {
+            if (_poolEditId is null) await Quiz.CreateQuestionAsync(ModuleId, _poolEdit, _userSub);
+            else await Quiz.UpdateQuestionAsync(ModuleId, _poolEditId, _poolEdit, _userSub);
+            await LoadPoolAsync();
+            _status = "Frage im Fragenpool gespeichert.";
+        }
+        catch (Exception e) when (e is ArgumentException or InvalidOperationException or KeyNotFoundException or UnauthorizedAccessException) { _poolError = e.Message; }
+    }
+
+    private async Task TogglePoolActiveAsync(QuizPoolQuestion q)
+    {
+        try { await Quiz.SetQuestionActiveAsync(ModuleId, q.Id, !q.Active, _userSub); await LoadPoolAsync(); }
+        catch (Exception e) when (e is KeyNotFoundException or UnauthorizedAccessException) { _poolError = e.Message; }
+    }
+
+    private static string TypeLabel(string type) => type switch { QuizTypes.SingleChoice => "Single Choice", QuizTypes.MultipleResponse => "Multiple Response", _ => "Freitext" };
+
+    private static RenderFragment PreviewQuestion(QuizQuestionInput q) => builder =>
+    {
+        builder.AddContent(0, $"{q.Question} ({TypeLabel(q.Type)})");
+        if (q.Type == QuizTypes.FreeText) { builder.OpenElement(1, "div"); builder.AddAttribute(2, "class", "muted"); builder.AddContent(3, "Musterlösung: " + q.Explanation); builder.CloseElement(); return; }
+        builder.OpenElement(4, "ul");
+        for (var i = 0; i < q.Options.Count; i++)
+        {
+            builder.OpenElement(5, "li");
+            if (q.CorrectIndexes.Contains(i)) builder.AddAttribute(6, "class", "editor-correct");
+            builder.AddContent(7, (q.CorrectIndexes.Contains(i) ? "✓ " : "") + q.Options[i]);
+            builder.CloseElement();
+        }
+        builder.CloseElement();
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        try { await JS.InvokeVoidAsync("lcRte.setBeforeUnload", false); } catch (Exception e) when (e is JSDisconnectedException or InvalidOperationException) { }
+    }
+}

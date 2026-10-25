@@ -197,6 +197,7 @@ try
 {
     await ImageStorageUnitTests.RunAsync(Check, tmp);
     await ImageStorageRemoteUnitTests.RunAsync(Check);
+    RichTextUnitTests.Run(Check);
     Console.WriteLine();
 
     // ─── Warten bis der Server antwortet ───────────────────────────────────
@@ -1438,6 +1439,144 @@ try
         var mcpAddText = await McpCall(benMcp!, "add_card", new { module = "MCP-Quiz", category = "K", term = "MR", question = "Q?", definition = "D",
             quiz = new object[] { new { type = "multiple_response", question = "Welche?", options = new[] { "a", "b", "c" }, correct_indexes = new[] { 0, 2 }, explanation = "a und c" }, new { type = "free_text", question = "Frei?", explanation = "Muster" } } });
         Check(mcpAddText.StartsWith("Card created"), "MCP: add_card nimmt multiple_response und free_text im quiz[] an");
+    }
+
+    // ─── Karten-Editor (ADR 0020): Rich-Text, Duplizieren, Sortieren, Archiv, Konflikte, Bilder, Rechte ───
+    Console.WriteLine("\nKarten-Editor (ADR 0020)");
+    {
+        var (em2, ec) = await MakeQuizModule(ann, "ED-Karten");
+        async Task<HttpResponseMessage> PutCardFull(HttpClient who, string id, object body, string? ifUpdatedAt = null)
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Put, $"/api/cards/{id}") { Content = Body(body) };
+            if (ifUpdatedAt is not null) req.Headers.TryAddWithoutValidation("X-Card-Updated-At", ifUpdatedAt);
+            return await who.SendAsync(req);
+        }
+
+        // 1) Rich-Text: Grenzen und Speicherung
+        Check((await ann.PostAsync("/api/cards/", Body(new { module = "ED-Karten", category = "K", term = "Lang", question = "Q?", definition = new string('x', 20001) }))).StatusCode == HttpStatusCode.BadRequest
+              && (await ann.PostAsync("/api/cards/", Body(new { module = "ED-Karten", category = "K", term = "Lang", question = "Q?", definition = "a\u0001b" }))).StatusCode == HttpStatusCode.BadRequest,
+            "Rich-Text: zu lange Texte (> 20 000 Zeichen) und Steuerzeichen werden beim Anlegen abgelehnt (400)");
+        Check((await PutCardFull(ann, ec[0], new { module = "ED-Karten", category = "K", term = "SC-Karte", question = "Q?", definition = new string('x', 20001) })).StatusCode == HttpStatusCode.BadRequest, "Rich-Text: auch beim Aktualisieren wird validiert (400)");
+        var markup = "## Titel\n**fett** und [Link](https://example.org)\n\n- eins\n- zwei";
+        var withMarkup = await ann.PostAsync("/api/cards/", Body(new { module = "ED-Karten", category = "K", term = "Markup", question = "Q?", definition = markup, key_fact = "<script>alert(1)</script>" }));
+        var markupCard = await J(withMarkup);
+        Check(withMarkup.StatusCode == HttpStatusCode.Created && markupCard!["definition"]!.GetValue<string>() == markup && markupCard["key_fact"]!.GetValue<string>() == "<script>alert(1)</script>",
+            "Rich-Text: das Markup wird unverändert gespeichert und ausgeliefert (kein HTML-Umbau im Speicher; Ausgabe wird beim Rendern gesichert)");
+
+        // Ausgabe in der Lernansicht (serverseitig gerendert): Angriffe erscheinen nur als Text, Formatierung als erlaubte Elemente
+        var xssRes = await ann.PostAsync("/api/cards/", Body(new { module = "ED-XSS", category = "K", term = "XSS", question = "Q?",
+            definition = "<script>window.__xss=1</script> <img src=x onerror=alert(1)>\n\n[Klick](javascript:alert(2)) und [ok](https://example.org/a?b=1&c=2) mit **fett**",
+            how_it_works = "- <b onclick=alert(3)>x</b>", key_fact = "++unter++ <svg onload=alert(4)>" }));
+        var xssModule = (await J(await ann.GetAsync($"/api/cards/{(await J(xssRes))!["id"]!.GetValue<string>()}")))!["module_id"]!.GetValue<string>();
+        var xssPage = await (await ann.GetAsync($"/module/{xssModule}")).Content.ReadAsStringAsync();
+        Check(xssPage.Contains("&lt;script&gt;window.__xss=1&lt;/script&gt;") && !xssPage.Contains("<script>window.__xss") && !xssPage.Contains("<img src=x") && !xssPage.Contains("<svg onload") && !xssPage.Contains("<b onclick")
+              && !xssPage.Contains("href=\"javascript:") && xssPage.Contains("<strong>fett</strong>") && xssPage.Contains("href=\"https://example.org/a?b=1&amp;c=2\"") && xssPage.Contains("<u>unter</u>"),
+            "Rich-Text-Sicherheit: die Lernansicht gibt Skripte, Bilder, SVG und Event-Handler nur als Text aus; erlaubte Formatierung und https-Links bleiben");
+
+        // 2) Bilder: behalten, Metadaten ändern, sortieren, entfernen, Limits
+        var imgA = Convert.ToBase64String(PngLike(2_000, 41)); var imgB = Convert.ToBase64String(PngLike(3_000, 42));
+        object QuizOf(int i) => i == 1 ? new object[] { new { type = "multiple_response", question = "Welche sind Primzahlen?", options = new[] { "2", "3", "4", "6" }, correct_indexes = new[] { 0, 1 }, explanation = "2 und 3." },
+                                                       new { type = "free_text", question = "Erkläre den Begriff MR.", explanation = "Muster: MR ist ein Auswahlformat mit mehreren richtigen Antworten." } } : Array.Empty<object>();
+        var put2 = await PutCardFull(ann, ec[1], new { module = "ED-Karten", category = "K", term = "MR-Karte", question = "Frage MR?", definition = "Definition der MR-Karte", quiz = QuizOf(1),
+            images = new object[] { new { mime_type = "image/png", data_base64 = imgA, alt_text = "A", caption = "a" }, new { mime_type = "image/png", data_base64 = imgB, alt_text = "B", caption = "b" } } });
+        var imgs0 = (await J(put2))!["images"]!.AsArray();
+        Check(put2.IsSuccessStatusCode && imgs0.Count == 2, "Editor-Bilder: zwei Bilder gespeichert");
+        var idA = imgs0[0]!["image_id"]!.GetValue<string>(); var idB = imgs0[1]!["image_id"]!.GetValue<string>();
+        var putKeepImages = await PutCardFull(ann, ec[1], new { module = "ED-Karten", category = "K", term = "MR-Karte", question = "Frage MR?", definition = "Definition der MR-Karte (geändert)", quiz = QuizOf(1) });
+        Check((await J(putKeepImages))!["images"]!.AsArray().Count == 2, "Editor-Bilder: fehlendes images-Feld behält die vorhandenen Bilder (nichts geht beim Speichern verloren)");
+        var putMeta = await PutCardFull(ann, ec[1], new { module = "ED-Karten", category = "K", term = "MR-Karte", question = "Frage MR?", definition = "Definition der MR-Karte", quiz = QuizOf(1),
+            images = new object[] { new { image_id = idB, alt_text = "B neu", caption = "b neu" }, new { image_id = idA, alt_text = "A neu", caption = "" } } });
+        var imgs1 = (await J(putMeta))!["images"]!.AsArray();
+        Check(imgs1.Count == 2 && imgs1[0]!["image_id"]!.GetValue<string>() == idB && imgs1[0]!["alt_text"]!.GetValue<string>() == "B neu" && imgs1[0]["caption"]!.GetValue<string>() == "b neu" && imgs1[1]!["alt_text"]!.GetValue<string>() == "A neu",
+            "Editor-Bilder: Alternativtext, Unterschrift und Reihenfolge lassen sich über image_id ändern (Bilddaten bleiben)");
+        var bytesB = await (await ann.GetAsync("/api/images/" + idB)).Content.ReadAsByteArrayAsync();
+        Check(bytesB.SequenceEqual(PngLike(3_000, 42)), "Editor-Bilder: Auslieferung über /api/images/{id} ist byte-identisch");
+        Check((await PutCardFull(ann, ec[1], new { module = "ED-Karten", category = "K", term = "MR-Karte", question = "Frage MR?", definition = "D", quiz = QuizOf(1),
+                images = new object[] { new { image_id = (await J(await ann.GetAsync($"/api/cards/{ec[0]}")))!["images"]?.AsArray().FirstOrDefault()?["image_id"]?.GetValue<string>() ?? Guid.NewGuid().ToString() } } })).StatusCode == HttpStatusCode.BadRequest, "Editor-Bilder: eine image_id einer anderen Karte wird abgewiesen (400)");
+        var six = Enumerable.Range(0, 6).Select(i => (object)new { mime_type = "image/png", data_base64 = Convert.ToBase64String(PngLike(500, 60 + i)), alt_text = "", caption = "" }).ToArray();
+        Check((await PutCardFull(ann, ec[1], new { module = "ED-Karten", category = "K", term = "MR-Karte", question = "Frage MR?", definition = "D", quiz = QuizOf(1), images = six })).StatusCode == HttpStatusCode.BadRequest, "Editor-Bilder: mehr als 5 Bilder werden abgewiesen (400)");
+
+        // 3) Fragenpool: Editor-Frage zur Karte, dann Duplizieren
+        var poolQ = await ann.PostAsync($"/api/modules/{em2}/quiz-questions", Body(new { card_id = ec[1], type = "single_choice", question = "Editor-Frage zur MR-Karte?", options = new[] { "a", "b", "c", "d" }, correct_indexes = new[] { 3 }, explanation = "d" }));
+        Check(poolQ.StatusCode == HttpStatusCode.Created, "Editor: Fragenpool-Frage der Karte zugeordnet");
+        var dup = await ann.PostAsync($"/api/cards/{ec[1]}/duplicate", null);
+        var dupJson = await J(dup);
+        var dupId = dupJson!["id"]!.GetValue<string>();
+        var dupPool = (await J(await ann.GetAsync($"/api/modules/{em2}/quiz-questions?card_id={dupId}")))!.AsArray();
+        var srcPool = (await J(await ann.GetAsync($"/api/modules/{em2}/quiz-questions?card_id={ec[1]}")))!.AsArray();
+        Check(dup.StatusCode == HttpStatusCode.Created && dupJson["term"]!.GetValue<string>() == "MR-Karte (Kopie)" && !dupJson["archived"]!.GetValue<bool>() && dupJson["quiz"]!.AsArray().Count == 2,
+            "Duplizieren: Kopie mit Titelzusatz „(Kopie)“, aktiv, mit quiz[]");
+        var dupImgs = dupJson["images"]!.AsArray();
+        Check(dupImgs.Count == 2 && dupImgs.All(i => i!["image_id"]!.GetValue<string>() != idA && i["image_id"]!.GetValue<string>() != idB)
+              && (await (await ann.GetAsync("/api/images/" + dupImgs[0]!["image_id"]!.GetValue<string>())).Content.ReadAsByteArrayAsync()).SequenceEqual(bytesB), "Duplizieren: Bilder werden mit neuen IDs und gleichen Daten kopiert");
+        Check(dupPool.Count == srcPool.Count && srcPool.Count == 3 && dupPool.Count(p => p!["source"]!.GetValue<string>() == "card_json") == 2 && dupPool.Count(p => p!["source"]!.GetValue<string>() == "editor") == 1,
+            "Duplizieren: Fragenpool — card_json-Fragen genau einmal (aus dem quiz[] der Kopie), Editor-Frage kopiert, keine Duplikate");
+        Check((await ben.PostAsync($"/api/cards/{ec[1]}/duplicate", null)).StatusCode == HttpStatusCode.NotFound, "Duplizieren: fremde Karten lassen sich nicht duplizieren (404)");
+
+        // 4) Sortieren
+        var idsK = (await J(await ann.GetAsync($"/api/cards/?module_id={em2}")))!.AsArray().Select(c => c!["id"]!.GetValue<string>()).ToList();
+        var reversed = Enumerable.Reverse(idsK).ToList();
+        Check((await ann.PutAsync($"/api/modules/{em2}/cards/order", Body(new { card_ids = reversed }))).StatusCode == HttpStatusCode.NoContent
+              && (await J(await ann.GetAsync($"/api/cards/?module_id={em2}")))!.AsArray().Select(c => c!["id"]!.GetValue<string>()).SequenceEqual(reversed), "Sortieren: die neue Reihenfolge wird gespeichert und angezeigt");
+        Check((await ann.PutAsync($"/api/modules/{em2}/cards/order", Body(new { card_ids = idsK.Append(qCards[0]).ToList() }))).StatusCode == HttpStatusCode.BadRequest
+              && (await ann.PutAsync($"/api/modules/{em2}/cards/order", Body(new { card_ids = new[] { idsK[0], idsK[0] } }))).StatusCode == HttpStatusCode.BadRequest, "Sortieren: fremde oder doppelte Karten-IDs werden abgewiesen (400)");
+        Check((await ben.PutAsync($"/api/modules/{em2}/cards/order", Body(new { card_ids = idsK }))).StatusCode == HttpStatusCode.NotFound
+              && (await ann.PutAsync($"/api/modules/{Guid.NewGuid()}/cards/order", Body(new { card_ids = idsK }))).StatusCode == HttpStatusCode.NotFound, "Sortieren: fremdes bzw. unbekanntes Modul → 404");
+
+        // 5) Archivieren / Wiederherstellen
+        Check((await ann.PatchAsync($"/api/cards/{ec[2]}/archive", null)).IsSuccessStatusCode
+              && !(await J(await ann.GetAsync($"/api/cards/?module_id={em2}")))!.AsArray().Any(c => c!["id"]!.GetValue<string>() == ec[2])
+              && (await J(await ann.GetAsync("/api/cards/?archived=true")))!.AsArray().Any(c => c!["id"]!.GetValue<string>() == ec[2]), "Archivieren: Karte verschwindet aus der aktiven Liste und erscheint im Archiv");
+        Check((await ben.PatchAsync($"/api/cards/{ec[2]}/restore", null)).StatusCode == HttpStatusCode.NotFound && (await ann.PatchAsync($"/api/cards/{ec[2]}/restore", null)).IsSuccessStatusCode
+              && (await J(await ann.GetAsync($"/api/cards/?module_id={em2}")))!.AsArray().Any(c => c!["id"]!.GetValue<string>() == ec[2]), "Wiederherstellen: nur der Eigentümer; Karte ist wieder aktiv");
+
+        // 6) Gleichzeitige Bearbeitung
+        var cur = (await J(await ann.GetAsync($"/api/cards/{ec[0]}")))!;
+        var u1 = cur["updated_at"]!.GetValue<string>();
+        object Body0(string def) => new { module = "ED-Karten", category = "K", term = "SC-Karte", question = "Frage SC?", definition = def };
+        var ok1 = await PutCardFull(ann, ec[0], Body0("Stand 2"), u1);
+        var u2 = (await J(ok1))!["updated_at"]!.GetValue<string>();
+        var stale = await PutCardFull(ann, ec[0], Body0("Veraltet"), u1);
+        var staleJson = await J(stale);
+        Check(ok1.IsSuccessStatusCode && stale.StatusCode == HttpStatusCode.Conflict && staleJson!["code"]!.GetValue<string>() == "card_conflict"
+              && (await J(await ann.GetAsync($"/api/cards/{ec[0]}")))!["definition"]!.GetValue<string>() == "Stand 2", "Konflikt: ein veralteter Bearbeitungsstand wird erkannt (409) und überschreibt nichts");
+        Check((await PutCardFull(ann, ec[0], Body0("Stand 3"), u2)).IsSuccessStatusCode && (await PutCardFull(ann, ec[0], Body0("Stand 4"))).IsSuccessStatusCode, "Konflikt: aktueller Stand wird akzeptiert; ohne Kopfzeile gilt weiter das bisherige Verhalten (Import/REST kompatibel)");
+
+        // 7) Schreibschutz und Besitz
+        Check((await PutCardFull(ben, qCards[0], new { module = "QZ-Engine", category = "K", term = "x", question = "Q?", definition = "x" })).StatusCode == HttpStatusCode.NotFound
+              && (await ben.PatchAsync($"/api/cards/{qCards[0]}/archive", null)).StatusCode == HttpStatusCode.NotFound
+              && (await ben.PostAsync($"/api/cards/{qCards[0]}/duplicate", null)).StatusCode == HttpStatusCode.NotFound
+              && (await ben.PutAsync($"/api/modules/{qm}/cards/order", Body(new { card_ids = qCards }))).StatusCode == HttpStatusCode.NotFound,
+            "Editor-Rechte: Freigabeempfänger können Karten weder ändern noch archivieren, duplizieren oder sortieren (404)");
+        Check((await PutCardFull(admin, gCardId, new { module = "QZ-Engine", category = "K", term = "x", question = "Q?", definition = "x" })).StatusCode == HttpStatusCode.NotFound
+              && (await ben.PostAsync($"/api/cards/{gCardId}/duplicate", null)).StatusCode == HttpStatusCode.NotFound
+              && (await admin.PutAsync($"/api/modules/{globalQm}/cards/order", Body(new { card_ids = new[] { gCardId } }))).StatusCode == HttpStatusCode.NotFound,
+            "Editor-Rechte: globale Modulversionen sind für alle (auch Administratoren) unveränderlich (404)");
+        var stranger = await LoginAsync("editorstranger");
+        string Text(string html) => html;
+        var okPage = Text(await (await ann.GetAsync($"/module/{em2}/edit")).Content.ReadAsStringAsync());
+        var shareEdit = Text(await (await ben.GetAsync($"/module/{qm}/edit")).Content.ReadAsStringAsync());
+        var strangerEdit = Text(await (await stranger.GetAsync($"/module/{em2}/edit")).Content.ReadAsStringAsync());
+        var adminEdit = Text(await (await admin.GetAsync($"/module/{em2}/edit")).Content.ReadAsStringAsync());
+        var globalEdit = Text(await (await ben.GetAsync($"/module/{globalQm}/edit")).Content.ReadAsStringAsync());
+        Check(okPage.Contains("ED-Karten") && !okPage.Contains("darfst es nicht bearbeiten") && shareEdit.Contains("darfst es nicht bearbeiten") && strangerEdit.Contains("darfst es nicht bearbeiten")
+              && adminEdit.Contains("darfst es nicht bearbeiten") && globalEdit.Contains("darfst es nicht bearbeiten"),
+            "Editor-Seite: nur der Eigentümer öffnet den Editor; Freigabeempfänger, Fremde, Administratoren (fremde private Module) und globale Module erhalten die Sperrmeldung");
+        Check((await NewClient(false).GetAsync($"/module/{em2}/edit")).StatusCode is HttpStatusCode.Redirect or HttpStatusCode.Found or HttpStatusCode.Unauthorized, "Editor-Seite: ohne Anmeldung wird zur Anmeldung umgeleitet");
+
+        // 8) Vorlage mit Formatierung, Schema, MCP
+        var fullTpl = JsonNode.Parse(File.ReadAllText(Path.Combine(FindRepoRoot(), "src", "LearnCards.Web", "wwwroot", "templates", "full-card-template.json")))!["cards"]![0]!;
+        var tplHtml = LearnCards.Web.Domain.RichText.ToHtml(fullTpl["definition"]!.GetValue<string>());
+        Check(tplHtml.Contains("<strong>") && tplHtml.Contains("<em>") && tplHtml.Contains("<u>") && tplHtml.Contains("<ul>") && tplHtml.Contains("<ol>") && tplHtml.Contains("<a href=\"https://learn.microsoft.com/\""),
+            "Vorlage: full-card-template.json zeigt die Formatierung (fett, kursiv, unterstrichen, Listen, Link) und rendert sicher");
+        var schema2 = (await J(await ann.GetAsync("/api/schema/import/cards")))!;
+        Check(schema2["rich_text_rules"]!.AsArray().Count >= 6 && schema2["card_schema"]!["properties"]!["definition"]!["description"]!.GetValue<string>().Contains("rich_text_rules"),
+            "Live-Schema: rich_text_rules beschreibt die Textsyntax; die Textfelder verweisen darauf");
+        using var listReq2 = new HttpRequestMessage(HttpMethod.Post, mcpUrl + "/mcp") { Content = Body(new { jsonrpc = "2.0", id = 4, method = "tools/list" }) };
+        listReq2.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", benMcp!);
+        var tools2 = (await J(await mcp.SendAsync(listReq2)))!["result"]!["tools"]!.AsArray();
+        Check(new[] { "add_card", "import_cards" }.All(n => { var d = tools2.First(t => t!["name"]!.GetValue<string>() == n)!["description"]!.GetValue<string>(); return d.Contains("**bold**") && d.Contains("[text](https://") && d.Contains("never send HTML"); }),
+            "MCP: add_card und import_cards beschreiben die Textformatierung (und dass kein HTML gesendet wird)");
     }
 
     // ─── Freigabe: Version zum Ersetzen wählen, globale Version löschen ───

@@ -63,6 +63,7 @@ static void RegisterCoreTools(McpServerEngine engine, LearnCardsApiClient api, M
     engine.RegisterTool(
         new ToolDefinition("add_card",
             "Create a single learning card in the LearnCards platform. Use only source-grounded facts and preserve the canonical import structure. Optional images[]: each entry needs mime_type (image/png, image/jpeg or image/webp) and data_base64 (plain standard Base64 of the real image file, no 'data:' prefix); alt_text and caption are optional. Limits: max 5 images per card, max 2 MiB per decoded image; prefer small images (< 200 KiB) because Base64 inside tool arguments consumes model context. Only include images you were actually given; never invent Base64 data. Call get_import_schema for the exact, current rules."+
+            " Text fields (definition, how_it_works, context, key_fact, reference_answer) accept a small formatting syntax: **bold**, *italic*, ++underline++, '# ' headings, '- ' and '1. ' lists, [text](https://…) links; plain text stays valid; never send HTML (it is shown as plain text)."+
             " Optional quiz[]: fixed quiz questions of the card. type single_choice (default; exactly 4 options + 0-based correct_index), multiple_response (3-6 options + correct_indexes = all correct 0-based indexes) or free_text (no options; explanation = model answer); every entry needs question and explanation. Omit quiz or send [] for none; AI-generated questions are managed by the server, never send them here.",
             CardUpsertSchema()),
         async (args, ct) =>
@@ -80,6 +81,7 @@ static void RegisterCoreTools(McpServerEngine engine, LearnCardsApiClient api, M
     engine.RegisterTool(
         new ToolDefinition("import_cards",
             "Import multiple learning cards at once. Always consult get_import_schema first and keep answers grounded in the provided official sources. Cards may contain images[] (mime_type, data_base64, alt_text, caption) as described in the schema: real files only, standard Base64 without a 'data:' prefix, max 5 images per card and 2 MiB per decoded image. Many or large images make the request very large — import such cards in small batches; the server reports rejected cards with a reason in the result. With overwrite_existing=true an omitted images field keeps existing images, [] removes them."+
+            " Text fields (definition, how_it_works, context, key_fact, reference_answer) accept a small formatting syntax: **bold**, *italic*, ++underline++, '# ' headings, '- ' and '1. ' lists, [text](https://…) links; plain text stays valid; never send HTML (it is shown as plain text)."+
             " Optional quiz[]: fixed quiz questions of the card. type single_choice (default; exactly 4 options + 0-based correct_index), multiple_response (3-6 options + correct_indexes = all correct 0-based indexes) or free_text (no options; explanation = model answer); every entry needs question and explanation. Omit quiz or send [] for none; AI-generated questions are managed by the server, never send them here.",
             """
             {
@@ -591,7 +593,7 @@ static string CardUpsertSchema() =>
         "category": {"type": "string", "description": "Thematic group, e.g. Netzwerk, Security, IAM"},
         "term": {"type": "string", "description": "The term or concept on the card front"},
         "question": {"type": "string", "description": "Question the learner should answer"},
-        "definition": {"type": "string", "description": "Correct answer or definition"},
+        "definition": {"type": "string", "description": "Correct answer or definition. May use the formatting syntax (bold, italic, underline, headings, lists, https links) described by get_import_schema."},
         "how_it_works": {"type": "string", "description": "Technical mechanics explanation"},
         "context": {"type": "string", "description": "Domain-specific context and gotchas"},
         "key_fact": {"type": "string", "description": "One memorable fact or exam gotcha"},

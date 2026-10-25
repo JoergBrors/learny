@@ -165,6 +165,8 @@ public class CardJson
             if (!Uri.TryCreate(source.Url, UriKind.Absolute, out var uri) || uri.Scheme is not "https")
                 return (false, "Offizielle Quellen müssen absolute HTTPS-URLs sein");
         }
+        foreach (var (field, value) in new[] { ("definition", Definition), ("how_it_works", HowItWorks), ("context", Context), ("key_fact", KeyFact), ("reference_answer", ReferenceAnswer) })
+            if (RichText.Validate(value, field) is { } richError) return (false, richError);
         if (SlideNumber is <= 0) return (false, "'slide_number' muss größer als 0 sein");
         if (TargetTimeSec is <= 0) return (false, "'target_time_sec' muss größer als 0 sein");
         foreach (var quiz in Quiz)

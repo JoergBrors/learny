@@ -1,0 +1,91 @@
+@* Formular für eine Quizfrage (Single Choice, Multiple Response, Freitext) — arbeitet auf QuizQuestionInput und speichert nichts selbst (ADR 0019/0020). *@
+<div class="qform">
+    <label class="form-label">Fragetyp
+        <select class="input" value="@Model.Type" @onchange="e => SetType(e.Value?.ToString() ?? QuizTypes.SingleChoice)" aria-label="Fragetyp">
+            <option value="single_choice">Single Choice (eine richtige Antwort)</option>
+            <option value="multiple_response">Multiple Response (mehrere richtige Antworten)</option>
+            <option value="free_text">Freitext (Musterlösung)</option>
+        </select>
+    </label>
+    <label class="form-label">Frage
+        <textarea class="input" rows="2" maxlength="2000" aria-label="Fragetext" value="@Model.Question" @onchange='e => { Model.Question = e.Value?.ToString() ?? ""; Changed(); }'></textarea>
+    </label>
+
+    @if (Model.Type != QuizTypes.FreeText)
+    {
+        <fieldset class="qform-options">
+            <legend>Antwortmöglichkeiten — @(Model.Type == QuizTypes.SingleChoice ? "die richtige auswählen" : "alle richtigen ankreuzen")</legend>
+            @for (var i = 0; i < Model.Options.Count; i++)
+            {
+                var index = i;
+                <div class="qform-option">
+                    <input type='@(Model.Type == QuizTypes.SingleChoice ? "radio" : "checkbox")' name="@(_name)-correct" aria-label="Option @(index + 1) ist richtig"
+                           checked="@Model.CorrectIndexes.Contains(index)" @onchange="() => ToggleCorrect(index)" />
+                    <input class="input" maxlength="500" aria-label="Option @(index + 1)" value="@Model.Options[index]" @onchange='e => { Model.Options[index] = e.Value?.ToString() ?? ""; Changed(); }' />
+                    @if (Model.Options.Count > MinOptions)
+                    {
+                        <button type="button" class="btn btn-ghost btn-sm" aria-label="Option @(index + 1) entfernen" @onclick="() => RemoveOption(index)">✕</button>
+                    }
+                </div>
+            }
+            @if (!FixedFourOptions && Model.Options.Count < 6)
+            {
+                <button type="button" class="btn btn-ghost btn-sm" @onclick="AddOption">+ Option</button>
+            }
+            @if (FixedFourOptions && Model.Type == QuizTypes.SingleChoice)
+            {
+                <p class="muted">Im Karten-JSON hat eine Single-Choice-Frage genau 4 Optionen.</p>
+            }
+        </fieldset>
+    }
+
+    <label class="form-label">@(Model.Type == QuizTypes.FreeText ? "Musterlösung" : "Erklärung")
+        <textarea class="input" rows="3" aria-label='@(Model.Type == QuizTypes.FreeText ? "Musterlösung" : "Erklärung")' value="@Model.Explanation" @onchange='e => { Model.Explanation = e.Value?.ToString() ?? ""; Changed(); }'></textarea>
+    </label>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public QuizQuestionInput Model { get; set; } = new();
+    /// <summary>Fragen aus dem Karten-JSON: Single Choice hat genau 4 Optionen.</summary>
+    [Parameter] public bool FixedFourOptions { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private readonly string _name = "q" + Guid.NewGuid().ToString("N")[..8];
+
+    private int MinOptions => Model.Type == QuizTypes.MultipleResponse ? 3 : FixedFourOptions ? 4 : 2;
+
+    private void Changed() => _ = OnChanged.InvokeAsync();
+
+    private void SetType(string type)
+    {
+        Model.Type = type;
+        if (type == QuizTypes.FreeText) { Model.Options = new(); Model.CorrectIndexes = new(); }
+        else
+        {
+            var target = type == QuizTypes.SingleChoice && FixedFourOptions ? 4 : Math.Max(Model.Options.Count, type == QuizTypes.MultipleResponse ? 4 : 4);
+            while (Model.Options.Count < target) Model.Options.Add("");
+            if (FixedFourOptions && type == QuizTypes.SingleChoice && Model.Options.Count > 4) Model.Options = Model.Options.Take(4).ToList();
+            Model.CorrectIndexes = type == QuizTypes.SingleChoice
+                ? new() { Model.CorrectIndexes.FirstOrDefault(i => i < Model.Options.Count) }
+                : Model.CorrectIndexes.Where(i => i < Model.Options.Count).Distinct().ToList();
+        }
+        Changed();
+    }
+
+    private void ToggleCorrect(int index)
+    {
+        if (Model.Type == QuizTypes.SingleChoice) Model.CorrectIndexes = new() { index };
+        else if (!Model.CorrectIndexes.Remove(index)) Model.CorrectIndexes.Add(index);
+        Changed();
+    }
+
+    private void AddOption() { Model.Options.Add(""); Changed(); }
+
+    private void RemoveOption(int index)
+    {
+        Model.Options.RemoveAt(index);
+        Model.CorrectIndexes = Model.CorrectIndexes.Where(i => i != index).Select(i => i > index ? i - 1 : i).ToList();
+        if (Model.Type == QuizTypes.SingleChoice && Model.CorrectIndexes.Count == 0) Model.CorrectIndexes.Add(0);
+        Changed();
+    }
+}

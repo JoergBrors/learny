@@ -68,6 +68,7 @@
                 <ul class="help-list">
                     <li><code>how_it_works</code>, <code>context</code> und <code>key_fact</code> vertiefen die Karte.</li>
                     <li><code>reference_answer</code> verbessert Freitext-Quizbewertung.</li>
+                    <li>Die Textfelder <code>definition</code>, <code>how_it_works</code>, <code>context</code>, <code>key_fact</code> und <code>reference_answer</code> verstehen die Formatierung (<code>**fett**</code>, <code>*kursiv*</code>, <code>++unterstrichen++</code>, <code># Überschrift</code>, <code>- Liste</code>, <code>1. Nummerierung</code>, <code>[Text](https://…)</code>) — siehe „Lernkarten visuell bearbeiten“.</li>
                     <li><code>official_sources</code> erzwingt quellengebundenes Lernen.</li>
                 </ul>
             </div>
@@ -175,6 +176,72 @@
         </ul>
     </section>
 
+    <section class="card panel" id="editor">
+        <h2 class="panel-title">Lernkarten visuell bearbeiten</h2>
+        <p class="muted">Mit dem visuellen Editor erstellst und bearbeitest du Lernkarten, Texte, Bilder und Quizfragen direkt im Browser — ohne JSON. Du erreichst ihn auf der Modulseite über <strong>✏ Karten bearbeiten</strong> oder auf einer Karte über <strong>✏ Bearbeiten</strong>.
+            Bearbeiten dürfen nur die Eigentümer ihrer eigenen Module; freigegebene und globale Module sind schreibgeschützt (auch für Administratoren).</p>
+
+        <div class="help-grid">
+            <div class="help-block">
+                <h3>Karten erstellen und verwalten</h3>
+                <ul class="help-list">
+                    <li><strong>Neue Karte:</strong> „+ Neue Karte“, Kategorie, Begriff und Frage ausfüllen, Texte schreiben, „Speichern“.</li>
+                    <li><strong>Bearbeiten:</strong> Karte in der Liste links anklicken. Alle Kartenfelder sind editierbar (Texte, offizielle Quellen, Folienmodus, Bilder, Quizfragen).</li>
+                    <li><strong>Duplizieren</strong> (⧉): Kopie mit „(Kopie)“ im Titel — samt Bildern und Quizfragen.</li>
+                    <li><strong>Archivieren / Wiederherstellen</strong> (🗂 / ↩): archivierte Karten erscheinen mit „Archiv anzeigen“ und sind nicht lernbar.</li>
+                    <li><strong>Sortieren</strong> (↑ ↓): ändert die Reihenfolge innerhalb einer Kategorie.</li>
+                </ul>
+            </div>
+            <div class="help-block">
+                <h3>Speichern und Vorschau</h3>
+                <ul class="help-list">
+                    <li>Oben steht, ob es <strong>ungespeicherte Änderungen</strong> gibt. Beim Wechseln der Karte, beim Verlassen der Seite oder beim Schließen des Tabs warnt der Browser.</li>
+                    <li><strong>Vorschau</strong> zeigt die Karte so, wie sie beim Lernen aussieht — inkl. Formatierung, Bildern und Quizfragen mit markierten richtigen Antworten.</li>
+                    <li><strong>Änderungen verwerfen</strong> lädt den gespeicherten Stand neu.</li>
+                    <li>Wurde dieselbe Karte inzwischen in einem anderen Fenster oder per Import geändert, meldet der Editor einen <strong>Konflikt</strong> und überschreibt nichts; „Neu laden“ übernimmt den aktuellen Stand.</li>
+                </ul>
+            </div>
+        </div>
+
+        <h3>Texte formatieren</h3>
+        <p class="muted">Die Felder Antwort/Definition, „Wie funktioniert es?“, Kontext, Key Fact und Referenzantwort haben eine Formatierleiste: Absatz bzw. Überschrift 1–3, <strong>fett</strong>, <em>kursiv</em>, <u>unterstrichen</u>, Aufzählung, nummerierte Liste, Link (nur http/https) und „Format entfernen“.
+            Eingefügter Text wird immer als Klartext übernommen. Gespeichert wird <em>kein HTML</em>, sondern eine kleine, sichere Textsyntax — dieselbe, die du auch im JSON-Import verwenden kannst:</p>
+        <pre class="help-code"><code>## Überschrift
+Normaler Text mit **fett**, *kursiv* (oder _kursiv_) und ++unterstrichen++.
+
+- Aufzählungspunkt
+- Noch ein Punkt mit [Link](https://learn.microsoft.com/)
+
+1. Erster Schritt
+2. Zweiter Schritt</code></pre>
+        <ul class="help-list">
+            <li>Absatz = Leerzeile, Zeilenumbruch = einfacher Zeilenwechsel. Reiner Text ohne Markup bleibt unverändert gültig (auch bestehende Karten und Importe).</li>
+            <li>Ein Sonderzeichen wörtlich anzeigen: mit Backslash maskieren, z. B. <code>\*</code>. HTML, Skripte, Bilder oder andere Links als http/https werden nie ausgeführt, sondern als Text angezeigt. Jedes Feld darf höchstens 20.000 Zeichen lang sein.</li>
+        </ul>
+
+        <h3>Bilder hochladen und beschriften</h3>
+        <ul class="help-list">
+            <li>„🖼 Bild hinzufügen“ (PNG, JPEG oder WebP, höchstens 2 MiB, bis zu 5 Bilder je Karte). Die Vorschau erscheint sofort; gespeichert wird mit der Karte.</li>
+            <li><strong>Alternativtext</strong> (für Screenreader) und <strong>Bildunterschrift</strong> (unter dem Bild) bearbeitest du je Bild. Mit ↑ ↓ änderst du die Reihenfolge; „Bild entfernen“ verlangt eine Bestätigung.</li>
+            <li>Vorhandene Bilder bleiben beim Speichern erhalten, solange du sie nicht bewusst entfernst. Angezeigt werden sie über die geschützte Bildadresse der Anwendung.</li>
+        </ul>
+
+        <h3>Quizfragen im Editor</h3>
+        <ul class="help-list">
+            <li><strong>Feste Fragen dieser Karte</strong> (Abschnitt „Feste Quizfragen“): Single Choice, Multiple Response oder Freitext; Antwortmöglichkeiten bearbeiten, <em>richtige Antworten markieren</em> (Radiobutton bzw. Häkchen), Erklärung bzw. Musterlösung ergänzen. Sie sind Teil der Karte (<code>quiz[]</code>) und werden <em>mit der Karte</em> gespeichert.</li>
+            <li><strong>Fragen im Fragenpool</strong> (Abschnitt „Weitere Fragen im Fragenpool“): hier siehst du die manuell angelegten Fragen und die <strong>von der KI generierten</strong> Fragen der Karte. Du kannst sie bearbeiten, neue Fragen anlegen, Fragen <em>aktivieren/deaktivieren</em> (deaktivierte werden nicht gestellt; gespeicherte Ergebnisse bleiben erhalten). Diese Änderungen werden <em>sofort einzeln</em> gespeichert.</li>
+            <li><strong>Quiz-Einstellungen</strong> (⚙ im Editor): dieselben Einstellungen wie auf der Modulseite — Quiz aktivieren, Frageformate, Herkunft, Umfang, Bestehensgrenze, Wiederholungen.</li>
+            <li>„📝 Quiz dieser Karte ausprobieren“ in der Vorschau startet das echte Kartenquiz (nach dem Speichern).</li>
+        </ul>
+
+        <h3>Karten-JSON und Fragenpool — der Unterschied</h3>
+        <ul class="help-list">
+            <li>Das <code>quiz[]</code> im Karten-JSON enthält die <strong>festen</strong> Fragen einer Karte; es wird exportiert und importiert. Im Editor bearbeitest du diese Fragen im Karteneditor, nicht im Pool.</li>
+            <li>Der <strong>Fragenpool</strong> des Moduls enthält diese festen Fragen als Kopie plus die KI-Fragen und die im Editor angelegten Pool-Fragen. Letztere stehen <em>nicht</em> im Karten-JSON und werden nicht exportiert.</li>
+            <li>Jede Frage hat genau einen Ort, an dem sie geändert wird — so können keine zwei Fassungen auseinanderlaufen.</li>
+        </ul>
+    </section>
+
     <section class="card panel">
         <h2 class="panel-title">Bilder in Karten</h2>
         <p class="muted">Eine Karte kann optional Bilder enthalten (Diagramme, Screenshots). Sie werden als Base64 im JSON mitgeliefert, vom Server im konfigurierten Bildspeicher abgelegt (Datenbank, Dateisystem, Azure Blob, S3 oder SharePoint — Betriebseinstellung) und über den geschützten Bildabruf <code>/api/images/{id}</code> angezeigt — ohne KI-Schlüssel und ohne externe Bild-URLs. Der Import bleibt unabhängig vom Speicher immer gleich; Zugangsdaten oder Cloud-Adressen sieht niemand.</p>
@@ -239,6 +306,7 @@
 
 Regeln:
 - Antworte ausschließlich mit JSON.
+- Textfelder dürfen eine einfache Formatierung nutzen: **fett**, *kursiv*, ++unterstrichen++, "- " für Listen, "1. " für Nummerierungen, [Text](https://…) für Links. Niemals HTML ausgeben.
 - Quizfragen: single_choice hat genau 4 Optionen und ein correct_index; multiple_response hat 3 bis 6 Optionen und correct_indexes (alle richtigen, 0-basiert); free_text hat keine Optionen, die explanation ist die Musterlösung.
 - Verwende nur Fakten aus meinem Input.
 - Erfinde keine Technologien, Quellen oder Randbedingungen.

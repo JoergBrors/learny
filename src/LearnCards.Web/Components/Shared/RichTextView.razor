@@ -1,0 +1,10 @@
+@* Zeigt formatierten Kartentext (ADR 0020). Die HTML-Ausgabe entsteht ausschließlich serverseitig aus dem begrenzten Markup (RichText.ToHtml: alles kodiert, nur erlaubte Elemente). *@
+@if (!string.IsNullOrWhiteSpace(Value))
+{
+    <div class="rt @CssClass">@((MarkupString)RichText.ToHtml(Value))</div>
+}
+
+@code {
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public string CssClass { get; set; } = "";
+}

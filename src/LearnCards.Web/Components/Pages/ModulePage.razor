@@ -54,6 +54,7 @@
                     @if (_canEdit)
                     {
                         <button class="btn btn-ghost" @onclick="ToggleArchive">@(_showArchive ? "← Aktive Karten" : $"🗂 Archiv ({_archivedCount})")</button>
+                        <a class="btn btn-ghost" href="/module/@ModuleId/edit">✏ Karten bearbeiten</a>
                         <button class="btn btn-ghost" @onclick="() => _shareOpen = !_shareOpen">🔗 Modul freigeben</button>
                     }
                     @if (_context == "global" && _isAdmin)
