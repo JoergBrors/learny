@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using System.Net;
 using System.Text.Json.Nodes;
 using LearnCards.McpServer;
@@ -276,10 +277,11 @@ static async Task RunHttpServerAsync(McpServerEngine engine, LearnCardsApiClient
     // Die Pfade ohne "/oauth"-Präfix bleiben für Clients erhalten, die keine Metadaten auswerten.
     foreach (var prefix in new[] { "/oauth", "" })
     {
-        app.MapGet(prefix + "/authorize", (HttpRequest request, HttpResponse response, ProprietaryOAuthService auth, McpSettings cfg) =>
+        app.MapGet(prefix + "/authorize", async (HttpRequest request, HttpResponse response, ProprietaryOAuthService auth, McpSettings cfg, CancellationToken ct) =>
         {
             if (!auth.IsEnabled)
                 return Results.NotFound();
+            await auth.EnsureClientAsync(request.Query["client_id"].FirstOrDefault(), api, ct);   // nach einem Neustart: Client aus Learny nachladen (ADR 0025)
 
             var query = request.Query;
             if (!string.Equals(query["response_type"].FirstOrDefault(), "code", StringComparison.Ordinal))
@@ -323,7 +325,7 @@ static async Task RunHttpServerAsync(McpServerEngine engine, LearnCardsApiClient
             return Results.Redirect(connectUrl);
         });
 
-        app.MapPost(prefix + "/register", async (HttpRequest request, ProprietaryOAuthService auth) =>
+        app.MapPost(prefix + "/register", async (HttpRequest request, ProprietaryOAuthService auth, CancellationToken ct) =>
         {
             if (!auth.IsEnabled)
                 return Results.NotFound();
@@ -350,6 +352,15 @@ static async Task RunHttpServerAsync(McpServerEngine engine, LearnCardsApiClient
                     body["token_endpoint_auth_method"]?.GetValue<string>() ?? "client_secret_post",
                     scopes,
                     body["application_type"]?.GetValue<string>() ?? "web");
+                if (client.TokenEndpointAuthMethod == "none")
+                {
+                    // Dauerhaft (verschlüsselt) in Learny speichern, damit der Client einen Neustart überlebt; bei Ausfall bleibt der Client im Speicher gültig
+                    try { await api.StoreOAuthClientAsync(client, ct); }
+                    catch (Exception ex) when (ex is McpApiException or HttpRequestException or TaskCanceledException)
+                    {
+                        app.Logger.LogWarning("OAuth-Client {ClientId} konnte nicht dauerhaft gespeichert werden ({Type}); er gilt bis zum Neustart.", client.ClientId, ex.GetType().Name);
+                    }
+                }
                 return Results.Json(new
                 {
                     client_id = client.ClientId,

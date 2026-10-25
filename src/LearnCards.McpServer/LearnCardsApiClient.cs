@@ -63,6 +63,50 @@ public sealed class LearnCardsApiClient : IDisposable
         return await ReadAsync(await _http.SendAsync(req, ct), ct);
     }
 
+    /// <summary>
+    /// Speichert einen öffentlichen, dynamisch registrierten OAuth-Client dauerhaft in Learny (verschlüsselt, Dienstschlüssel) — damit sich Clients nach einem
+    /// Neustart des MCP-Servers nicht neu registrieren müssen (ADR 0025).
+    /// </summary>
+    public async Task StoreOAuthClientAsync(OAuthClientRegistration client, CancellationToken ct)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Post, "mcp/oauth/clients")
+        {
+            Content = new StringContent(new JsonObject
+            {
+                ["client_id"] = client.ClientId,
+                ["client_name"] = client.ClientName ?? "",
+                ["redirect_uris"] = new JsonArray(client.RedirectUris.Select(u => (JsonNode?)JsonValue.Create(u)).ToArray()),
+                ["token_endpoint_auth_method"] = client.TokenEndpointAuthMethod,
+                ["scopes"] = new JsonArray(client.Scopes.Select(u => (JsonNode?)JsonValue.Create(u)).ToArray()),
+                ["application_type"] = client.ApplicationType,
+            }.ToJsonString(), Encoding.UTF8, "application/json"),
+        };
+        if (_serviceKey.Length > 0) req.Headers.Add("X-MCP-Key", _serviceKey);
+        await ReadAsync(await _http.SendAsync(req, ct), ct);
+    }
+
+    /// <summary>Lädt einen gespeicherten öffentlichen Client; unbekannt, manipuliert oder Learny nicht erreichbar → null (der Client ist dann nicht bekannt).</summary>
+    public async Task<OAuthClientRegistration?> LoadOAuthClientAsync(string clientId, CancellationToken ct)
+    {
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get, "mcp/oauth/clients/" + Uri.EscapeDataString(clientId));
+            if (_serviceKey.Length > 0) req.Headers.Add("X-MCP-Key", _serviceKey);
+            using var res = await _http.SendAsync(req, ct);
+            if (!res.IsSuccessStatusCode) return null;
+            var node = JsonNode.Parse(await res.Content.ReadAsStringAsync(ct)) as JsonObject;
+            if (node is null || node["client_id"]?.GetValue<string>() != clientId) return null;
+            var redirects = node["redirect_uris"]?.AsArray().Select(n => n?.GetValue<string>() ?? "").Where(s => s.Length > 0).ToArray() ?? Array.Empty<string>();
+            if (redirects.Length == 0 || node["token_endpoint_auth_method"]?.GetValue<string>() != "none") return null;
+            return new OAuthClientRegistration(clientId, "", new[] { "mcp" }, redirects, "none", node["application_type"]?.GetValue<string>() ?? "web",
+                DateTimeOffset.FromUnixTimeSeconds(node["issued_at"]?.GetValue<long>() ?? 0), true, node["client_name"]?.GetValue<string>());
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException or InvalidOperationException or FormatException)
+        {
+            return null;
+        }
+    }
+
     private async Task<JsonNode?> SendAsync(HttpMethod method, string path, JsonNode? body, CancellationToken ct, string? explicitToken = null)
     {
         using var req = new HttpRequestMessage(method, path);

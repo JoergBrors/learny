@@ -80,6 +80,7 @@ az webapp config appsettings set --resource-group <RESOURCE_GROUP> --name learnc
   OIDC_WEB_SCOPE='openid profile email api://<CLIENT_ID>/access_as_user' \
   OPENAI_API_KEY='<OPENAI_KEY>' \
   MCP_API_KEY='<STARKER_ZUFALLSSTRING>' \
+  MCP_TOKEN_KEY='<BASE64_32_BYTE>' \
   MCP_PUBLIC_URL='https://<oeffentliche-mcp-url>' \
   ADMIN_SUBJECTS='<ENTRA_SUB_DES_ERSTEN_ADMINS>' \
   APP_DOMAIN=learncards-app.azurewebsites.net \

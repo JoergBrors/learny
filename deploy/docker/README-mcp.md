@@ -73,7 +73,7 @@ services:
       - "127.0.0.1:8787:8787"     # Reverse Proxy leitet https://mcp.example.org hierher
 ```
 
-Die Web-Seite braucht zusätzlich `MCP_API_KEY` (identisch), `MCP_PUBLIC_URL=https://mcp.example.org` und optional `MCP_TOKEN_DAYS` (Standard 30).
+Die Web-Seite braucht zusätzlich den Pflicht-Schlüssel `MCP_TOKEN_KEY` (schützt Tokens und gespeicherte OAuth-Clients in der Datenbank, siehe Installationsanleitung), `MCP_API_KEY` (identisch), `MCP_PUBLIC_URL=https://mcp.example.org` und optional `MCP_TOKEN_DAYS` (Standard 30).
 
 stdio ohne Compose (der Client startet den Container):
 
@@ -105,6 +105,7 @@ docker run -i --rm \
 | Start bricht ab: „HTTPS listener URLs are not supported“ | Nur `http://` als Listener. TLS im Reverse Proxy terminieren. |
 | 401 auf `/mcp` | Kein/ungültiges Benutzertoken. OAuth-Anmeldung erneut durchlaufen oder Token im Profil neu erzeugen. |
 | Anmeldung kehrt mit Fehler zurück | `MCP_PUBLIC_URL` der Web-App stimmt nicht mit der öffentlichen MCP-URL überein oder ist leer (in Produktion ist die MCP-Anmeldung dann deaktiviert). |
+| Claude muss sich nach einem Neustart nicht mehr neu registrieren | Öffentliche OAuth-Clients werden verschlüsselt in Learny gespeichert (`mcp_oauth_clients`, Schlüssel `MCP_TOKEN_KEY`). Verlust des Schlüssels macht gespeicherte Clients und alle MCP-Zugänge ungültig — neu verbinden. |
 | Fehler beim Aufruf der Learny-API | `LEARNCARDS_API_URL` falsch (intern `http://web:8080/api`) oder `MCP_API_KEY` stimmt auf beiden Seiten nicht überein. |
 | `mcpsettings.json` wird als Verzeichnis angelegt | Die Datei fehlte beim Start des Profils `mcp`. `cp mcpsettings.example.json mcpsettings.json`, Verzeichnis entfernen, neu starten. |
 | Browser leitet auf `http://web:8080` weiter | `LEARNCARDS_WEB_PUBLIC_URL` nicht gesetzt. Öffentliche Learny-URL eintragen. |

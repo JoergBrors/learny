@@ -121,21 +121,37 @@ Benutzergebundene MCP-Zugänge ([ADR 0013](adr/0013-mcp-benutzergebundene-anmeld
 | user_id | UUID NOT NULL | FK → users, `CASCADE`; Index `ix_mcp_links_user` |
 | name | TEXT NOT NULL | Clientname bzw. frei gewählter Name |
 | kind | TEXT NOT NULL | `oauth` oder `token` |
-| token_hash | TEXT NOT NULL UNIQUE | SHA-256 (hex) des Tokens `lcm_…` |
-| token_hint | TEXT NOT NULL | letzte Zeichen zur Wiedererkennung (`…ab12`) |
+| token_hash | TEXT NOT NULL UNIQUE | **HMAC-SHA-256** (hex) des Tokens `lcm_…` mit einem Schlüssel aus der `.env` (`hash_alg='hmac1'`); Altbestand: reiner SHA-256 (`hash_alg='sha256'`), wird beim ersten Gebrauch umgestellt ([ADR 0025](adr/0025-sichere-speicherung-von-mcp-tokens.md)) |
+| token_hint | TEXT NOT NULL | Kennung `#abcd` aus der Zeilen-ID — **keine** Token-Teile |
 | created_at, expires_at | TEXT NOT NULL | |
-| last_used_at, revoked_at | TEXT NULL | Widerruf setzt `revoked_at` |
+| last_used_at, revoked_at | TEXT NULL | Widerruf setzt `revoked_at` (und berechnet `row_mac` neu) |
+| hash_alg | TEXT NOT NULL | `hmac1` (neu) oder `sha256` (Altbestand, befristet bis `MCP_LEGACY_TOKEN_UNTIL`) |
+| key_id | TEXT NOT NULL | Kennung des Schlüssels (8 Hex, abgeleitet; für Rotation) |
+| row_mac | TEXT NOT NULL | HMAC über id, user_id, kind, token_hash, created_at, expires_at, revoked_at, key_id (ganze Sekunden, UTC). Wird bei **jedem** Aufruf vor allem anderen geprüft; Abweichung = 401 + Audit `mcp.token.integrity_failure` |
 
 ### mcp_link_codes
 Einmalige Übergabecodes der Zustimmung (5 Minuten gültig, Tausch nur durch den MCP-Server mit Dienstschlüssel).
 
 | Spalte | Typ | Hinweis |
 |---|---|---|
-| code_hash | TEXT PK | SHA-256 (hex) des Codes |
+| code_hash | TEXT PK | **HMAC-SHA-256** (hex) des Codes mit Schlüssel aus der `.env` (ADR 0025) |
 | user_id | UUID NOT NULL | FK → users, `CASCADE` — der zustimmende Benutzer |
 | client_name | TEXT NOT NULL | |
 | created_at, expires_at | TEXT NOT NULL | |
+| key_id, row_mac | TEXT NOT NULL | Schlüssel-Kennung und Zeilen-MAC (ADR 0025): `row_mac` über code_hash, user_id, client_name, created_at, expires_at, key_id |
 | used_at | TEXT NULL | gesetzt beim Tausch (atomar, einmalig) |
+
+### mcp_oauth_clients
+Dynamisch registrierte **öffentliche** OAuth-Clients des MCP-Servers (z. B. Claude), damit sie einen Neustart überstehen ([ADR 0025](adr/0025-sichere-speicherung-von-mcp-tokens.md)). Zugriff nur über Endpunkte mit Dienstschlüssel (`POST/GET /api/mcp/oauth/clients`).
+
+| Spalte | Typ | Hinweis |
+|---|---|---|
+| client_id | TEXT PK | `learncards-<32 Hex>` |
+| key_id | TEXT NOT NULL | Schlüssel-Kennung |
+| record_enc | TEXT NOT NULL | **AES-256-GCM**-verschlüsselter JSON-Datensatz (Name, Redirect-URIs, Scopes, …); `client_id` als AAD; Format `v1.<nonce>.<ciphertext+tag>` (Base64url) |
+| created_at | TEXT NOT NULL | Nie genutzte Clients verfallen nach 30 Tagen; höchstens 1000 Zeilen |
+| last_used_at | TEXT NULL | höchstens einmal täglich aktualisiert |
+| row_mac | TEXT NOT NULL | HMAC über client_id, key_id, record_enc, created_at |
 
 ### audit_log
 Protokoll administrativer Aktionen (Rollen, Sperren, Zuweisung, Benutzeranlage).

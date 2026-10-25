@@ -70,11 +70,16 @@ public static class Schema
                 created_at   TEXT NOT NULL,
                 expires_at   TEXT NOT NULL,
                 last_used_at TEXT NULL,
-                revoked_at   TEXT NULL
+                revoked_at   TEXT NULL,
+                hash_alg     TEXT NOT NULL DEFAULT 'sha256',
+                key_id       TEXT NOT NULL DEFAULT '',
+                row_mac      TEXT NOT NULL DEFAULT ''
             )
             """;
 
         yield return "CREATE INDEX IF NOT EXISTS ix_mcp_links_user ON mcp_links(user_id)";
+        // ADR 0025: keine Token-Teile in der Datenbank — alte Hinweise (letzte Zeichen des Tokens) werden durch eine Kennung aus der Zeilen-ID ersetzt
+        yield return "UPDATE mcp_links SET token_hint = '#' || SUBSTR(CAST(id AS TEXT), 1, 4) WHERE token_hint <> '' AND token_hint NOT LIKE '#%'";
 
         yield return $"""
             CREATE TABLE IF NOT EXISTS mcp_link_codes (
@@ -83,7 +88,21 @@ public static class Schema
                 client_name TEXT NOT NULL DEFAULT '',
                 created_at  TEXT NOT NULL,
                 expires_at  TEXT NOT NULL,
-                used_at     TEXT NULL
+                used_at     TEXT NULL,
+                key_id      TEXT NOT NULL DEFAULT '',
+                row_mac     TEXT NOT NULL DEFAULT ''
+            )
+            """;
+
+        // ADR 0025: dynamisch registrierte öffentliche OAuth-Clients des MCP-Servers — Datensatz AES-256-GCM-verschlüsselt (Schlüssel aus der .env), mit Zeilen-MAC
+        yield return """
+            CREATE TABLE IF NOT EXISTS mcp_oauth_clients (
+                client_id    TEXT PRIMARY KEY,
+                key_id       TEXT NOT NULL,
+                record_enc   TEXT NOT NULL,
+                created_at   TEXT NOT NULL,
+                last_used_at TEXT NULL,
+                row_mac      TEXT NOT NULL
             )
             """;
 

@@ -100,6 +100,8 @@ jobs:
       MCP_HTTP_HEALTH_URL: ${{ vars.MCP_HTTP_HEALTH_URL }}
       DEPLOY_APP_DOMAIN: ${{ vars.APP_DOMAIN }}
       DEPLOY_PUBLIC_BASE_URL: ${{ vars.PUBLIC_BASE_URL }}
+      DEPLOY_MCP_PUBLIC_URL: ${{ vars.MCP_PUBLIC_URL }}
+      DEPLOY_MCP_WEB_PUBLIC_URL: ${{ vars.MCP_WEB_PUBLIC_URL }}
       DEPLOY_DEBUG: ${{ vars.DEBUG }}
       DEPLOY_DB_PROVIDER: ${{ vars.DB_PROVIDER }}
       DEPLOY_SQLITE_PATH: ${{ vars.SQLITE_PATH }}
@@ -133,6 +135,7 @@ jobs:
       DEPLOY_OIDC_CLIENT_SECRET: ${{ secrets.OIDC_CLIENT_SECRET }}
       DEPLOY_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       DEPLOY_MCP_API_KEY: ${{ secrets.MCP_API_KEY }}
+      DEPLOY_MCP_TOKEN_KEY: ${{ secrets.MCP_TOKEN_KEY }}
       DEPLOY_MCP_OAUTH_SIGNING_KEY: ${{ secrets.MCP_OAUTH_SIGNING_KEY }}
       DEPLOY_MCP_OAUTH_CLIENT_SECRET: ${{ secrets.MCP_OAUTH_CLIENT_SECRET }}
 
@@ -306,6 +309,7 @@ jobs:
           Render-File -SourcePath $webTemplate -TargetPath $webTarget -Tokens @{
             "__APP_DOMAIN__" = $env:DEPLOY_APP_DOMAIN
             "__PUBLIC_BASE_URL__" = $env:DEPLOY_PUBLIC_BASE_URL
+            "__MCP_PUBLIC_URL__" = $env:DEPLOY_MCP_PUBLIC_URL
             "__DEBUG__" = $env:DEPLOY_DEBUG
             "__DB_PROVIDER__" = $env:DEPLOY_DB_PROVIDER
             "__SQLITE_PATH__" = $env:DEPLOY_SQLITE_PATH
@@ -327,6 +331,7 @@ jobs:
             "__OIDC_CLIENT_SECRET__" = $env:DEPLOY_OIDC_CLIENT_SECRET
             "__OPENAI_API_KEY__" = $env:DEPLOY_OPENAI_API_KEY
             "__MCP_API_KEY__" = $env:DEPLOY_MCP_API_KEY
+            "__MCP_TOKEN_KEY__" = $env:DEPLOY_MCP_TOKEN_KEY
           }
 
           $mcpTemplate = Join-Path $env:GITHUB_WORKSPACE "deploy\iis\mcpsettings.json"
@@ -338,6 +343,7 @@ jobs:
             "__MCP_SERVER_NAME__" = $env:DEPLOY_MCP_SERVER_NAME
             "__MCP_SERVER_VERSION__" = $env:DEPLOY_MCP_SERVER_VERSION
             "__MCP_UPSTREAM_API_BASE_URL__" = $env:DEPLOY_MCP_UPSTREAM_API_BASE_URL
+            "__MCP_WEB_PUBLIC_URL__" = $env:DEPLOY_MCP_WEB_PUBLIC_URL
             "__MCP_STDIO_ENABLED__" = $env:DEPLOY_MCP_STDIO_ENABLED
             "__MCP_HTTP_ENABLED__" = $env:DEPLOY_MCP_HTTP_ENABLED
             "__MCP_HTTP_URLS_JSON__" = $env:DEPLOY_MCP_HTTP_URLS_JSON
@@ -355,9 +361,26 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($env:DEPLOY_MCP_API_KEY)) {
             throw "GitHub Secret 'MCP_API_KEY' fehlt."
           }
+          # ADR 0025: Hauptschlüssel für MCP-Tokens und OAuth-Clients ist Pflicht (Base64, mindestens 32 Byte); der Wert wird nie ausgegeben
+          $tokenKeyBytes = $null
+          try { $tokenKeyBytes = [Convert]::FromBase64String(([string]$env:DEPLOY_MCP_TOKEN_KEY).Trim()) } catch { }
+          if ($null -eq $tokenKeyBytes -or $tokenKeyBytes.Length -lt 32) {
+            throw "GitHub Secret 'MCP_TOKEN_KEY' fehlt oder ist ungültig (Base64, mindestens 32 Byte; erzeugen mit: openssl rand -base64 32)."
+          }
 
           $mcpConfig = Get-Content -LiteralPath $mcpTarget -Raw | ConvertFrom-Json
           if ($mcpConfig.oauth.enabled -eq $true) {
+            # Der Issuer ist die öffentliche MCP-URL: Alle Metadaten-URLs (Registrierung, Anmeldung, Token) zeigen darauf. Ein falscher Host bricht die Registrierung in Claude.
+            $issuerUri = $null
+            if (-not [Uri]::TryCreate([string]$mcpConfig.oauth.issuer, [UriKind]::Absolute, [ref]$issuerUri) -or $issuerUri.Scheme -ne "https") {
+              throw "MCP_OAUTH_ISSUER muss die öffentliche HTTPS-URL des MCP-Servers sein (z. B. https://learny-mcp.example.org)."
+            }
+            if ([string]::IsNullOrWhiteSpace($env:DEPLOY_MCP_PUBLIC_URL) -or $env:DEPLOY_MCP_PUBLIC_URL.TrimEnd('/') -ne $mcpConfig.oauth.issuer.TrimEnd('/')) {
+              throw "MCP_PUBLIC_URL (Learny-Web, erlaubte Rückleitung) muss gleich MCP_OAUTH_ISSUER sein."
+            }
+            if ([string]::IsNullOrWhiteSpace($env:DEPLOY_MCP_WEB_PUBLIC_URL) -or $env:DEPLOY_MCP_WEB_PUBLIC_URL -notmatch '^https://') {
+              throw "MCP_WEB_PUBLIC_URL (öffentliche HTTPS-URL der Learny-Weboberfläche für die Anmeldung) fehlt."
+            }
             if ([string]::IsNullOrWhiteSpace($env:DEPLOY_MCP_OAUTH_SIGNING_KEY)) {
               throw "GitHub Secret 'MCP_OAUTH_SIGNING_KEY' fehlt, obwohl OAuth im MCP-Config aktiviert ist."
             }
@@ -706,6 +729,21 @@ jobs:
           $global:LASTEXITCODE = 0
 
           # Die .env liegt geschützt außerhalb des Webroots (Schritt "Prepare Secure Config And Key Paths"); im Webroot wird keine .env abgelegt.
+          # Pfad der .env als Umgebungsvariable des Prozesses: zusätzlich zum App-Pool im web.config (aspNetCore/environmentVariables), das das Spiegeln gerade erneuert hat.
+          $configRootDeploy = if ([string]::IsNullOrWhiteSpace($env:IIS_CONFIG_ROOT)) { Join-Path $env:ProgramData ("LearnCards\" + $env:IIS_SITE_NAME) } else { $env:IIS_CONFIG_ROOT }
+          $envFileDeploy = Join-Path ([IO.Path]::GetFullPath($configRootDeploy)) "config\.env"
+          if (-not (Test-Path -LiteralPath $envFileDeploy)) { throw "Die .env fehlt: $envFileDeploy" }
+          $webConfigPath = Join-Path $env:IIS_PHYSICAL_PATH "web.config"
+          [xml]$webConfigXml = Get-Content -LiteralPath $webConfigPath -Raw
+          $aspNetCoreNode = $webConfigXml.SelectSingleNode("/configuration/system.webServer/aspNetCore")
+          if ($null -eq $aspNetCoreNode) { throw "web.config enthält keinen aspNetCore-Eintrag." }
+          $envVarsNode = $aspNetCoreNode.SelectSingleNode("environmentVariables")
+          if ($null -eq $envVarsNode) { $envVarsNode = $webConfigXml.CreateElement("environmentVariables"); [void]$aspNetCoreNode.AppendChild($envVarsNode) }
+          foreach ($old in @($envVarsNode.SelectNodes("environmentVariable[@name='ENV_FILE']"))) { [void]$envVarsNode.RemoveChild($old) }
+          $envVarNode = $webConfigXml.CreateElement("environmentVariable")
+          $envVarNode.SetAttribute("name", "ENV_FILE"); $envVarNode.SetAttribute("value", $envFileDeploy)
+          [void]$envVarsNode.AppendChild($envVarNode)
+          $webConfigXml.Save($webConfigPath)
 
           if ((Get-Service -Name W3SVC).Status -ne "Running") {
             Start-Service -Name W3SVC
@@ -1079,6 +1117,22 @@ jobs:
             Write-Host ("{0} -> HTTP {1}" -f $p, $code)
           }
 
+          # Betriebsmodus: Die Anwendung muss ihre .env gelesen haben. Ohne Konfiguration fiele sie (ältere Versionen) in den Dev-Login mit Administratorrechten zurück.
+          try {
+            $login = Invoke-WebRequest -Uri ($root + "/login") -UseBasicParsing -TimeoutSec 20 -SkipHttpErrorCheck
+            $loginBody = [string]$login.Content
+            if ($env:DEPLOY_AUTH_MODE -ne "dev" -and $loginBody -match "Dev-Modus") { $failures.Add("Die Anwendung läuft im Dev-Login (AUTH_MODE=$($env:DEPLOY_AUTH_MODE) erwartet) — die .env wurde nicht gelesen.") }
+            else { Write-Host "Anmeldeseite: kein Dev-Login" }
+          } catch { $failures.Add("Anmeldeseite nicht prüfbar: $($_.Exception.GetType().Name)") }
+          if (-not [string]::IsNullOrWhiteSpace($env:DEPLOY_PUBLIC_BASE_URL)) {
+            try {
+              $issuerInfo = Invoke-RestMethod -Uri ($root + "/badges/issuer") -TimeoutSec 20
+              if (-not ([string]$issuerInfo.id).StartsWith($env:DEPLOY_PUBLIC_BASE_URL.TrimEnd('/'), [StringComparison]::OrdinalIgnoreCase)) {
+                $failures.Add("Aussteller-URL der Badges ($($issuerInfo.id)) entspricht nicht PUBLIC_BASE_URL — die Konfiguration wurde nicht gelesen.")
+              }
+            } catch { $failures.Add("/badges/issuer nicht prüfbar: $($_.Exception.GetType().Name)") }
+          }
+
           # Badge-Schlüssel: veröffentlichte Schlüssel-ID muss zur Initialisierung gehören (gleicher Schlüssel wie beim ersten Deployment)
           try {
             $jwks = Invoke-RestMethod -Uri ($root + "/.well-known/jwks.json") -TimeoutSec 20
@@ -1105,3 +1159,24 @@ jobs:
           if ($response.StatusCode -lt 200 -or $response.StatusCode -ge 300) {
             throw "MCP-Health-Check fehlgeschlagen: $($response.StatusCode)"
           }
+
+          # OAuth-Metadaten: Jede veröffentlichte URL muss auf denselben öffentlichen Host zeigen und erreichbar sein (sonst scheitert die Registrierung in Claude)
+          $publicBase = ([Uri]$env:MCP_HTTP_HEALTH_URL).GetLeftPart([UriPartial]::Authority)
+          $meta = Invoke-RestMethod -Uri ($publicBase + "/.well-known/oauth-authorization-server") -TimeoutSec 30
+          $failures = New-Object System.Collections.Generic.List[string]
+          foreach ($name in @("issuer", "authorization_endpoint", "token_endpoint", "registration_endpoint")) {
+            $value = [string]$meta.$name
+            if ([string]::IsNullOrWhiteSpace($value) -or -not $value.StartsWith($publicBase, [StringComparison]::OrdinalIgnoreCase)) {
+              $failures.Add("OAuth-Metadatum '$name' ($value) zeigt nicht auf den öffentlichen MCP-Host $publicBase.")
+            }
+          }
+          if ($failures.Count -eq 0) {
+            # Ungültige Registrierung muss vom Server mit 400 beantwortet werden (beweist: Endpunkt öffentlich erreichbar, keine Anlage eines Clients)
+            $probe = Invoke-WebRequest -Uri $meta.registration_endpoint -Method Post -ContentType "application/json" -Body '{"redirect_uris":["javascript:x"]}' -UseBasicParsing -SkipHttpErrorCheck -TimeoutSec 30
+            if ([int]$probe.StatusCode -ne 400) { $failures.Add("registration_endpoint antwortet auf eine ungültige Registrierung mit HTTP $([int]$probe.StatusCode) statt 400.") }
+          }
+          if ($failures.Count -gt 0) {
+            $failures | ForEach-Object { Write-Error $_ -ErrorAction Continue }
+            throw "MCP-OAuth-Metadaten sind nicht konsistent ($($failures.Count) Befunde)."
+          }
+          Write-Host "MCP-OAuth-Metadaten konsistent: $publicBase"

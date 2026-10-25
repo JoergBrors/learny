@@ -60,6 +60,12 @@ public class AppConfig
     public List<string> McpPublicUrls { get; set; } = new();
     /// <summary>Gültigkeit benutzergebundener MCP-Tokens aus der OAuth-Anmeldung in Tagen (Standard 30).</summary>
     public int McpTokenDays { get; set; } = 30;
+    /// <summary>Hauptschlüssel für MCP-Tokens, Codes und OAuth-Clients (MCP_TOKEN_KEY, Pflicht; ADR 0025). Nie in der Datenbank.</summary>
+    public byte[]? McpTokenKey { get; set; }
+    /// <summary>Vorgängerschlüssel nach einer Rotation (MCP_TOKEN_KEY_PREVIOUS) — nur Prüfen/Entschlüsseln.</summary>
+    public List<byte[]> McpTokenKeysPrevious { get; set; } = new();
+    /// <summary>Ende der Übergangsfrist für Altbestands-Tokens mit reinem SHA-256 (MCP_LEGACY_TOKEN_UNTIL, ISO-Datum; Standard 2027-01-31).</summary>
+    public DateTime McpLegacyTokenUntil { get; set; } = new DateTime(2027, 1, 31, 23, 59, 59, DateTimeKind.Utc);
 
     // Benutzer / Rollen
     /// <summary>
@@ -143,17 +149,42 @@ public class AppConfig
         };
 
         // ── Auth-Modus bestimmen ────────────────────────────────────────
-        var authMode = E("AUTH_MODE", "auto").ToLowerInvariant();
+        // Fail closed (ADR 0014/0026): Außerhalb von "Development" wird der Dev-Login nie stillschweigend aktiv. "auto", leere oder unbekannte Werte
+        // (z. B. Tippfehler) führen dann zu OIDC oder zum Startabbruch; "dev" gilt nur, wenn AUTH_MODE=dev ausdrücklich gesetzt ist.
+        var authMode = E("AUTH_MODE", "auto").Trim().ToLowerInvariant();
+        var isDevelopment = (Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ?? "Production")
+            .Equals("Development", StringComparison.OrdinalIgnoreCase);
+        var oidcComplete = cfg.OidcIssuer.Length > 0 && cfg.OidcClientId.Length > 0
+                           && !cfg.OidcClientId.StartsWith("YOUR_", StringComparison.OrdinalIgnoreCase);
         cfg.AuthMode = authMode switch
         {
             "oidc" => "oidc",
             "dev" or "none" or "local" => "dev",
-            _ => (cfg.OidcIssuer.Length > 0 && cfg.OidcClientId.Length > 0
-                  && !cfg.OidcClientId.StartsWith("YOUR_", StringComparison.OrdinalIgnoreCase))
-                    ? "oidc" : "dev",
+            _ => oidcComplete ? "oidc" : "dev",
         };
+        if (!isDevelopment)
+        {
+            var explicitDev = authMode is "dev" or "none" or "local";
+            if (!explicitDev && authMode is not ("oidc" or "auto"))
+                throw new InvalidOperationException($"AUTH_MODE hat den ungültigen Wert '{authMode}'. Erlaubt: oidc | dev (nur zum lokalen Ausprobieren). Ein Tippfehler darf nicht zum Dev-Login führen.");
+            if (!explicitDev && !oidcComplete)
+                throw new InvalidOperationException("Die Anmeldung ist nicht konfiguriert: OIDC_ISSUER und OIDC_CLIENT_ID (und OIDC_CLIENT_SECRET) fehlen. Der Dev-Login ohne Passwort wird außerhalb von Development nie " +
+                    "stillschweigend aktiviert. Ursache oft: die .env wurde nicht gelesen (ENV_FILE prüfen). Für lokale Tests ausdrücklich AUTH_MODE=dev setzen.");
+            if (authMode == "oidc" && (!oidcComplete || cfg.OidcClientSecret.Length == 0))
+                throw new InvalidOperationException("AUTH_MODE=oidc, aber OIDC_ISSUER, OIDC_CLIENT_ID oder OIDC_CLIENT_SECRET fehlt.");
+        }
         if (cfg.McpPublicUrls.Count == 0 && cfg.AuthMode == "dev")
             cfg.McpPublicUrls = new() { "http://127.0.0.1:8787", "http://localhost:8787" };
+
+        // MCP-Schlüssel (ADR 0025): Pflicht außerhalb von Development; Fehler nennen nie den Schlüsselwert
+        cfg.McpTokenKey = McpTokenKeys.Resolve(E("MCP_TOKEN_KEY"), isDevelopment, Path.GetFullPath("data"));
+        cfg.McpTokenKeysPrevious = McpTokenKeys.ResolvePrevious(E("MCP_TOKEN_KEY_PREVIOUS"));
+        if (E("MCP_LEGACY_TOKEN_UNTIL") is { Length: > 0 } until)
+        {
+            if (!DateTime.TryParse(until, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var untilDate))
+                throw new InvalidOperationException("MCP_LEGACY_TOKEN_UNTIL ist kein gültiges Datum (z. B. 2027-01-31).");
+            cfg.McpLegacyTokenUntil = untilDate;
+        }
         return cfg;
     }
 

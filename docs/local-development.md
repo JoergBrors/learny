@@ -206,3 +206,11 @@ Import über die Startseite:
 ## Bekannte Unterschiede zur Python-Ursprungslösung
 
 Siehe [migration-notes.md](migration-notes.md).
+
+## Betriebsmodus lokal (ADR 0026)
+
+Unter `dotnet run`/VS Code gilt `ASPNETCORE_ENVIRONMENT=Development`: Ohne OIDC-Konfiguration wird der Dev-Login verwendet (`AUTH_MODE=auto`). Startest du die Anwendung anders (z. B. `dotnet LearnCards.Web.dll`, Container), gilt `Production`: dann ist `AUTH_MODE=dev` **ausdrücklich** zu setzen, sonst bricht der Start mit einer Meldung ab.
+
+## MCP_TOKEN_KEY lokal (ADR 0025)
+
+`MCP_TOKEN_KEY` (Base64, ≥ 32 Byte) ist Pflicht. Unter `dotnet run` (Development) wird ohne Angabe einmalig `data/mcp-token.key` erzeugt und wiederverwendet. Für `Production`-Starts (Container, `dotnet LearnCards.Web.dll`) den Schlüssel selbst setzen: `openssl rand -base64 32`. Die Datei `data/mcp-token.key` nie committen (Verzeichnis `data/` ist ignoriert).

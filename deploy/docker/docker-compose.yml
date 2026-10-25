@@ -70,6 +70,10 @@ services:
       MCP_API_KEY: ${MCP_API_KEY:-}
       MCP_PUBLIC_URL: ${MCP_PUBLIC_URL:-}
       MCP_TOKEN_DAYS: ${MCP_TOKEN_DAYS:-30}
+      # PFLICHT (ADR 0025): Hauptschlüssel für MCP-Tokens, Codes und OAuth-Clients in der Datenbank — nur in der .env, nie in der Datenbank
+      MCP_TOKEN_KEY: ${MCP_TOKEN_KEY:?MCP_TOKEN_KEY in .env setzen (openssl rand -base64 32)}
+      MCP_TOKEN_KEY_PREVIOUS: ${MCP_TOKEN_KEY_PREVIOUS:-}
+      MCP_LEGACY_TOKEN_UNTIL: ${MCP_LEGACY_TOKEN_UNTIL:-}
       # KI (ohne Schlüssel greift der Offline-Fallback, ADR 0008)
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}

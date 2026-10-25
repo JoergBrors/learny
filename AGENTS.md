@@ -26,7 +26,7 @@ UI-Texten und Dokumentation: **Deutsch**; Bezeichner: Englisch.
 | Kartenfeld hinzufügen/ändern | `Domain/Models.cs`, `Data/Schema.cs`, `Services/CardRepository.cs`, `Api/CardImportSchema.cs`, MCP `Program.cs`, `wwwroot/templates/*`, `Help.razor`, `FlashCardView.razor` | [0006](docs/adr/0006-kanonisches-karten-json.md), [0004](docs/adr/0004-datenbank-abstraktion.md) |
 | Neuer REST-Endpunkt | `Api/ApiEndpoints.cs` (+ Service-Methode) | [0003](docs/adr/0003-eine-deploybare-einheit.md), [0005](docs/adr/0005-authentifizierung.md) |
 | Neues MCP-Tool | `LearnCards.McpServer/Program.cs` (+ API-Endpunkt, in `TokenAllowedPrefixes`) | [0007](docs/adr/0007-mcp-server.md), [0013](docs/adr/0013-mcp-benutzergebundene-anmeldung.md) |
-| MCP-Anmeldung, Tokens, Zustimmung | `Services/McpLinkService.cs`, `McpConnect.razor`, MCP `ProprietaryOAuthService.cs` | [0013](docs/adr/0013-mcp-benutzergebundene-anmeldung.md) |
+| MCP-Anmeldung, Tokens, Zustimmung, OAuth-Clients | `Services/McpLinkService.cs`, `McpTokenProtector.cs`, `McpOAuthClientStore.cs`, `Infrastructure/McpTokenKeys.cs`, `McpConnect.razor`, MCP `ProprietaryOAuthService.cs` | [0013](docs/adr/0013-mcp-benutzergebundene-anmeldung.md), [0025](docs/adr/0025-sichere-speicherung-von-mcp-tokens.md) |
 | Datenbank/SQL/Schema | `Data/*`, `CardRepository.cs`, [docs/database-schema.md](docs/database-schema.md) mitpflegen | [0004](docs/adr/0004-datenbank-abstraktion.md) |
 | Login, OIDC, API-Schutz | `Auth/*`, API-Filter in `ApiEndpoints.cs` | [0005](docs/adr/0005-authentifizierung.md), [0011](docs/adr/0011-mehrbenutzerarchitektur.md) |
 | Benutzer, Rollen, Besitz, Profil/Admin-UI | `Services/UserService.cs`, `Domain/Users.cs`, `Pages/Profile.razor`, `Pages/Admin.razor` | [0011](docs/adr/0011-mehrbenutzerarchitektur.md), [0012](docs/adr/0012-rollen-aus-entra-app-roles.md) |
@@ -58,11 +58,12 @@ Der Integrationstest „Beispiele, Templates, Schema, MCP, Hilfe“ prüft das a
 - **KI-Funktionen behalten ihren Offline-Fallback** ([0008](docs/adr/0008-ki-integration-und-fallback.md)).
 - **Module/Karten sind privat** (Eigentümer). Zusätzlich gibt es **explizit verwaltete** freigegebene Module (Eigentümer erlaubt Lernen) und **globale** Module (Administrator veröffentlicht eine eingefrorene Version) — [ADR 0015](docs/adr/0015-freigaben-globale-lernmodule.md). Lesen fremder Module nur über `ResolveModuleAccessAsync`/`*Readable*`, Ändern nur mit `ownerId`; kein „Admin liest alles“.
 - **Mehrbenutzer-Isolation** ([0011](docs/adr/0011-mehrbenutzerarchitektur.md)): Jeder Zugriff auf Module/Karten läuft mit `ownerId` und filtert in SQL; die Benutzer-ID stammt nur aus dem Claim `uid`/`HttpContext.Items`, nie aus Request-Daten. Rollen für Änderungen über `UserService.RequireRoleAsync` (DB) prüfen.
+- **MCP-Tokens/-Clients** ([0025](docs/adr/0025-sichere-speicherung-von-mcp-tokens.md)): Tokens, Einmal-Codes und Client-Secrets nur als HMAC mit `MCP_TOKEN_KEY` (Pflicht, aus der `.env`, nie in der Datenbank/Backups); jede Zeile trägt einen `row_mac`, der vor jeder Prüfung verifiziert wird (Konstantzeitvergleich); OAuth-Clients nur AES-256-GCM-verschlüsselt (AAD = `client_id`); kein Token-Teilwissen (`token_hint`) in der Datenbank; Klartext nie in Logs/Audit/Antworten.
 - **MCP**: Daten nur mit dem Token des Benutzers ([0013](docs/adr/0013-mcp-benutzergebundene-anmeldung.md)); der Dienstschlüssel `MCP_API_KEY` gewährt nie Datenzugriff und wird nie an Clients weitergegeben. Tokens/Codes nie im Klartext speichern oder loggen.
 - Geschäftslogik nicht in `.razor`-Dateien oder Endpunkt-Lambdas, sondern in `Services/`.
 - **Keine Secrets** committen (`.env`, `mcpsettings.json`, Schlüssel). `src/LearnCards.Web/Data/keys/` enthält einen
   eingecheckten Data-Protection-Schlüssel — nicht erweitern oder wiederverwenden; Schlüssel gehören nicht ins Repository.
-- **Betriebsmodus:** Dev-Login (`AUTH_MODE=dev`) ist nie für Produktion; `auto` fällt ohne OIDC lautlos auf Dev zurück (Prüfbericht F1, Härtung vorgeschlagen in ADR 0014).
+- **Betriebsmodus** ([0026](docs/adr/0026-betriebsmodus-fail-closed.md)): Dev-Login (`AUTH_MODE=dev`) ist nie für Produktion. Außerhalb von `Development` fällt die Anwendung **nie** still auf Dev zurück (`auto`/Tippfehler/fehlende OIDC-Angaben → Startabbruch); `ENV_FILE` muss lesbar sein, sonst Startabbruch. Weitere Härtung: ADR 0014.
 - **Nicht ohne ausdrücklichen Auftrag:** Git-Tags setzen/pushen (löst Produktions-Deployment aus), Daten löschen, Deployments auslösen.
 - `bin/`, `obj/`, `publish-web-test/` sind Build-Ausgaben, keine Quellen.
 

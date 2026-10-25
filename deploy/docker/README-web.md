@@ -72,12 +72,13 @@ Die vollständige Liste (alle Variablen, Pflicht/Standard) steht in der [Install
 | `OIDC_AUDIENCE`, `OIDC_WEB_SCOPE`, `OIDC_ROLE_MAP`, `ADMIN_SUBJECTS` | nein | — | Zielgruppe, Scopes, Rollenzuordnung, Admin-Bootstrap |
 | `PUBLIC_BASE_URL` | in Produktion | leer | öffentliche URL (Badge-Aussteller, Prüf-Links) |
 | `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_BASE_URL` | nein | — / `gpt-4o-mini` / OpenAI | KI-Funktionen |
+| `MCP_TOKEN_KEY` | **ja (immer)** | — | Hauptschlüssel (Base64, ≥ 32 Byte, `openssl rand -base64 32`) für MCP-Tokens, Einmal-Codes und OAuth-Clients in der Datenbank (ADR 0025); nie in der Datenbank/Backup, ohne ihn startet Learny nicht |
 | `MCP_API_KEY`, `MCP_PUBLIC_URL`, `MCP_TOKEN_DAYS` | bei MCP | — / — / `30` | Anbindung des MCP-Servers |
 | `BADGE_SIGNING_KEY_PEM` | nein | leer | Signaturschlüssel der Badges (leer = wird im Volume erzeugt) |
 | `IMAGE_STORAGE_PROVIDER` | nein | `database` | `database`, `local`, `azureblob`, `s3`, `sharepoint` (+ providerspezifische `IMAGE_*`-Variablen) |
 | `DATA_PROTECTION_DIR` | nein | `data/keys` (= `/app/data/keys`) | Ablage der Data-Protection-Schlüssel (auf dem Volume lassen) |
 
-> **Sicherheit:** `AUTH_MODE` immer ausdrücklich setzen. `dev` meldet jeden ohne Passwort als Administrator an. Mit `auto` (Standard der Anwendung) kann eine unvollständige OIDC-Konfiguration still zu `dev` führen.
+> **Sicherheit (ADR 0026):** `AUTH_MODE` immer ausdrücklich setzen. `dev` meldet jeden ohne Passwort als Administrator an. Im Container (`Production`) startet Learny mit `auto`, leerem oder falschem Wert und ohne vollständige OIDC-Angaben **nicht**, statt still in den Dev-Login zu fallen; `AUTH_MODE=dev` ist nur zum lokalen Ausprobieren gedacht und schreibt eine Warnung ins Log. Eine gesetzte, aber nicht lesbare `ENV_FILE` verhindert ebenfalls den Start.
 
 ## PostgreSQL
 

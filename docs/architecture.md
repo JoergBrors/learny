@@ -180,3 +180,7 @@ damit lokale Entwicklung ohne Schlüssel möglich bleibt.
 ## Verteilung als Docker-Images
 
 Beide Dienste werden zusätzlich als öffentliche Docker-Hub-Images (`joergb23/learny-web`, `joergb23/learny-mcp`; amd64 + arm64) veröffentlicht. Das Paket `deploy/docker/` startet Web (mit PostgreSQL) und optional den MCP-Server; die Web-App bleibt eine deploybare Einheit (ADR 0003), der MCP-Server ein getrennter API-Client (ADR 0007). Siehe [ADR 0024](adr/0024-docker-hub-veroeffentlichung.md).
+
+## Schutz von MCP-Tokens bei Datenbankzugriff (ADR 0025)
+
+MCP-Tokens und Einmal-Codes liegen nur als HMAC (Schlüssel `MCP_TOKEN_KEY` aus der `.env`) mit Zeilen-MAC in der Datenbank; OAuth-Clients des MCP-Servers werden AES-256-GCM-verschlüsselt in `mcp_oauth_clients` gespeichert. Ein Angreifer mit Lese- und Schreibzugriff auf Postgres kann weder Tokens ablesen noch gültige herstellen oder Zugänge verändern (`McpTokenProtector`, `McpLinkService`, `McpOAuthClientStore`).

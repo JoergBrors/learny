@@ -36,6 +36,11 @@ public sealed class PostgresDatabase : IDatabase
             await MigrateLegacySchemaAsync(ct);
             await MigrateCardContentColumnsAsync(ct);
             await MigrateQuizResultColumnsAsync(ct);
+            await EnsureTableColumnAsync("mcp_links", "hash_alg", "TEXT NOT NULL DEFAULT 'sha256'", ct);   // ADR 0025
+            await EnsureTableColumnAsync("mcp_links", "key_id", "TEXT NOT NULL DEFAULT ''", ct);
+            await EnsureTableColumnAsync("mcp_links", "row_mac", "TEXT NOT NULL DEFAULT ''", ct);
+            await EnsureTableColumnAsync("mcp_link_codes", "key_id", "TEXT NOT NULL DEFAULT ''", ct);
+            await EnsureTableColumnAsync("mcp_link_codes", "row_mac", "TEXT NOT NULL DEFAULT ''", ct);
             await MigrateModuleDeleteCascadeAsync(ct);
             await MigrateOwnershipAsync(ct);
             await MigrateSharingAsync(ct);

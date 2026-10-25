@@ -1,6 +1,6 @@
 # 0014 — Sitzungs- und Betriebsmodus-Härtung
 
-- **Status:** Vorgeschlagen (nicht umgesetzt, benötigt Freigabe)
+- **Status:** Vorgeschlagen (Punkt 1 teilweise umgesetzt durch [0026](0026-betriebsmodus-fail-closed.md); übrige Punkte nicht umgesetzt, benötigen Freigabe)
 - **Datum:** 2026-10-24
 - **Anlass:** [Prüfbericht Mehrbenutzerfähigkeit](../reviews/2026-10-24-mehrbenutzer-pruefbericht.md), Feststellungen F1–F6
 - **Würde ergänzen:** [0005](0005-authentifizierung.md), [0011](0011-mehrbenutzerarchitektur.md)

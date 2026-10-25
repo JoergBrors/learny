@@ -37,7 +37,9 @@ builder.Services.AddSingleton<QuizService>();
 builder.Services.AddSingleton<ChatService>();
 builder.Services.AddSingleton<OidcService>();
 builder.Services.AddSingleton<UserService>();
+builder.Services.AddSingleton<McpTokenProtector>();   // ADR 0025
 builder.Services.AddSingleton<McpLinkService>();
+builder.Services.AddSingleton<McpOAuthClientStore>();
 builder.Services.AddSingleton<SharingService>();
 // Zertifikate, Open Badges und Blockchain-Verankerung (ADR 0021/0022)
 builder.Services.AddSingleton<BadgeSigner>();
@@ -172,6 +174,8 @@ var primaryHealth = await imageService.Registry.Primary.CheckHealthAsync();
 app.Logger.Log(primaryHealth.Ok ? LogLevel.Information : LogLevel.Warning, "Bildspeicher '{Provider}': {Message} ({Ms} ms){Cache}",
     imageService.Registry.PrimaryName, primaryHealth.Message, (int)primaryHealth.Latency.TotalMilliseconds,
     imageService.Cache.Enabled ? ", Cache aktiv" : ", Cache aus");
+if (cfg.AuthMode == "dev" && !app.Environment.IsDevelopment())
+    app.Logger.LogWarning("ACHTUNG: AUTH_MODE=dev außerhalb von Development — jeder erhält ohne Passwort Administratorrechte. Nur zum lokalen Ausprobieren, nie in Produktion.");
 app.Logger.LogInformation("LearnCards gestartet — DB-Provider: {Provider}, Auth-Modus: {Auth}, OpenAI: {OpenAi}, .env: {Env}",
     db.ProviderName, cfg.AuthMode, cfg.OpenAiConfigured ? "konfiguriert" : "nicht konfiguriert", EnvLoader.LoadedFrom ?? "—");
 

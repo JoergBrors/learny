@@ -165,7 +165,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          docker run -d --name smoke-web -p 18080:8080 -e AUTH_MODE=dev -e DB_PROVIDER=sqlite learny-web:smoke
+          docker run -d --name smoke-web -p 18080:8080 -e AUTH_MODE=dev -e DB_PROVIDER=sqlite -e MCP_TOKEN_KEY="$(openssl rand -base64 32)" learny-web:smoke
           docker run -d --name smoke-mcp -p 18787:8787 -e LEARNCARDS_MCP_HTTP=true -e LEARNCARDS_MCP_STDIO=false \
             -e LEARNCARDS_MCP_HTTP_URLS=http://0.0.0.0:8787 -e LEARNCARDS_API_URL=http://localhost:18080/api learny-mcp:smoke
           ok=false

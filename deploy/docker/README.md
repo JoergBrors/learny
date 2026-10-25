@@ -32,6 +32,8 @@ Inhalt dieses Pakets: `docker-compose.yml`, `.env.example`, `mcpsettings.example
 10. **Optional MCP aktivieren**: siehe [MCP](#mcp-optional).
 11. **Updates und Backups**: siehe [Updates](#updates) und [Backup und Wiederherstellung](#backup-und-wiederherstellung).
 
+> **Betriebsmodus (ADR 0026):** Im Container (`ASPNETCORE_ENVIRONMENT=Production`) startet Learny ohne vollständige OIDC-Angaben **nicht**, statt still in den Dev-Login zu fallen. Der Dev-Login braucht ausdrücklich `AUTH_MODE=dev` (Warnung im Log). Tippfehler im Wert von `AUTH_MODE` führen ebenfalls zum Startabbruch.
+>
 > **Nur zum Ausprobieren auf dem eigenen Rechner** (ohne Entra ID): `AUTH_MODE=dev` in `.env`. Das ist ein Login ohne Passwort mit Administratorrechten — **niemals** auf einem Server oder hinter einer öffentlichen Adresse verwenden. Beispiel für `.env`:
 > `POSTGRES_PASSWORD=...` + `AUTH_MODE=dev`, Zugriff nur über `http://localhost:8080`.
 
@@ -202,6 +204,9 @@ Pflicht: **PostgreSQL-Betrieb** → `POSTGRES_PASSWORD`; **OIDC-Betrieb** → `O
 | `ADMIN_SUBJECTS` | web | nein | leer | Subjects (`sub`), die beim Login Administrator werden (Bootstrap). |
 | `MCP_API_KEY` | web, mcp | **ja** bei MCP | leer | Dienstschlüssel zwischen Web und MCP; gewährt nie Datenzugriff. |
 | `MCP_PUBLIC_URL` | web | **ja** bei MCP (Produktion) | leer | Erlaubte öffentliche MCP-URL(n) für die Rückleitung, kommagetrennt, ohne `/` am Ende. |
+| `MCP_TOKEN_KEY` | web | **ja** (immer) | — | Hauptschlüssel (Base64, ≥ 32 Byte) für MCP-Tokens, Einmal-Codes und OAuth-Clients in der Datenbank (ADR 0025). Nur in der `.env`; getrennt von Datenbank-Backups sichern. Ohne Schlüssel startet Learny nicht. |
+| `MCP_TOKEN_KEY_PREVIOUS` | web | nein | leer | Bisherige Schlüssel nach einer Rotation (kommagetrennt), nur zum Prüfen/Entschlüsseln. |
+| `MCP_LEGACY_TOKEN_UNTIL` | web | nein | `2027-01-31` | Ende der Übergangsfrist für ältere MCP-Tokens (reiner SHA-256). |
 | `MCP_TOKEN_DAYS` | web | nein | `30` | Gültigkeit persönlicher MCP-Tokens in Tagen (1–365). |
 | `LEARNCARDS_WEB_PUBLIC_URL` | mcp | **ja** bei MCP | leer | Öffentliche URL der Learny-Weboberfläche (Browser-Anmeldung). |
 | `OPENAI_API_KEY` | web | nein | leer | OpenAI-Schlüssel für Chat/Quiz-Generierung/KI-Bewertung; ohne Schlüssel gilt der Offline-Fallback. |

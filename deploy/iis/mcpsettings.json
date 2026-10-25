@@ -3,6 +3,7 @@
   "serverVersion": "__MCP_SERVER_VERSION__",
   "upstreamApi": {
     "baseUrl": "__MCP_UPSTREAM_API_BASE_URL__",
+    "webPublicUrl": "__MCP_WEB_PUBLIC_URL__",
     "apiKey": "__MCP_API_KEY__"
   },
   "transports": {

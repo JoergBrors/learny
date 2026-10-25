@@ -47,6 +47,11 @@ public sealed class SqliteDatabase : IDatabase
             EnsureColumn("quiz_results", "passed", "INTEGER NULL");
             EnsureColumn("quiz_results", "pass_percent", "INTEGER NULL");
             EnsureColumn("quiz_results", "module_version", "INTEGER NULL");
+            EnsureColumn("mcp_links", "hash_alg", "TEXT NOT NULL DEFAULT 'sha256'");   // ADR 0025: 'sha256' = Altbestand, 'hmac1' = HMAC mit Schlüssel aus der .env
+            EnsureColumn("mcp_links", "key_id", "TEXT NOT NULL DEFAULT ''");
+            EnsureColumn("mcp_links", "row_mac", "TEXT NOT NULL DEFAULT ''");
+            EnsureColumn("mcp_link_codes", "key_id", "TEXT NOT NULL DEFAULT ''");
+            EnsureColumn("mcp_link_codes", "row_mac", "TEXT NOT NULL DEFAULT ''");
             MigrateOwnership();
             MigrateSharing();
         }

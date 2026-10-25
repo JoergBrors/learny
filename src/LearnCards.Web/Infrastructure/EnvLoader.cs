@@ -13,7 +13,13 @@ public static class EnvLoader
         var candidates = new List<string>();
         if (!string.IsNullOrWhiteSpace(explicitPath)) candidates.Add(explicitPath);
         var envFile = Environment.GetEnvironmentVariable("ENV_FILE");
-        if (!string.IsNullOrWhiteSpace(envFile)) candidates.Add(envFile);
+        if (!string.IsNullOrWhiteSpace(envFile))
+        {
+            // Ausdrücklich konfigurierter Pfad: nicht still ignorieren (sonst startet die Anwendung ohne ihre Konfiguration, z. B. im Dev-Login)
+            if (!File.Exists(envFile))
+                throw new InvalidOperationException($"ENV_FILE zeigt auf '{envFile}', die Datei ist nicht vorhanden oder für den Prozess nicht lesbar (Berechtigung des App-Pools prüfen).");
+            candidates.Add(envFile);
+        }
 
         // Vom aktuellen Verzeichnis aufwärts suchen (deckt "dotnet run" in src/LearnCards.Web ab)
         var dir = new DirectoryInfo(Directory.GetCurrentDirectory());

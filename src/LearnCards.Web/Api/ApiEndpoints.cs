@@ -92,6 +92,25 @@ public static partial class ApiEndpoints
             });
         });
 
+        // OAuth-Clients des MCP-Servers (ADR 0025): nur mit Dienstschlüssel, kein Benutzer- oder Datenzugriff; der Datensatz liegt verschlüsselt in der Datenbank
+        api.MapPost("/mcp/oauth/clients", async (McpOAuthClientRequest req, HttpContext http, McpOAuthClientStore store) =>
+        {
+            if (!http.Items.ContainsKey(ViaKeyItem))
+                return Results.Json(new { detail = "Nur der MCP-Server (Dienstschlüssel) darf OAuth-Clients speichern." }, statusCode: 403);
+            var error = await store.RegisterAsync(new McpOAuthClientRecord
+            {
+                ClientId = req.ClientId, ClientName = req.ClientName ?? "", RedirectUris = req.RedirectUris ?? new(),
+                TokenEndpointAuthMethod = req.TokenEndpointAuthMethod ?? "none", Scopes = req.Scopes ?? new(), ApplicationType = req.ApplicationType ?? "web",
+            });
+            return error is null ? Results.StatusCode(201) : Results.Json(new { detail = error }, statusCode: 400);
+        });
+        api.MapGet("/mcp/oauth/clients/{clientId}", async (string clientId, HttpContext http, McpOAuthClientStore store) =>
+        {
+            if (!http.Items.ContainsKey(ViaKeyItem))
+                return Results.Json(new { detail = "Nur der MCP-Server (Dienstschlüssel) darf OAuth-Clients lesen." }, statusCode: 403);
+            return await store.GetAsync(clientId) is { } rec ? Results.Ok(rec) : Results.Json(new { detail = "Client nicht gefunden." }, statusCode: 404);
+        });
+
         var secured = api.MapGroup(string.Empty);
         secured.AddEndpointFilter(async (ctx, next) =>
             ctx.HttpContext.Items[UserItem] is AppUser
@@ -768,6 +787,15 @@ public class OwnerAssignRequest { public string OwnerUserId { get; set; } = ""; 
 public class ShareCreateRequest { public string RecipientUserId { get; set; } = ""; }
 public class SubmissionRejectRequest { public string Reason { get; set; } = ""; }
 public class McpCodeExchangeRequest { public string Code { get; set; } = ""; }
+public class McpOAuthClientRequest
+{
+    public string ClientId { get; set; } = "";
+    public string? ClientName { get; set; }
+    public List<string>? RedirectUris { get; set; }
+    public string? TokenEndpointAuthMethod { get; set; }
+    public List<string>? Scopes { get; set; }
+    public string? ApplicationType { get; set; }
+}
 public class McpLinkCreateRequest { public string Name { get; set; } = ""; public int Days { get; set; } = 90; }
 public class McpConsentRequest
 {

@@ -55,6 +55,9 @@ services:
       MCP_API_KEY: ${MCP_API_KEY:-change-me-mcp-key}
       MCP_PUBLIC_URL: ${MCP_PUBLIC_URL:-}
       MCP_TOKEN_DAYS: ${MCP_TOKEN_DAYS:-30}
+      MCP_TOKEN_KEY: ${MCP_TOKEN_KEY:?MCP_TOKEN_KEY in .env setzen (openssl rand -base64 32)}   # Pflicht (ADR 0025)
+      MCP_TOKEN_KEY_PREVIOUS: ${MCP_TOKEN_KEY_PREVIOUS:-}
+      MCP_LEGACY_TOKEN_UNTIL: ${MCP_LEGACY_TOKEN_UNTIL:-}
       ADMIN_SUBJECTS: ${ADMIN_SUBJECTS:-}
       OIDC_ROLE_MAP: ${OIDC_ROLE_MAP:-}
       APP_DOMAIN: ${APP_DOMAIN:-localhost}

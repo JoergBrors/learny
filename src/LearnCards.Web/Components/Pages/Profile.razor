@@ -191,6 +191,7 @@
             <p class="muted">
                 MCP-Clients arbeiten ausschließlich in deinem Namen und sehen nur deine eigenen Module und Karten.
                 Clients mit OAuth-Unterstützung verbinden sich über die Anmeldung bei Learny; für stdio-Clients (z. B. Claude Desktop) erzeugst du ein persönliches Token.
+                Tokens werden nie im Klartext gespeichert: In der Datenbank liegt nur eine geschützte Prüfsumme, die ohne den Server-Schlüssel wertlos ist. Die „Kennung“ hilft nur beim Wiedererkennen und enthält keinen Teil des Tokens.
             </p>
 
             @if (_newToken is not null)
@@ -209,7 +210,7 @@
             else
             {
                 <table class="table">
-                    <thead><tr><th>Name</th><th>Art</th><th>Token</th><th>Erstellt</th><th>Gültig bis</th><th>Zuletzt genutzt</th><th>Status</th><th></th></tr></thead>
+                    <thead><tr><th>Name</th><th>Art</th><th>Kennung</th><th>Erstellt</th><th>Gültig bis</th><th>Zuletzt genutzt</th><th>Status</th><th></th></tr></thead>
                     <tbody>
                         @foreach (var l in _links)
                         {

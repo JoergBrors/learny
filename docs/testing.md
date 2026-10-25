@@ -92,3 +92,7 @@ Die Anwendung lädt unter Windows `winsqlite3.dll` (Systembibliothek) vor `sqlit
 ## Docker-Konfiguration (ADR 0024)
 
 `DockerConfigTests` (im Integrationstest-Lauf) prüft, dass `deploy/docker/docker-compose.yml`, `.env.example`, die Variablentabelle der README und der Code dieselben Variablen verwenden, dass keine Geheimnisse in den Beispielen stehen, sichere Standards gelten (`AUTH_MODE=oidc`, kein veröffentlichter PostgreSQL-Port, Bindung an 127.0.0.1, benannte Volumes) und dass der Workflow nur auf Commit-SHAs gepinnte Actions und Repository-Secrets verwendet.
+
+## MCP-Token-Schutz (ADR 0025)
+
+`McpTokenUnitTests` (M1–M44) prüfen mit direktem Datenbankzugriff: eingeschleuste Zeilen/Codes, geänderte `user_id`/Ablaufdaten/Widerrufe, getauschte Hashes, manipulierte oder kopierte OAuth-Client-Datensätze, Schlüsselrotation und -verlust, Umstellung und Ablauf des Altbestands sowie die Pflicht-Konfiguration von `MCP_TOKEN_KEY`. Der Ende-zu-Ende-Test startet den MCP-Server neu und prüft, dass ein registrierter Client bekannt bleibt. Die Integrationstests setzen `MCP_TOKEN_KEY` selbst (Testwert).

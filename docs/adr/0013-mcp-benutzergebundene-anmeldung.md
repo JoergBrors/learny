@@ -1,8 +1,9 @@
 # 0013 — MCP: benutzergebundene Anmeldung per OAuth und persönliche Tokens
 
 - **Status:** Akzeptiert
+- **Klarstellung (2026-10-26):** `oauth.issuer` des MCP-Servers ist die öffentlich erreichbare HTTPS-URL; `MCP_PUBLIC_URL` (Learny-Web) und `webPublicUrl` müssen dazu passen (Deploy-Prüfung, siehe [docs/iis-deployment.md](../iis-deployment.md), Abschnitt Claude.ai).
 - **Datum:** 2026-10-24
-- **Ergänzt durch:** [0015](0015-freigaben-globale-lernmodule.md) (`list_modules` mit `scope`, lesender Zugriff auf freigegebene/globale Module; Freigaben/Veröffentlichung bleiben für Tokens gesperrt)
+- **Ergänzt durch:** [0025](0025-sichere-speicherung-von-mcp-tokens.md) (Speicherung: HMAC mit Schlüssel aus der `.env`, Zeilen-MAC, verschlüsselte OAuth-Clients — ersetzt „nur SHA-256-Hash“ und „Clients nur im Arbeitsspeicher“), [0015](0015-freigaben-globale-lernmodule.md) (`list_modules` mit `scope`, lesender Zugriff auf freigegebene/globale Module; Freigaben/Veröffentlichung bleiben für Tokens gesperrt)
 - **Ersetzt teilweise:** [0011](0011-mehrbenutzerarchitektur.md) (Abschnitt „API und MCP-Schlüssel“: `MCP_LINKED_USER_ID` entfällt), [0007](0007-mcp-server.md) (Authentifizierung des MCP-Servers)
 
 ## Kontext

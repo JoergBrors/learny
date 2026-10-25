@@ -46,6 +46,19 @@ public sealed class ProprietaryOAuthService
 
     public bool IsEnabled => _settings.Enabled;
 
+    /// <summary>Übernimmt einen aus Learny nachgeladenen Client (ADR 0025); bereits bekannte Clients bleiben unverändert.</summary>
+    public void Adopt(OAuthClientRegistration client) => _clients.TryAdd(client.ClientId, client);
+
+    /// <summary>
+    /// Lädt einen unbekannten dynamisch registrierten Client aus Learny nach (nach einem Neustart des MCP-Servers). Nur Clients dieses Dienstes
+    /// (Präfix "learncards-") werden angefragt.
+    /// </summary>
+    public async Task EnsureClientAsync(string? clientId, LearnCardsApiClient api, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(clientId) || clientId.Length > 100 || !clientId.StartsWith("learncards-", StringComparison.Ordinal) || FindClient(clientId) is not null) return;
+        if (await api.LoadOAuthClientAsync(clientId, ct) is { } loaded) Adopt(loaded);
+    }
+
     public OAuthClientRegistration? FindClient(string clientId)
         => _clients.TryGetValue(clientId, out var client) ? client : null;
 

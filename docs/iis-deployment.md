@@ -123,6 +123,8 @@ Unter GitHub → `Settings` → `Secrets and variables` → `Actions` → `Secre
 
 - `MCP_API_KEY`
   Pflicht. Dienstschlüssel zwischen MCP-Server und Web-App (identisch in beiden). Gewährt keinen Datenzugriff; Benutzer arbeiten mit eigenen Tokens ([ADR 0013](adr/0013-mcp-benutzergebundene-anmeldung.md)).
+- `MCP_TOKEN_KEY`
+  **Pflicht** (ADR 0025). Hauptschlüssel für MCP-Tokens, Einmal-Codes und OAuth-Clients in der Datenbank: Base64, mindestens 32 Byte — erzeugen mit `openssl rand -base64 32` oder in PowerShell mit `[Convert]::ToBase64String([System.Security.Cryptography.RandomNumberGenerator]::GetBytes(32))`. Der Workflow prüft Länge und Format vor dem Deployment, rendert ihn nur in die geschützte `.env` und gibt ihn nie aus. Nicht zusammen mit Datenbank-Sicherungen aufbewahren; bei Verlust sind alle MCP-Zugänge ungültig (Neuanmeldung). Rotation: neuen Schlüssel als `MCP_TOKEN_KEY` setzen, den alten in `MCP_TOKEN_KEY_PREVIOUS` (IIS-Umgebungsvariable) belassen.
 - `MCP_OAUTH_SIGNING_KEY`
   Wird vom Workflow weiterhin verlangt, solange `oauth.enabled=true` ist, vom MCP-Server aber **nicht mehr verwendet** (Tokens stellt die Web-App aus). Platzhalterwert setzen; Bereinigung des Workflows empfohlen.
 - `MCP_OAUTH_CLIENT_SECRET`
@@ -292,3 +294,41 @@ Windows-Dienst wieder und belässt den MCP-Teil im reinen `stdio`-/Client-Start-
 
 - **Vermutete Ursache (nicht unter IIS nachgestellt):** `ImportFromPem`/`ImportPkcs8PrivateKey` laufen unter Windows über den CNG-Schlüsseldienst (NCrypt); ohne geladenes Benutzerprofil des App-Pool-Kontos kann dieser Weg so fehlschlagen. Weiterer Auslöser in diesem Repository: `robocopy /MIR` löschte frühere `data\`-Inhalte im Webroot.
 - **Behebung:** Der Schlüssel wird zuerst selbst in `ECParameters` zerlegt und flüchtig im Prozess importiert (ohne NCrypt-Schlüsselspeicher); „Benutzerprofil laden“ wird vom Deployment gesetzt; `data`/`logs` werden beim Spiegeln ausgenommen.
+
+## Claude.ai mit dem MCP-Server verbinden (OAuth, Dynamic Client Registration)
+
+Claude.ai liest die OAuth-Metadaten des MCP-Servers, registriert sich dort selbst (DCR) und schickt den Benutzer zur Anmeldung bei Learny.
+
+**Benötigte GitHub-Variablen** (Environment, alle öffentlich erreichbare HTTPS-URLs ohne `/` am Ende):
+
+| Variable | Beispiel | Bedeutung |
+|---|---|---|
+| `MCP_OAUTH_ISSUER` | `https://learny-mcp.brors.date` | **Öffentliche URL des MCP-Servers**; Issuer und Basis aller veröffentlichten OAuth-Endpunkte |
+| `MCP_PUBLIC_URL` | `https://learny-mcp.brors.date` | muss **gleich** `MCP_OAUTH_ISSUER` sein; erlaubte Rückleitung nach der Anmeldung (Learny-Web) |
+| `MCP_WEB_PUBLIC_URL` | `https://learny.brors.date` | öffentliche URL der Learny-Weboberfläche; dorthin leitet der MCP-Server den Browser zur Anmeldung |
+| `MCP_HTTP_HEALTH_URL` | `https://learny-mcp.brors.date/health` | Prüf-URL nach dem Deployment (gleicher Host wie der Issuer) |
+
+Der Deploy-Workflow bricht ab, wenn der Issuer kein `https://` ist, `MCP_PUBLIC_URL` vom Issuer abweicht oder `MCP_WEB_PUBLIC_URL` fehlt. Nach dem Start prüft der Schritt „Verify MCP HTTP Service“, dass `issuer`, `authorization_endpoint`, `token_endpoint` und `registration_endpoint` auf den öffentlichen MCP-Host zeigen und dass der Registrierungsendpunkt eine ungültige Anfrage mit HTTP 400 beantwortet.
+
+**Prüfung von außen:**
+
+```
+GET  https://<mcp-host>/.well-known/oauth-authorization-server     → 200 JSON, alle URLs auf <mcp-host>
+GET  https://<mcp-host>/.well-known/oauth-protected-resource/mcp   → 200 JSON, resource = https://<mcp-host>/mcp
+POST https://<mcp-host>/oauth/register  (public client)            → 201 JSON mit client_id
+POST https://<mcp-host>/mcp  ohne Token                            → 401 mit WWW-Authenticate (resource_metadata)
+```
+
+`GET /mcp` liefert bewusst 405 (nur POST, Streamable HTTP). Erforderlich für Claude sind die Authorization-Server-Metadaten und die Protected-Resource-Metadaten; `/.well-known/openid-configuration` ist optional. Unterstützt werden Authorization Code mit PKCE **S256**, öffentliche Clients (`token_endpoint_auth_method=none`), Redirect-URIs mit `https` (oder Loopback-`http`); `javascript:`/fremde `http`-Adressen werden mit `invalid_redirect_uri` abgewiesen. Feste Claude-Redirect-URIs werden nicht vorausgesetzt.
+
+**In Claude.ai:** Einstellungen → Konnektoren → Benutzerdefinierten Konnektor hinzufügen → URL `https://<mcp-host>/mcp`. Claude registriert sich, leitet zu Learny (`/mcp/connect`), der Benutzer meldet sich an und stimmt zu; die Verknüpfung erscheint im Learny-Profil unter den MCP-Zugängen und lässt sich dort widerrufen.
+
+**Fehlerbild „Registrierung beim Anmeldedienst von Learny fehlgeschlagen“:** Die Metadaten nannten einen Host, der nicht erreichbar ist (z. B. `MCP_OAUTH_ISSUER=https://mcplearny.brors.date`, obwohl der Server unter `https://learny-mcp.brors.date` läuft). Claude liest die Metadaten vom richtigen Host, ruft dann aber die dort genannte, nicht auflösbare `registration_endpoint`-Adresse auf. Abhilfe: Variablen oben auf den tatsächlichen öffentlichen Host setzen und neu deployen.
+
+**Neustart:** Registrierte OAuth-Clients und offene Anmeldungen liegen nur im Arbeitsspeicher des MCP-Servers (ADR 0013). Nach einem Neustart (z. B. Deployment) sind sie weg; ausgestellte Tokens bleiben gültig (Learny speichert sie). Eine laufende Claude-Sitzung funktioniert weiter. Ein neues Verbinden registriert Claude erneut; ein Client, der mit einer alten `client_id` einen Anmeldevorgang startet, erhält `invalid_client` und muss sich neu registrieren. Eine dauerhafte Speicherung der Clients wäre eine Architekturänderung und erfordert eine eigene ADR.
+
+## Fehlerbild: Anwendung zeigt „Lokal anmelden (Dev-Modus)“ / liest keine Variablen (ADR 0026)
+
+- **Ursache** (Vorfall 2026-10-26): Nach dem Verschieben der `.env` aus dem Webroot (ADR 0023) wurde der Pfad (`ENV_FILE`) nicht wirksam; ältere Versionen starteten dann ohne Konfiguration und fielen bei `AUTH_MODE=auto` still auf den Dev-Login zurück.
+- **Jetzt:** Die Anwendung bricht bei fehlender/unlesbarer `ENV_FILE` ab (HTTP 500.30, Grund im Log `<Webroot>\logs\stdout_*.log`) und aktiviert außerhalb von `Development` keinen Dev-Login ohne ausdrückliches `AUTH_MODE=dev`. `ENV_FILE` steht als Umgebungsvariable am App-Pool **und** in der `web.config` (`aspNetCore/environmentVariables`). Nach dem Start prüft der Workflow (`Verify Secure Configuration`), dass die Anmeldeseite keinen Dev-Login zeigt und die Aussteller-URL zu `PUBLIC_BASE_URL` passt.
+- **Prüfen auf dem Server:** `type C:\inetpub\wwwroot\LearnCards\logs\stdout_*.log` zeigt „.env: <Pfad>“ in der Startzeile; der App-Pool-Konto `IIS AppPool\<Pool>` braucht Leserecht auf `<IIS_CONFIG_ROOT>\config\.env` (Standard `C:\ProgramData\LearnCards\<Site>`).

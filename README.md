@@ -256,3 +256,7 @@ Die Datei lässt sich direkt über den JSON-Import in der Startseite laden. Weit
 Eigenes, für Lernumgebungen gestaltetes Farbsystem (gedämpftes Petrol/Salbei als Markenfarbe,
 warmes Papierweiß, sanfter Bernstein-Akzent für „Key Facts") mit vollständigem Dark Mode —
 siehe `src/LearnCards.Web/wwwroot/app.css`.
+
+## MCP-Tokens und Schlüssel (ADR 0025)
+
+`MCP_TOKEN_KEY` ist eine **Pflichtvariable** (Base64, ≥ 32 Byte, `openssl rand -base64 32`; nur in `.env`/Geheimnisverwaltung): Er schützt MCP-Tokens, Einmal-Codes und gespeicherte OAuth-Clients in der Datenbank (HMAC, Zeilen-MAC, AES-256-GCM). Auch mit Zugriff auf PostgreSQL lassen sich so keine MCP-Zugänge ablesen, herstellen oder verändern. Siehe [ADR 0025](docs/adr/0025-sichere-speicherung-von-mcp-tokens.md).

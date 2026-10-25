@@ -19,3 +19,7 @@ src/LearnCards.Web/Data/badge-signing-key.pem
 deploy/docker/.env
 deploy/docker/mcpsettings.json
 deploy/docker/certs/
+
+# MCP-Hauptschlüssel für die lokale Entwicklung (ADR 0025) — nie committen (unter Windows ist data/ dasselbe Verzeichnis wie Data/)
+**/mcp-token.key
+*.key

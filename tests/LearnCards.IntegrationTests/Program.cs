@@ -38,6 +38,7 @@ Env("ASPNETCORE_URLS", baseUrl);
 Env("ASPNETCORE_ENVIRONMENT", "Production");
 Env("AUTH_MODE", "dev");
 Env("MCP_API_KEY", McpKey);
+Env("MCP_TOKEN_KEY", "aW50ZWdyYXRpb24tdGVzdC1rZXktMDEyMzQ1Njc4OSE=");   // Pflicht (ADR 0025); nur Testwert
 Env("MCP_PUBLIC_URL", mcpUrl);
 Env("OPENAI_API_KEY", "");
 Env("DATA_PROTECTION_DIR", Path.Combine(tmp, "keys"));
@@ -102,6 +103,7 @@ async Task<(string Url, Process Proc)> StartWebAsync(string label, Dictionary<st
     info.Environment["ASPNETCORE_ENVIRONMENT"] = "Production";
     info.Environment["AUTH_MODE"] = "dev";
     info.Environment["MCP_API_KEY"] = McpKey;
+    info.Environment["MCP_TOKEN_KEY"] = "aW50ZWdyYXRpb24tdGVzdC1rZXktMDEyMzQ1Njc4OSE=";
     info.Environment["OPENAI_API_KEY"] = "";
     info.Environment["DB_PROVIDER"] = "sqlite";
     info.Environment["SQLITE_PATH"] = Path.Combine(dir, "e2e.db");
@@ -199,6 +201,8 @@ try
     await ImageStorageRemoteUnitTests.RunAsync(Check);
     RichTextUnitTests.Run(Check);
     await BlockchainUnitTests.RunAsync(Check, tmp);
+    await McpTokenUnitTests.RunAsync(Check, tmp);   // Schutz der MCP-Tokens bei Datenbankzugriff (ADR 0025)
+    AuthModeTests.Run(Check);   // Betriebsmodus fail closed (ADR 0026)
     DockerConfigTests.Run(Check, repoRoot);   // Docker-Hub-Veröffentlichung (ADR 0024)
     Console.WriteLine();
 
@@ -454,6 +458,23 @@ try
     var meta = await J(await mcp.GetAsync(mcpUrl + "/.well-known/oauth-authorization-server"));
     Check(meta!["code_challenge_methods_supported"]!.AsArray().Select(x => x!.GetValue<string>()).SequenceEqual(new[] { "S256" })
           && meta["grant_types_supported"]!.AsArray().Select(x => x!.GetValue<string>()).SequenceEqual(new[] { "authorization_code" }), "Metadaten: nur Authorization Code + S256 (kein client_credentials/plain)");
+    // Claude-Registrierung: Discovery muss in sich stimmig sein — jede veröffentlichte URL liegt auf dem öffentlichen Host (Fehlerbild: Issuer mit falschem Host → „Registrierung fehlgeschlagen“)
+    Check(new[] { "issuer", "authorization_endpoint", "token_endpoint", "registration_endpoint" }.All(k => meta[k]!.GetValue<string>().StartsWith(mcpUrl, StringComparison.Ordinal)), "Metadaten: issuer, authorization-, token- und registration_endpoint liegen auf demselben öffentlichen Host");
+    var prm = await J(await mcp.GetAsync(mcpUrl + "/.well-known/oauth-protected-resource/mcp"));
+    Check(prm!["resource"]!.GetValue<string>() == mcpUrl + "/mcp" && prm["authorization_servers"]![0]!.GetValue<string>() == mcpUrl, "Protected-Resource-Metadaten: resource = <öffentliche URL>/mcp, authorization_servers = Issuer");
+    Check((await mcp.GetAsync(mcpUrl + "/.well-known/oauth-protected-resource")).StatusCode == HttpStatusCode.OK, "Protected-Resource-Metadaten auch ohne Pfad erreichbar");
+    var dcr = await mcp.PostAsync(meta["registration_endpoint"]!.GetValue<string>(), Body(new
+    {
+        client_name = "Claude", redirect_uris = new[] { "https://claude.ai/api/mcp/auth_callback" }, grant_types = new[] { "authorization_code", "refresh_token" },
+        response_types = new[] { "code" }, token_endpoint_auth_method = "none", scope = "mcp",
+    }));
+    var dcrJson = await J(dcr);
+    Check(dcr.StatusCode == HttpStatusCode.Created && (dcr.Content.Headers.ContentType?.MediaType ?? "") == "application/json"
+          && dcrJson!["client_id"]!.GetValue<string>().Length > 8 && dcrJson["token_endpoint_auth_method"]!.GetValue<string>() == "none"
+          && dcrJson["redirect_uris"]![0]!.GetValue<string>() == "https://claude.ai/api/mcp/auth_callback" && (dcrJson["client_secret"]?.GetValue<string>() ?? "") == "",
+        "DCR über den veröffentlichten registration_endpoint: öffentlicher Client (https-Redirect, auth_method none) → 201 JSON mit client_id ohne Secret");
+    Check((await mcp.PostAsync(meta["registration_endpoint"]!.GetValue<string>(), Body(new { client_name = "x", token_endpoint_auth_method = "none" }))).StatusCode == HttpStatusCode.BadRequest
+          && (await mcp.PostAsync(meta["registration_endpoint"]!.GetValue<string>(), new StringContent("{kaputt", System.Text.Encoding.UTF8, "application/json"))).StatusCode == HttpStatusCode.BadRequest, "DCR: fehlende Redirect-URIs und fehlerhaftes JSON → 400");
     Check((await mcp.PostAsync(mcpUrl + "/oauth/register", Body(new { client_name = "x", redirect_uris = new[] { "javascript:alert(1)" }, token_endpoint_auth_method = "none" }))).StatusCode == HttpStatusCode.BadRequest, "Registrierung: javascript:-Redirect abgelehnt");
     Check((await mcp.PostAsync(mcpUrl + "/oauth/register", Body(new { client_name = "x", redirect_uris = new[] { "http://example.com/cb" }, token_endpoint_auth_method = "none" }))).StatusCode == HttpStatusCode.BadRequest, "Registrierung: http-Redirect ausserhalb von Loopback abgelehnt");
     Check((await mcp.PostAsync(mcpUrl + "/oauth/token", new FormUrlEncodedContent(new Dictionary<string, string> { ["grant_type"] = "client_credentials", ["client_id"] = "a", ["client_secret"] = "b" }))).StatusCode == HttpStatusCode.BadRequest, "client_credentials-Grant wird nicht mehr unterstützt");
@@ -525,6 +546,35 @@ try
         ["grant_type"] = "authorization_code", ["client_id"] = clientId, ["code"] = aliceAuthCode, ["redirect_uri"] = cbUri, ["code_verifier"] = aliceVerifier,
     }));
     Check(reuse.StatusCode == HttpStatusCode.BadRequest, "Autorisierungscode ist nur einmal verwendbar");
+
+    // Neustart des MCP-Servers (z. B. Deployment): dynamisch registrierte öffentliche Clients bleiben erhalten (verschlüsselt in Learny, ADR 0025)
+    {
+        mcpServer!.Kill(true); mcpServer.WaitForExit(5000);
+        mcpServer = Process.Start(mcpPsi)!;
+        mcpServer.OutputDataReceived += (_, e) => { if (e.Data is not null) log.AppendLine("[mcp2] " + e.Data); };
+        mcpServer.ErrorDataReceived += (_, e) => { if (e.Data is not null) log.AppendLine("[mcp2] " + e.Data); };
+        mcpServer.BeginOutputReadLine(); mcpServer.BeginErrorReadLine();
+        var back = false;
+        for (var i = 0; i < 80 && !back && !mcpServer.HasExited; i++)
+        {
+            try { back = (await mcp.GetAsync(mcpUrl + "/health")).IsSuccessStatusCode; } catch { await Task.Delay(250); }
+        }
+        Check(back, "MCP-Server startet nach dem Neustart wieder");
+        var cv = "n" + Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N");
+        var cc = Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.ASCII.GetBytes(cv))).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        var afterRestart = await mcp.GetAsync($"{mcpUrl}/oauth/authorize?response_type=code&client_id={clientId}&redirect_uri={Uri.EscapeDataString(cbUri)}&state=s1&code_challenge={cc}&code_challenge_method=S256&scope=mcp");
+        Check(afterRestart.StatusCode == HttpStatusCode.Redirect && afterRestart.Headers.Location!.ToString().StartsWith(baseUrl + "/mcp/connect"),
+            "OAuth-Client bleibt nach einem Neustart des MCP-Servers bekannt (Autorisierung ohne erneute Registrierung)");
+        var unknownClient = await mcp.GetAsync($"{mcpUrl}/oauth/authorize?response_type=code&client_id=learncards-{Guid.NewGuid():N}&redirect_uri={Uri.EscapeDataString(cbUri)}&state=s2&code_challenge={cc}&code_challenge_method=S256&scope=mcp");
+        Check(unknownClient.StatusCode == HttpStatusCode.BadRequest, "Unbekannte client_id wird weiterhin abgewiesen (kein Nachladen ins Leere)");
+        // Dienstschlüssel-Endpunkte: Benutzer/Anonyme dürfen Clients weder lesen noch schreiben
+        Check((await alice.GetAsync("/api/mcp/oauth/clients/" + clientId)).StatusCode == HttpStatusCode.Forbidden
+              && (await anon.GetAsync("/api/mcp/oauth/clients/" + clientId)).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden
+              && (await alice.PostAsync("/api/mcp/oauth/clients", Body(new { client_id = "learncards-" + Guid.NewGuid().ToString("N"), redirect_uris = new[] { "https://claude.ai/cb" }, token_endpoint_auth_method = "none" }))).StatusCode == HttpStatusCode.Forbidden,
+            "OAuth-Client-Endpunkte nur mit Dienstschlüssel (Benutzer und Anonyme: 403/401)");
+        var stored = await J(await key.GetAsync("/api/mcp/oauth/clients/" + clientId));
+        Check(stored!["client_id"]!.GetValue<string>() == clientId && stored["token_endpoint_auth_method"]!.GetValue<string>() == "none" && stored["client_secret"] is null, "Gespeicherter Client enthält kein Secret und liefert die Registrierungsdaten");
+    }
 
     // falscher PKCE-Verifier
     {
