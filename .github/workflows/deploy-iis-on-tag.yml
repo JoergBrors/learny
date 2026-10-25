@@ -1033,7 +1033,13 @@ jobs:
 
           # Ist der HTTP-MCP-Server als echter Windows-Dienst eingerichtet, wird genau dieser Dienst gestartet (nicht die geplante Aufgabe); ein nicht vorhandener Dienst wird nie angelegt oder gestartet
           $mcpService = Get-Service -Name $taskName -ErrorAction SilentlyContinue
-          if ($null -ne $mcpService) {
+          # Nur ein Dienst, dessen Programm im MCP-Verzeichnis liegt, ist der betriebene MCP-Server; ein veralteter Dienst gleichen Namens (anderer Pfad) wird ignoriert
+          $serviceInfo = if ($null -ne $mcpService) { Get-CimInstance Win32_Service -Filter "Name = '$($taskName.Replace("'", "''"))'" -ErrorAction SilentlyContinue } else { $null }
+          $serviceUsable = $null -ne $serviceInfo -and -not [string]::IsNullOrWhiteSpace($serviceInfo.PathName) -and $serviceInfo.PathName.Replace('"', '').StartsWith($env:MCP_PHYSICAL_PATH, [System.StringComparison]::OrdinalIgnoreCase)
+          if ($null -ne $mcpService -and -not $serviceUsable) {
+            Write-Warning "Ein Windows-Dienst '$taskName' existiert, gehört aber nicht zu '$($env:MCP_PHYSICAL_PATH)' (Pfad: $($serviceInfo.PathName)). Er wird nicht gestartet; der MCP-Server läuft als geplante Aufgabe."
+          }
+          if ($serviceUsable) {
             if ($mcpService.Status -ne "Stopped") { Stop-Service -Name $taskName -Force -ErrorAction Stop; $mcpService.WaitForStatus("Stopped", [TimeSpan]::FromSeconds(60)) }
             Start-Service -Name $taskName -ErrorAction Stop
             try { $mcpService.WaitForStatus("Running", [TimeSpan]::FromSeconds(60)) }

@@ -16,9 +16,9 @@ public static class WorkflowStructureTests
               && install.IndexOf("Stop-Service", StringComparison.Ordinal) < install.IndexOf("robocopy $extractPath", StringComparison.Ordinal), "W1 Zustand wird ermittelt und ein vorhandener Windows-Dienst vor dem Ersetzen der Dateien gestoppt");
         check(install.Contains("WaitForStatus(\"Stopped\"") && install.Contains("Get-McpProcesses).Count -gt 0") && install.IndexOf("konnte nicht beendet werden", StringComparison.Ordinal) < install.IndexOf("robocopy $extractPath", StringComparison.Ordinal)
               && install.Contains("NICHT ersetzt"), "W2 es wird gewartet, bis der MCP-Prozess beendet ist; sonst bricht das Deployment ab, bevor Dateien ersetzt werden");
-        check(configure.Contains("$null -ne $mcpService") && configure.Contains("Start-Service -Name $taskName") && configure.Contains("WaitForStatus(\"Running\"") && configure.Contains("keinen MCP-Prozess"),
+        check(configure.Contains("$serviceUsable") && configure.Contains("Win32_Service") && configure.Contains("Start-Service -Name $taskName") && configure.Contains("WaitForStatus(\"Running\"") && configure.Contains("keinen MCP-Prozess"),
             "W3 ein vorhandener Windows-Dienst wird nach dem Update gestartet, auf „Running“ geprüft und muss einen MCP-Prozess besitzen");
-        var guardIdx = configure.IndexOf("$null -ne $mcpService", StringComparison.Ordinal);
+        var guardIdx = configure.IndexOf("if ($serviceUsable)", StringComparison.Ordinal);
         check(configure.IndexOf("Start-Service", StringComparison.Ordinal) > guardIdx && !configure.Contains("New-Service") && !configure.Contains("sc.exe create"), "W4 ein nicht vorhandener Dienst wird nie gestartet oder angelegt (nur bei vorhandenem Dienst)");
         check(configure.Contains("if (-not $httpEnabled)") && configure.IndexOf("if (-not $httpEnabled)", StringComparison.Ordinal) < guardIdx, "W5 im reinen stdio-Modus (HTTP deaktiviert) wird nichts gestartet; die Aufgabe wird entfernt");
         check(configure.Contains("schtasks.exe /Run") && configure.Contains("innerhalb von 45 s nicht gestartet") && configure.Contains("Backup des Runners"), "W6 geplante Aufgabe: wird gestartet, auf den Prozess gewartet; Fehlstart bricht das Deployment mit nachvollziehbarer Meldung ab");
