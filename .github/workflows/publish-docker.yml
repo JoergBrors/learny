@@ -159,8 +159,7 @@ jobs:
           done
           # Keine Repository-Variablen/Secrets oder individuellen Einstellungen im Image: nur die fest im Dockerfile stehenden, unkritischen ENV-Werte
           for img in learny-web:smoke learny-mcp:smoke; do
-            env_names="$(docker image inspect "$img" --format '{{range .Config.Env}}{{println .}}{{end}}' | cut -d= -f1 | sort | tr '
-' ' ')"
+            env_names="$(docker image inspect "$img" --format '{{range .Config.Env}}{{println .}}{{end}}' | cut -d= -f1 | sort | paste -sd' ' -)"
             echo "ENV in $img: $env_names"
             if docker image inspect "$img" --format '{{range .Config.Env}}{{println .}}{{end}}' | cut -d= -f1 | grep -Eiq 'PASSWORD|SECRET|TOKEN|_KEY|CONNECTION|DOMAIN|OIDC|POSTGRES|OPENAI|DOCKERHUB'; then
               echo "::error::Das Image $img enthält konfigurations- oder geheimnisartige Umgebungsvariablen."; exit 1
