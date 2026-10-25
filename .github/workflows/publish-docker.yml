@@ -1,0 +1,285 @@
+name: Publish Docker Images
+
+# Veröffentlicht joergb23/learny-web und joergb23/learny-mcp (linux/amd64 + linux/arm64) auf Docker Hub,
+# aktualisiert die Docker-Hub-Beschreibungen und hängt das Installationspaket learny-docker-<version>.zip an das GitHub Release (ADR 0024).
+#
+# Auslöser: GitHub Release "published". Dieser Workflow erzeugt keine Git-Tags und löst kein IIS-/Azure-Deployment aus.
+# Achtung: Legt man ein Release mit NEUEM Tag an, erzeugt GitHub dabei den Tag — und der bestehende IIS-Workflow läuft bei jedem Tag-Push.
+# Deshalb Releases auf einem bereits vorhandenen Tag anlegen (siehe deploy/docker/README.md, Abschnitt "Veröffentlichen").
+#
+# Manueller Lauf (workflow_dispatch): nur Trockenlauf — baut und testet, veröffentlicht nichts.
+#
+# Benötigte Secrets: DOCKERHUB_USERNAME (joergb23), DOCKERHUB_TOKEN (Personal Access Token mit Lese-/Schreib-/Lösch-Rechten).
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Versionsnummer für den Trockenlauf (z. B. 1.0.0) — es wird nichts veröffentlicht"
+        required: true
+        default: "0.0.0-dryrun"
+
+permissions:
+  contents: read
+
+env:
+  WEB_IMAGE: joergb23/learny-web
+  MCP_IMAGE: joergb23/learny-mcp
+  PLATFORMS: linux/amd64,linux/arm64
+
+jobs:
+  validate:
+    name: Release-Version prüfen
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      stable: ${{ steps.v.outputs.stable }}
+      publish: ${{ steps.v.outputs.publish }}
+    steps:
+      - name: Version validieren
+        id: v
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "release" ]; then raw="$RELEASE_TAG"; publish=true; else raw="$INPUT_VERSION"; publish=false; fi
+          version="${raw#v}"
+          if [ -z "$version" ]; then echo "::error::Release-Version ist leer."; exit 1; fi
+          # SemVer: MAJOR.MINOR.PATCH mit optionalem Prerelease-Suffix (1.0.0, 1.2.3-rc.1)
+          if ! printf '%s' "$version" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$'; then
+            echo "::error::Ungültige Version '$version'. Erwartet wird SemVer, z. B. 1.0.0 oder 1.0.0-rc.1 (Tag optional mit führendem 'v')."
+            exit 1
+          fi
+          # latest nur bei stabilen Releases: kein Prerelease-Suffix und nicht als Pre-release markiert
+          stable=true
+          case "$version" in *-*) stable=false;; esac
+          if [ "$EVENT" = "release" ] && [ "$RELEASE_PRERELEASE" = "true" ]; then stable=false; fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "stable=$stable" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "### Version" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Version: \`$version\` · stabil (latest wird aktualisiert): \`$stable\` · Veröffentlichung: \`$publish\`" >> "$GITHUB_STEP_SUMMARY"
+
+  test:
+    name: Build und Integrationstests
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Solution bauen
+        run: dotnet build LearnCards.slnx -c Release
+      - name: Integrationstests
+        env:
+          TEST_WEB_DLL: ${{ github.workspace }}/src/LearnCards.Web/bin/Release/net10.0/LearnCards.Web.dll
+          TEST_MCP_DLL: ${{ github.workspace }}/src/LearnCards.McpServer/bin/Release/net10.0/LearnCards.McpServer.dll
+        run: dotnet run --project tests/LearnCards.IntegrationTests -c Release --no-build
+
+  publish:
+    name: Images bauen und veröffentlichen
+    runs-on: ubuntu-latest
+    needs: [validate, test]
+    env:
+      VERSION: ${{ needs.validate.outputs.version }}
+      STABLE: ${{ needs.validate.outputs.stable }}
+      PUBLISH: ${{ needs.validate.outputs.publish }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Bei Docker Hub anmelden
+        if: ${{ env.PUBLISH == 'true' }}
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Tags berechnen
+        id: tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          web="$WEB_IMAGE:$VERSION"; mcp="$MCP_IMAGE:$VERSION"
+          if [ "$STABLE" = "true" ]; then web="$web,$WEB_IMAGE:latest"; mcp="$mcp,$MCP_IMAGE:latest"; fi
+          echo "web=$web" >> "$GITHUB_OUTPUT"
+          echo "mcp=$mcp" >> "$GITHUB_OUTPUT"
+          echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      # Rauchtest vor der Veröffentlichung: amd64-Images lokal bauen und starten (Gesundheitsprüfung, nicht root, keine Geheimnisse im Image)
+      - name: Web-Image bauen (Rauchtest)
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: src/LearnCards.Web/Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: learny-web:smoke
+          cache-from: type=gha,scope=web
+          provenance: false
+      - name: MCP-Image bauen (Rauchtest)
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: src/LearnCards.McpServer/Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: learny-mcp:smoke
+          cache-from: type=gha,scope=mcp
+          provenance: false
+      - name: Rauchtest
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run -d --name smoke-web -p 18080:8080 -e AUTH_MODE=dev -e DB_PROVIDER=sqlite learny-web:smoke
+          docker run -d --name smoke-mcp -p 18787:8787 -e LEARNCARDS_MCP_HTTP=true -e LEARNCARDS_MCP_STDIO=false \
+            -e LEARNCARDS_MCP_HTTP_URLS=http://0.0.0.0:8787 -e LEARNCARDS_API_URL=http://localhost:18080/api learny-mcp:smoke
+          ok=false
+          for i in $(seq 1 40); do
+            if curl -fsS http://localhost:18080/health >/dev/null && curl -fsS http://localhost:18787/health >/dev/null; then ok=true; break; fi
+            sleep 3
+          done
+          if [ "$ok" != true ]; then docker logs smoke-web | tail -n 30; docker logs smoke-mcp | tail -n 30; echo "::error::Rauchtest fehlgeschlagen."; exit 1; fi
+          [ "$(docker exec smoke-web id -u)" != "0" ] || { echo "::error::Web-Container läuft als root."; exit 1; }
+          [ "$(docker exec smoke-mcp id -u)" != "0" ] || { echo "::error::MCP-Container läuft als root."; exit 1; }
+          # keine Geheimnisse / lokalen Datenbanken im Image
+          for img in learny-web:smoke learny-mcp:smoke; do
+            if docker run --rm --entrypoint sh "$img" -c 'find / -xdev \( -name "*.pem" -o -name "*.db" -o -name ".env" -o -name "mcpsettings.json" \) -not -path "/proc/*" -not -path "/etc/ssl/*" -not -path "/usr/share/ca-certificates/*" -not -path "/usr/lib/ssl/*" 2>/dev/null | head -n 5' | grep -q .; then
+              echo "::error::Unerwartete Dateien (Schlüssel/Datenbank/Konfiguration) im Image $img."; exit 1
+            fi
+          done
+          docker rm -f smoke-web smoke-mcp >/dev/null
+
+      - name: Veröffentlichen learny-web
+        id: push-web
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: src/LearnCards.Web/Dockerfile
+          platforms: ${{ env.PLATFORMS }}
+          push: ${{ env.PUBLISH == 'true' }}
+          tags: ${{ steps.tags.outputs.web }}
+          build-args: |
+            VERSION=${{ env.VERSION }}
+            REVISION=${{ github.sha }}
+            CREATED=${{ steps.tags.outputs.created }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max
+          provenance: false
+
+      - name: Veröffentlichen learny-mcp
+        id: push-mcp
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: src/LearnCards.McpServer/Dockerfile
+          platforms: ${{ env.PLATFORMS }}
+          push: ${{ env.PUBLISH == 'true' }}
+          tags: ${{ steps.tags.outputs.mcp }}
+          build-args: |
+            VERSION=${{ env.VERSION }}
+            REVISION=${{ github.sha }}
+            CREATED=${{ steps.tags.outputs.created }}
+          cache-from: type=gha,scope=mcp
+          cache-to: type=gha,scope=mcp,mode=max
+          provenance: false
+
+      - name: Veröffentlichung prüfen
+        if: ${{ env.PUBLISH == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "### Veröffentlichte Images"
+            for image in "$WEB_IMAGE" "$MCP_IMAGE"; do
+              out="$(docker buildx imagetools inspect "$image:$VERSION")"
+              for p in linux/amd64 linux/arm64; do
+                echo "$out" | grep -q "Platform: *$p" || { echo "::error::$image:$VERSION enthält keine Plattform $p."; exit 1; }
+              done
+              digest="$(echo "$out" | awk '/^Digest:/ {print $2; exit}')"
+              if [ "$STABLE" = "true" ]; then
+                latest="$(docker buildx imagetools inspect "$image:latest" | awk '/^Digest:/ {print $2; exit}')"
+                [ "$digest" = "$latest" ] || { echo "::error::$image:latest zeigt nicht auf $VERSION."; exit 1; }
+                tags="\`$VERSION\`, \`latest\`"
+              else
+                tags="\`$VERSION\` (Prerelease — latest unverändert)"
+              fi
+              echo "- \`$image\`: $tags · linux/amd64, linux/arm64 · \`$digest\`"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Beschreibung und README getrennt von der Veröffentlichung: schlägt sie fehl (z. B. Token ohne ausreichende Rechte), bleiben die Images veröffentlicht.
+      - name: Docker-Hub-Beschreibung learny-web aktualisieren
+        id: desc-web
+        if: ${{ env.PUBLISH == 'true' && needs.validate.outputs.stable == 'true' }}
+        continue-on-error: true
+        uses: peter-evans/dockerhub-description@432a30c9e07499fd01da9f8a49f0faf9e0ca5b77 # v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: joergb23/learny-web
+          short-description: "Learny: Karteikarten-Lernplattform (Blazor + REST-API, PostgreSQL, Entra-ID-Anmeldung, Quiz, KI-Chat)"
+          readme-filepath: deploy/docker/README-web.md
+      - name: Docker-Hub-Beschreibung learny-mcp aktualisieren
+        id: desc-mcp
+        if: ${{ env.PUBLISH == 'true' && needs.validate.outputs.stable == 'true' }}
+        continue-on-error: true
+        uses: peter-evans/dockerhub-description@432a30c9e07499fd01da9f8a49f0faf9e0ca5b77 # v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: joergb23/learny-mcp
+          short-description: "Learny MCP-Server: KI-Clients (Claude, GPT) greifen per MCP auf Learny zu (HTTP /mcp, OAuth, stdio)"
+          readme-filepath: deploy/docker/README-mcp.md
+      - name: Ergebnis der Beschreibungs-Aktualisierung
+        if: ${{ always() && env.PUBLISH == 'true' && needs.validate.outputs.stable == 'true' }}
+        shell: bash
+        env:
+          WEB: ${{ steps.desc-web.outcome }}
+          MCP: ${{ steps.desc-mcp.outcome }}
+        run: |
+          {
+            echo "### Docker-Hub-Beschreibung"
+            echo "- learny-web: \`$WEB\` · learny-mcp: \`$MCP\`"
+            if [ "$WEB" != "success" ] || [ "$MCP" != "success" ]; then
+              echo "- ⚠️ Die Beschreibung konnte nicht aktualisiert werden. Das Token braucht für die Docker-Hub-API Lese-, Schreib- und Löschrechte (Account Settings → Personal access tokens); die Images sind trotzdem veröffentlicht. Die README lässt sich manuell aus deploy/docker/README-*.md einfügen."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  release-asset:
+    name: Installationspaket am Release bereitstellen
+    runs-on: ubuntu-latest
+    needs: [validate, publish]
+    if: ${{ needs.validate.outputs.publish == 'true' }}
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.validate.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: ZIP erzeugen und prüfen
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="learny-docker-$VERSION.zip"
+          cd deploy/docker
+          # keine echten Konfigurationen oder Schlüssel einpacken
+          test ! -e .env && test ! -e mcpsettings.json && test ! -d certs
+          zip -r "../../$out" docker-compose.yml .env.example mcpsettings.example.json README.md README-web.md README-mcp.md nginx
+          cd ../..
+          if unzip -p "$out" | grep -Eq 'BEGIN (EC |RSA )?PRIVATE KEY|sk-[A-Za-z0-9]{20,}'; then echo "::error::Mögliches Geheimnis im Installationspaket."; exit 1; fi
+          unzip -l "$out"
+      - name: An das Release anhängen
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" "learny-docker-$VERSION.zip" --clobber --repo "$GITHUB_REPOSITORY"

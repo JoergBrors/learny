@@ -88,3 +88,7 @@ Die Anwendung lädt unter Windows `winsqlite3.dll` (Systembibliothek) vor `sqlit
 - OIDC-Login gegen Entra ID (nur Dev-Login wird getestet).
 - Last-Tests und Zwei-Browser-Sitzungen mit der interaktiven Oberfläche (siehe Anleitung im [Prüfbericht](reviews/2026-10-24-mehrbenutzer-pruefbericht.md)); die Prüfbericht-Checks (persönliche Daten, Gleichzeitigkeit, Logout/Benutzerwechsel, Schlüssel-Matrix) laufen im Abschnitt „Prüfbericht“ der Integrationstests.
 - Bekannt fehlschlagend auf PostgreSQL: paralleler Erstzugriff auf den Lernstatus (HTTP 500, Prüfbericht F4) — bis zur Korrektur ist das ein erwarteter Fehler.
+
+## Docker-Konfiguration (ADR 0024)
+
+`DockerConfigTests` (im Integrationstest-Lauf) prüft, dass `deploy/docker/docker-compose.yml`, `.env.example`, die Variablentabelle der README und der Code dieselben Variablen verwenden, dass keine Geheimnisse in den Beispielen stehen, sichere Standards gelten (`AUTH_MODE=oidc`, kein veröffentlichter PostgreSQL-Port, Bindung an 127.0.0.1, benannte Volumes) und dass der Workflow nur auf Commit-SHAs gepinnte Actions und Repository-Secrets verwendet.

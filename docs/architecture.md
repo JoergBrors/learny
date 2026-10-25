@@ -176,3 +176,7 @@ lokalen OpenAI-kompatiblen Endpunkten über `OPENAI_BASE_URL`). Ohne konfigurier
 `OPENAI_API_KEY` fallen `ChatService` und `QuizService` auf einen klar gekennzeichneten
 Offline-Modus zurück (Quiz-Fragen direkt aus dem Kartenpool, Bewertung per Stichwort-Heuristik),
 damit lokale Entwicklung ohne Schlüssel möglich bleibt.
+
+## Verteilung als Docker-Images
+
+Beide Dienste werden zusätzlich als öffentliche Docker-Hub-Images (`joergb23/learny-web`, `joergb23/learny-mcp`; amd64 + arm64) veröffentlicht. Das Paket `deploy/docker/` startet Web (mit PostgreSQL) und optional den MCP-Server; die Web-App bleibt eine deploybare Einheit (ADR 0003), der MCP-Server ein getrennter API-Client (ADR 0007). Siehe [ADR 0024](adr/0024-docker-hub-veroeffentlichung.md).

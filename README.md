@@ -106,7 +106,11 @@ Für ein vollständig repo-basiertes IIS-Deployment liegen zusätzlich diese Dat
 
 Die echten Werte kommen beim Deploy aus GitHub `Variables` und `Secrets`.
 
-## Docker — eigener Linux-Rechner
+## Docker — fertige Images von Docker Hub
+
+Ohne Quellcode installieren: `joergb23/learny-web` und `joergb23/learny-mcp` (linux/amd64 + arm64) mit Compose-Paket, `.env.example` und Variablentabelle unter [deploy/docker/](deploy/docker/README.md) (auch als `learny-docker-<version>.zip` an jedem GitHub Release). Entscheidung: [ADR 0024](docs/adr/0024-docker-hub-veroeffentlichung.md).
+
+## Docker — aus dem Quellcode bauen (eigener Linux-Rechner)
 
 ```bash
 docker compose up --build -d                        # db + web

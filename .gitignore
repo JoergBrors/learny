@@ -14,3 +14,8 @@ demoodule/kvno_seed_module.json
 # Privater Badge-Signaturschlüssel (nie committen)
 src/LearnCards.Web/Data/badge-signing-key.pem
 *.pem
+
+# Docker-Installation (deploy/docker): echte Konfiguration und Zertifikate nie committen
+deploy/docker/.env
+deploy/docker/mcpsettings.json
+deploy/docker/certs/

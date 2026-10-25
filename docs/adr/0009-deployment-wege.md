@@ -1,6 +1,7 @@
 # 0009 — Deployment: IIS per Tag, Docker, Azure
 
 - **Status:** Akzeptiert
+- **Ergänzt durch:** [0024](0024-docker-hub-veroeffentlichung.md) (Docker-Hub-Images und Compose-Installationspaket als weiterer Verteilweg), [0023](0023-secrets-und-badge-schluessel-unter-iis.md) (IIS: Geheimnisse außerhalb des Webroots)
 - **Datum:** 2026-10-24
 - **Ergänzt durch:** [0011](0011-mehrbenutzerarchitektur.md), [0012](0012-rollen-aus-entra-app-roles.md), [0013](0013-mcp-benutzergebundene-anmeldung.md) (neue Konfigurationswerte, siehe unten); [0015](0015-freigaben-globale-lernmodule.md) benötigt keine neuen Konfigurationswerte
 

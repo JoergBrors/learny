@@ -1,0 +1,10 @@
+{
+  "serverName": "Learny MCP",
+  "serverVersion": "2.1.0",
+  "oauth": {
+    "enabled": true,
+    "issuer": "https://mcp.example.org",
+    "audience": "learncards-mcp",
+    "clients": []
+  }
+}

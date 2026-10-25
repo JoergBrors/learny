@@ -1,0 +1,187 @@
+# Learny — Installation mit fertigen Docker-Hub-Images (kein Quellcode, kein lokaler Build)
+#
+#   cp .env.example .env        # Werte anpassen (Passwörter, OIDC, öffentliche URLs)
+#   docker compose pull
+#   docker compose up -d
+#
+# Profile (in .env über COMPOSE_PROFILES, kommagetrennt):
+#   db     PostgreSQL in einem Container (Standard). Für eine externe PostgreSQL-Instanz weglassen.
+#   mcp    Learny-MCP-Server (HTTP, /mcp) zusätzlich starten
+#   proxy  nginx als TLS-Reverse-Proxy (80/443) mitstarten
+#
+# Container-Variablen stehen in "environment:"; ${VAR:-Standard} wird beim Start aus .env/Shell ersetzt (Compose-Variablenersetzung).
+# Nichts davon liegt im Image. Secrets gehören ausschließlich in die .env (Dateirechte 600), nie in diese YAML.
+
+name: learny
+
+services:
+  db:
+    image: postgres:16-alpine
+    profiles: ["db"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-learncards}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD in .env setzen}
+      POSTGRES_DB: ${POSTGRES_DB:-learncards}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    networks: [internal]
+    # Kein "ports:" — PostgreSQL ist nur im internen Netzwerk erreichbar.
+
+  web:
+    image: joergb23/learny-web:${LEARNY_VERSION:-latest}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+        required: false          # entfällt bei externer PostgreSQL (Profil "db" nicht aktiv)
+    environment:
+      # Datenbank
+      DB_PROVIDER: ${DB_PROVIDER:-postgres}
+      POSTGRES_HOST: ${POSTGRES_HOST:-db}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_USER: ${POSTGRES_USER:-learncards}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD in .env setzen}
+      POSTGRES_DB: ${POSTGRES_DB:-learncards}
+      POSTGRES_SSLMODE: ${POSTGRES_SSLMODE:-disable}
+      # Web / Betrieb (ASPNETCORE_URLS und DATA_PROTECTION_DIR sind im Image voreingestellt bzw. liegen auf dem Volume)
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      ASPNETCORE_URLS: http://+:8080
+      ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
+      DATA_PROTECTION_DIR: ${DATA_PROTECTION_DIR:-/app/data/keys}
+      APP_DOMAIN: ${APP_DOMAIN:-localhost}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      DEBUG: ${DEBUG:-false}
+      # Anmeldung (Produktion: AUTH_MODE=oidc; "dev" ist ein Login ohne Passwort und nie für Produktion — ADR 0014)
+      AUTH_MODE: ${AUTH_MODE:-oidc}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
+      OIDC_WEB_SCOPE: ${OIDC_WEB_SCOPE:-openid profile email}
+      OIDC_ROLE_MAP: ${OIDC_ROLE_MAP:-}
+      ADMIN_SUBJECTS: ${ADMIN_SUBJECTS:-}
+      # MCP (Dienstschlüssel und erlaubte öffentliche MCP-URL, ADR 0013)
+      MCP_API_KEY: ${MCP_API_KEY:-}
+      MCP_PUBLIC_URL: ${MCP_PUBLIC_URL:-}
+      MCP_TOKEN_DAYS: ${MCP_TOKEN_DAYS:-30}
+      # KI (ohne Schlüssel greift der Offline-Fallback, ADR 0008)
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      # Zertifikate / Open Badges / Blockchain (ADR 0021/0022). Der Badge-Schlüssel wird beim ersten Start im Volume erzeugt
+      # (/app/data/badge-signing-key.pem); BADGE_SIGNING_KEY_PEM (Secret-Verwaltung) hat Vorrang.
+      BADGE_SIGNING_KEY_PEM: ${BADGE_SIGNING_KEY_PEM:-}
+      BLOCKCHAIN_ENABLED: ${BLOCKCHAIN_ENABLED:-true}
+      BLOCKCHAIN_NETWORK: ${BLOCKCHAIN_NETWORK:-polygon-amoy}
+      BLOCKCHAIN_AUTO_ANCHOR: ${BLOCKCHAIN_AUTO_ANCHOR:-true}
+      BLOCKCHAIN_MAX_COST_EUR: ${BLOCKCHAIN_MAX_COST_EUR:-0.001}
+      BLOCKCHAIN_MAINNET_ENABLED: ${BLOCKCHAIN_MAINNET_ENABLED:-false}
+      BLOCKCHAIN_BATCH_ENABLED: ${BLOCKCHAIN_BATCH_ENABLED:-true}
+      BLOCKCHAIN_BATCH_MAX_SIZE: ${BLOCKCHAIN_BATCH_MAX_SIZE:-100}
+      BLOCKCHAIN_BATCH_MAX_WAIT_MINUTES: ${BLOCKCHAIN_BATCH_MAX_WAIT_MINUTES:-60}
+      BLOCKCHAIN_WALLET_ADDRESS: ${BLOCKCHAIN_WALLET_ADDRESS:-}
+      # Bildspeicher (ADR 0017/0018). "database" (Standard) | "local" | "azureblob" | "s3" | "sharepoint"
+      IMAGE_STORAGE_PROVIDER: ${IMAGE_STORAGE_PROVIDER:-database}
+      IMAGE_LOCAL_PATH: ${IMAGE_LOCAL_PATH:-/app/data/images}
+      IMAGE_PROXY_ENABLED: ${IMAGE_PROXY_ENABLED:-true}
+      IMAGE_HTTP_TIMEOUT_SECONDS: ${IMAGE_HTTP_TIMEOUT_SECONDS:-30}
+      IMAGE_CACHE_ENABLED: ${IMAGE_CACHE_ENABLED:-true}
+      IMAGE_CACHE_MAX_SIZE_MB: ${IMAGE_CACHE_MAX_SIZE_MB:-512}
+      IMAGE_CACHE_TTL_MINUTES: ${IMAGE_CACHE_TTL_MINUTES:-1440}
+      IMAGE_CACHE_MEMORY_MB: ${IMAGE_CACHE_MEMORY_MB:-64}
+      IMAGE_CACHE_PATH: ${IMAGE_CACHE_PATH:-}
+      IMAGE_AZUREBLOB_ACCOUNT: ${IMAGE_AZUREBLOB_ACCOUNT:-}
+      IMAGE_AZUREBLOB_ENDPOINT: ${IMAGE_AZUREBLOB_ENDPOINT:-}
+      IMAGE_AZUREBLOB_CONTAINER: ${IMAGE_AZUREBLOB_CONTAINER:-learncards-images}
+      IMAGE_AZUREBLOB_AUTH: ${IMAGE_AZUREBLOB_AUTH:-managedidentity}
+      IMAGE_AZUREBLOB_TENANT_ID: ${IMAGE_AZUREBLOB_TENANT_ID:-}
+      IMAGE_AZUREBLOB_CLIENT_ID: ${IMAGE_AZUREBLOB_CLIENT_ID:-}
+      IMAGE_AZUREBLOB_CLIENT_SECRET: ${IMAGE_AZUREBLOB_CLIENT_SECRET:-}
+      IMAGE_AZUREBLOB_ACCOUNT_KEY: ${IMAGE_AZUREBLOB_ACCOUNT_KEY:-}
+      IMAGE_AZURE_SAS_TTL_SECONDS: ${IMAGE_AZURE_SAS_TTL_SECONDS:-60}
+      IMAGE_S3_ENDPOINT: ${IMAGE_S3_ENDPOINT:-}
+      IMAGE_S3_REGION: ${IMAGE_S3_REGION:-us-east-1}
+      IMAGE_S3_BUCKET: ${IMAGE_S3_BUCKET:-}
+      IMAGE_S3_ACCESS_KEY_ID: ${IMAGE_S3_ACCESS_KEY_ID:-}
+      IMAGE_S3_SECRET_ACCESS_KEY: ${IMAGE_S3_SECRET_ACCESS_KEY:-}
+      IMAGE_S3_SESSION_TOKEN: ${IMAGE_S3_SESSION_TOKEN:-}
+      IMAGE_S3_PATH_STYLE: ${IMAGE_S3_PATH_STYLE:-false}
+      IMAGE_S3_PRESIGN_TTL_SECONDS: ${IMAGE_S3_PRESIGN_TTL_SECONDS:-60}
+      IMAGE_SHAREPOINT_TENANT_ID: ${IMAGE_SHAREPOINT_TENANT_ID:-}
+      IMAGE_SHAREPOINT_CLIENT_ID: ${IMAGE_SHAREPOINT_CLIENT_ID:-}
+      IMAGE_SHAREPOINT_CLIENT_SECRET: ${IMAGE_SHAREPOINT_CLIENT_SECRET:-}
+      IMAGE_SHAREPOINT_SITE_ID: ${IMAGE_SHAREPOINT_SITE_ID:-}
+      IMAGE_SHAREPOINT_DRIVE_ID: ${IMAGE_SHAREPOINT_DRIVE_ID:-}
+      IMAGE_SHAREPOINT_FOLDER: ${IMAGE_SHAREPOINT_FOLDER:-LearnCards/images}
+    volumes:
+      # Datenbank (SQLite), Data-Protection-Schlüssel, Badge-Signaturschlüssel, lokaler Bildspeicher und -Cache
+      - web_data:/app/data
+    # Nur lokal gebunden: Der Reverse Proxy (Profil "proxy" oder eigener) terminiert TLS. Die Web-App vertraut X-Forwarded-*-Headern;
+    # sie darf deshalb nie ungeschützt ins Internet gestellt werden. Direktzugriff im LAN: LEARNY_BIND_ADDRESS=0.0.0.0 (nur in vertrauenswürdigen Netzen).
+    ports:
+      - "${LEARNY_BIND_ADDRESS:-127.0.0.1}:${LEARNY_WEB_PORT:-8080}:8080"
+    networks: [internal]
+
+  mcp:
+    image: joergb23/learny-mcp:${LEARNY_VERSION:-latest}
+    profiles: ["mcp"]
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+    environment:
+      # Interne Adresse der Web-API (Service-Name im Docker-Netzwerk) — nicht die öffentliche URL
+      LEARNCARDS_API_URL: http://web:8080/api
+      # Öffentliche Learny-URL für die Browser-Anmeldung des Benutzers (Weiterleitung zu /mcp/connect)
+      LEARNCARDS_WEB_PUBLIC_URL: ${LEARNCARDS_WEB_PUBLIC_URL:-}
+      # Dienstschlüssel (gleicher Wert wie MCP_API_KEY der Web-App); gewährt nie Datenzugriff
+      LEARNCARDS_MCP_API_KEY: ${MCP_API_KEY:-}
+      LEARNCARDS_MCP_HTTP: "true"
+      LEARNCARDS_MCP_STDIO: "false"
+      LEARNCARDS_MCP_HTTP_URLS: http://0.0.0.0:8787
+      LEARNCARDS_MCP_CONFIG: /config/mcpsettings.json
+    volumes:
+      # OAuth-Einstellungen (Issuer = öffentliche MCP-URL): aus mcpsettings.example.json kopieren und anpassen
+      - ./mcpsettings.json:/config/mcpsettings.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8787/health >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    ports:
+      - "${LEARNY_BIND_ADDRESS:-127.0.0.1}:${LEARNY_MCP_PORT:-8787}:8787"
+    networks: [internal]
+
+  proxy:
+    image: nginx:1.27-alpine
+    profiles: ["proxy"]
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+    environment:
+      # werden vom nginx-Image in die Vorlage eingesetzt (envsubst)
+      LEARNY_HOST: ${LEARNY_HOST:-localhost}
+      MCP_HOST: ${MCP_HOST:-mcp.localhost}
+    volumes:
+      - ./nginx/learny.conf.template:/etc/nginx/templates/learny.conf.template:ro
+      - ./certs:/etc/nginx/certs:ro      # cert.pem + key.pem (volle Kette / privater Schlüssel)
+    ports:
+      - "80:80"
+      - "443:443"
+    networks: [internal]
+
+volumes:
+  postgres_data:
+  web_data:
+
+networks:
+  internal:
+    driver: bridge

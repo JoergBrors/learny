@@ -199,6 +199,7 @@ try
     await ImageStorageRemoteUnitTests.RunAsync(Check);
     RichTextUnitTests.Run(Check);
     await BlockchainUnitTests.RunAsync(Check, tmp);
+    DockerConfigTests.Run(Check, repoRoot);   // Docker-Hub-Veröffentlichung (ADR 0024)
     Console.WriteLine();
 
     // ─── Warten bis der Server antwortet ───────────────────────────────────

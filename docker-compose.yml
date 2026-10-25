@@ -3,6 +3,8 @@
 #   docker compose up --build -d          # startet db + web (+ nginx im Profil "production")
 #   docker compose --profile mcp run --rm mcp-server   # MCP-Server interaktiv (stdio)
 #
+# Installation ohne Quellcode (fertige Images von Docker Hub): deploy/docker/README.md
+#
 # Für lokale Entwicklung ohne Container siehe docs/local-development.md —
 # `dotnet run` im Projekt src/LearnCards.Web genügt (SQLite, kein Docker nötig).
 
