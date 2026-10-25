@@ -32,6 +32,15 @@ public static class BatchStatus
     public const string Failed = "failed";
 }
 
+/// <summary>Deutsche Notenskala (IHK-Schlüssel) aus dem Ergebnis in Prozent: 100–92 → 1, 91–81 → 2, 80–67 → 3, 66–50 → 4, 49–30 → 5, darunter 6.</summary>
+public static class GermanGrade
+{
+    public static int From(double percent) => percent >= 92 ? 1 : percent >= 81 ? 2 : percent >= 67 ? 3 : percent >= 50 ? 4 : percent >= 30 ? 5 : 6;
+    public static string Label(int grade) => grade switch { 1 => "sehr gut", 2 => "gut", 3 => "befriedigend", 4 => "ausreichend", 5 => "mangelhaft", _ => "ungenügend" };
+    /// <summary>Kurzform, z. B. „Note 2 (gut)“.</summary>
+    public static string Text(double percent) { var g = From(percent); return $"Note {g} ({Label(g)})"; }
+}
+
 /// <summary>Zertifikat über den erfolgreichen Abschluss eines Lernmoduls (ADR 0021). Enthält das signierte Open Badge 3.0 (VC-JWT) und den Verankerungsstatus.</summary>
 public class Certificate
 {
@@ -71,6 +80,8 @@ public class Certificate
     public DateTime? AnchoredAt { get; set; }
 
     public bool IsRevoked => Status == "revoked";
+    /// <summary>Note nach deutscher Skala (1–6), berechnet aus dem Ergebnis in Prozent.</summary>
+    public int Grade => GermanGrade.From(ScorePercent);
 }
 
 public class AnchorBatch

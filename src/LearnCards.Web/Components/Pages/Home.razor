@@ -2,6 +2,7 @@
 @attribute [Authorize]
 @rendermode InteractiveServer
 @inject CardRepository Repo
+@inject CertificateService Certs
 @inject NavigationManager Nav
 @inject AuthenticationStateProvider AuthState
 
@@ -153,6 +154,14 @@
                             <span class="pill">@mod.ActiveCount Karten</span>
                         </div>
                         <h2>@mod.Name</h2>
+                        @if (_certs.TryGetValue(mod.Id, out var cert))
+                        {
+                            <p class="module-pass">
+                                <span class="badge badge-pass" title="Das Modul-Quiz wurde bestanden">✔ Bestanden · Note @cert.Grade (@GermanGrade.Label(cert.Grade))</span>
+                                <a class="btn btn-ghost btn-sm" href="/api/certificates/@cert.Id/certificate.html" download @onclick:stopPropagation="true"
+                                   aria-label="@($"Zertifikat für {mod.Name} herunterladen")">🎓 Zertifikat</a>
+                            </p>
+                        }
                         @if (_tab == "shared")
                         {
                             <p class="module-origin">von @mod.OwnerName · nur lernen</p>
@@ -210,6 +219,7 @@
     }
 
     private string _userId = "";
+    private Dictionary<string, Certificate> _certs = new(StringComparer.OrdinalIgnoreCase);
 
     private async Task ReloadAsync()
     {
@@ -217,6 +227,9 @@
         _modules = await Repo.ListModulesAsync(_userId);
         _shared = await Repo.ListSharedWithMeAsync(_userId);
         _global = await Repo.ListGlobalModulesAsync();
+        // bestandene Module: jüngstes Zertifikat je Modul (bei globalen Modulen gehört es zur jeweiligen Version)
+        _certs = (await Certs.ListForUserAsync(_userId)).Where(c => !c.IsRevoked).GroupBy(c => c.ModuleId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(c => c.IssuedAt).First(), StringComparer.OrdinalIgnoreCase);
         _loading = false;
     }
 

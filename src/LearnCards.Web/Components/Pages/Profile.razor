@@ -5,6 +5,7 @@
 @inject McpLinkService McpLinks
 @inject SharingService Sharing
 @inject CardRepository Repo
+@inject CertificateService Certs
 @inject AuthenticationStateProvider AuthState
 
 <PageTitle>Mein Profil — LearnCards</PageTitle>
@@ -117,6 +118,48 @@
             }
         </div>
 
+        <div class="card panel" id="certificates">
+            <h2 class="panel-title">Meine Zertifikate</h2>
+            <p class="muted">Für jedes bestandene Modulquiz erhältst du ein Zertifikat mit Note (1–6; bestanden ab der Bestehensgrenze des Moduls). Wähle, welche Ergebnisse du sehen möchtest.</p>
+            <label class="form-label">Anzeigen
+                <select class="input cert-filter" value="@_minGrade" @onchange="e => _minGrade = int.TryParse(e.Value?.ToString(), out var g) ? g : 0" aria-label="Zertifikate filtern">
+                    <option value="0">Alle bestandenen Module</option>
+                    <option value="4">Bestanden mit mindestens Note 4 (ausreichend)</option>
+                    <option value="3">Mindestens Note 3 (befriedigend)</option>
+                    <option value="2">Mindestens Note 2 (gut)</option>
+                    <option value="1">Nur Note 1 (sehr gut)</option>
+                </select>
+            </label>
+            @{ var shown = _certificates.Where(c => _minGrade == 0 || c.Grade <= _minGrade).ToList(); }
+            @if (shown.Count == 0)
+            {
+                <p class="muted">@(_certificates.Count == 0 ? "Noch kein Modul bestanden." : "Kein Zertifikat entspricht dem Filter.")</p>
+            }
+            else
+            {
+                <table class="table">
+                    <thead><tr><th>Modul</th><th>Datum</th><th>Ergebnis</th><th>Note</th><th>Nummer</th><th>Status</th><th>Download</th></tr></thead>
+                    <tbody>
+                        @foreach (var c in shown)
+                        {
+                            <tr>
+                                <td>@c.ModuleName@(c.ModuleVersion > 0 ? $" (Version {c.ModuleVersion})" : "")</td>
+                                <td>@c.IssuedAt.ToLocalTime().ToString("dd.MM.yyyy")</td>
+                                <td>@c.ScorePercent.ToString("0.#") %</td>
+                                <td><span class="badge badge-pass">@c.Grade — @GermanGrade.Label(c.Grade)</span></td>
+                                <td>@c.Number</td>
+                                <td>@ChainStatus.Label(c.ChainStatus, c.IsRevoked)</td>
+                                <td class="actions">
+                                    <a class="btn btn-ghost btn-sm" href="/api/certificates/@c.Id/certificate.html" download>🎓 Zertifikat</a>
+                                    <a class="btn btn-ghost btn-sm" href="/api/certificates/@c.Id/badge" download>Badge (JSON)</a>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+
         <div class="card panel">
             <h2 class="panel-title">Meine Lernergebnisse</h2>
             @if (_results.Count == 0)
@@ -220,6 +263,9 @@
     private string? _message;
     private bool _messageOk;
 
+    private List<Certificate> _certificates = new();
+    private int _minGrade;
+
     protected override async Task OnInitializedAsync()
     {
         var auth = await AuthState.GetAuthenticationStateAsync();
@@ -229,6 +275,7 @@
         _identities = await Users.GetIdentitiesAsync(uid);
         _summary = await Repo.GetOwnedSummaryAsync(uid);
         _results = await Repo.QuizHistoryAsync(uid, limit: 10);
+        _certificates = await Certs.ListForUserAsync(uid);
         _links = await McpLinks.ListAsync(uid);
         _outgoing = await Sharing.ListOutgoingSharesAsync(uid);
         _incoming = await Repo.ListSharedWithMeAsync(uid);

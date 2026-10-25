@@ -24,7 +24,7 @@ public static partial class ApiEndpoints
     private static object CertificateDto(Certificate c, bool includeLearner = true) => new
     {
         id = c.Id, number = c.Number, module_id = c.ModuleId, module_name = c.ModuleName, module_version = c.ModuleVersion, scope = c.ModuleScope, issued_at = c.IssuedAt,
-        score_percent = c.ScorePercent, pass_percent = c.PassPercent, learner_name = includeLearner ? c.LearnerName : null, badge_hash = c.BadgeHash,
+        score_percent = c.ScorePercent, grade = c.Grade, grade_label = GermanGrade.Label(c.Grade), pass_percent = c.PassPercent, learner_name = includeLearner ? c.LearnerName : null, badge_hash = c.BadgeHash,
         status = c.IsRevoked ? "revoked" : "active", revoked_at = c.RevokedAt, revoked_reason = c.IsRevoked ? c.RevokedReason : null,
         chain = new
         {
@@ -97,6 +97,14 @@ public static partial class ApiEndpoints
             if (await certs.GetForUserAsync(Uid(http), id) is not { } c) return Results.Json(new { detail = "Certificate not found" }, statusCode: 404);
             http.Response.Headers.ContentDisposition = $"attachment; filename=\"badge-{c.Number}.json\"";
             return Results.Text(certs.SignedBadgeJson(c).ToJsonString(new() { WriteIndented = true }), "application/ld+json");
+        });
+        // Druckbares Zertifikat (HTML; im Browser als PDF speichern). ?view=1 zeigt es im Browser, sonst Download.
+        mine.MapGet("/{id}/certificate.html", async (string id, CertificateService certs, HttpContext http, bool view = false) =>
+        {
+            if (await certs.GetForUserAsync(Uid(http), id) is not { } c) return Results.Json(new { detail = "Certificate not found" }, statusCode: 404);
+            http.Response.Headers.ContentDisposition = (view ? "inline" : "attachment") + $"; filename=\"Zertifikat-{c.Number}.html\"";
+            http.Response.Headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'";
+            return Results.Text(certs.RenderCertificateHtml(c), "text/html; charset=utf-8");
         });
         mine.MapGet("/{id}/badge.jwt", async (string id, CertificateService certs, HttpContext http) =>
         {

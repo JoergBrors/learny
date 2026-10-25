@@ -539,6 +539,9 @@ public static class BlockchainUnitTests
             var auditor = await e.AddUserAsync("Auditor", Roles.Auditor);
             var g = await e.IssueAsync(scope: "global"); var p = await e.IssueAsync(scope: "private"); var s = await e.IssueAsync(scope: "shared");
             var seen = await e.Certs.ListForAuditorAsync(auditor, new CertificateService.AuditorFilter(null, null, null, null, null, null, null));
+            check(GermanGrade.From(92) == 1 && GermanGrade.From(91.9) == 2 && GermanGrade.From(81) == 2 && GermanGrade.From(67) == 3 && GermanGrade.From(50) == 4 && GermanGrade.From(49.9) == 5 && GermanGrade.From(30) == 5 && GermanGrade.From(29) == 6, "B22 Noten: deutsche Skala 92/81/67/50/30");
+            var html = e.Certs.RenderCertificateHtml(g);
+            check(html.Contains(g.Number) && html.Contains("Zertifikat") && !html.Contains("<script"), "B22 Zertifikat-HTML enthält Nummer, kein Skript");
             check(seen.Count == 1 && seen[0].Id == g.Id, "B21 Auditor: sieht nur Zertifikate global veröffentlichter Module — keine privaten oder nur freigegebenen");
             check(await e.Certs.GetForAuditorAsync(auditor, p.Id) is null && await e.Certs.GetForAuditorAsync(auditor, s.Id) is null && await e.Certs.GetForAuditorAsync(auditor, g.Id) is not null, "B21 Auditor: der Einzelabruf privater/freigegebener Zertifikate liefert nichts");
             bool denied = false; try { await e.Certs.ListForAuditorAsync(e.LearnerId, new CertificateService.AuditorFilter(null, null, null, null, null, null, null)); } catch (UnauthorizedAccessException) { denied = true; }

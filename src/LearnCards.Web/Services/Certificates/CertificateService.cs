@@ -49,7 +49,10 @@ public sealed class CertificateService
         _db = db; _signer = signer; _chain = chain; _users = users; _cfg = cfg;
     }
 
-    public string BaseUrl => string.IsNullOrEmpty(_cfg.Blockchain.PublicBaseUrl) ? "http://localhost" : _cfg.Blockchain.PublicBaseUrl;
+    /// <summary>Nur Entwicklung: Ursprung der zuletzt gesehenen Anfrage (Schema, Host, Port), solange PUBLIC_BASE_URL nicht gesetzt ist. Wird von der Middleware in Program.cs gesetzt.</summary>
+    public string? ObservedOrigin { get; set; }
+    /// <summary>Öffentliche Basis-URL: PUBLIC_BASE_URL; ohne Konfiguration in der Entwicklung die tatsächliche Adresse der Anwendung, sonst http://localhost.</summary>
+    public string BaseUrl => !string.IsNullOrEmpty(_cfg.Blockchain.PublicBaseUrl) ? _cfg.Blockchain.PublicBaseUrl : ObservedOrigin ?? "http://localhost";
     public string IssuerId => BaseUrl + "/badges/issuer";
     public string KeyId => IssuerId + "#" + _signer.KeyId;
     public BadgeSigner Signer => _signer;
@@ -127,7 +130,7 @@ public sealed class CertificateService
                 },
                 ["result"] = new JsonArray(new JsonObject
                 {
-                    ["type"] = new JsonArray("Result"), ["status"] = "Completed", ["value"] = c.ScorePercent.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " %",
+                    ["type"] = new JsonArray("Result"), ["status"] = "Completed", ["value"] = c.ScorePercent.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " % — " + GermanGrade.Text(c.ScorePercent),
                 }),
             },
             ["credentialStatus"] = new JsonObject { ["id"] = BaseUrl + "/api/public/revocation-list", ["type"] = "1EdTechRevocationList" },
@@ -140,6 +143,49 @@ public sealed class CertificateService
         var credential = (JsonObject)JsonNode.Parse(BadgeSigner.PayloadText(c.BadgeJws))!;
         credential["proof"] = new JsonObject { ["type"] = "JwtProof2020", ["jwt"] = c.BadgeJws };
         return credential;
+    }
+
+    /// <summary>
+    /// Eigenständiges, druckbares Zertifikat als HTML (ohne Skripte, ohne externe Ressourcen): Name, Modul, Ergebnis, Note, Datum, Nummer, Aussteller, Prüf-Link.
+    /// Alle Werte werden HTML-kodiert. Im Browser über „Drucken → Als PDF speichern“ zu einem PDF machen. Das maßgebliche, signierte Dokument ist das Open Badge.
+    /// </summary>
+    public string RenderCertificateHtml(Certificate c)
+    {
+        static string E(string? v) => System.Net.WebUtility.HtmlEncode(v ?? "");
+        var grade = GermanGrade.Text(c.ScorePercent);
+        var verify = $"{BaseUrl}/verify/{c.Id}";
+        var revoked = c.IsRevoked ? $"<p class=\"revoked\">WIDERRUFEN am {c.RevokedAt?.ToString("dd.MM.yyyy")} — {E(c.RevokedReason)}</p>" : "";
+        return $$$"""
+            <!doctype html>
+            <html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>Zertifikat {{{E(c.Number)}}}</title>
+            <style>
+            body{font-family:Segoe UI,Arial,sans-serif;background:#f4f1ea;margin:0;padding:2rem;color:#1d2b2a}
+            .cert{max-width:46rem;margin:0 auto;background:#fff;border:8px double #2aa79b;padding:2.5rem 2rem;text-align:center}
+            h1{margin:.2rem 0 1.2rem;font-size:2rem;letter-spacing:.04em}
+            .name{font-size:1.6rem;font-weight:700;margin:.6rem 0}.module{font-size:1.35rem;font-weight:600;margin:.6rem 0}
+            .grade{display:inline-block;margin:1rem 0;padding:.4rem 1rem;border:2px solid #2aa79b;border-radius:2rem;font-weight:700}
+            .meta{color:#4a5a59;font-size:.9rem;line-height:1.6;margin-top:1.4rem;word-break:break-all}.revoked{color:#b3261e;font-weight:700}
+            .jwt{margin-top:1.5rem;text-align:left}.jwt textarea{width:100%;font:.75rem monospace;box-sizing:border-box}.jwt button{padding:.4rem 1rem;cursor:pointer}
+            @media print{.noprint{display:none}body{background:#fff;padding:0}.cert{border-width:6px}}
+            </style></head><body><main class="cert">
+            <p>LearnCards</p><h1>Zertifikat</h1>
+            <p>Hiermit wird bestätigt, dass</p><p class="name">{{{E(c.LearnerName)}}}</p>
+            <p>das Lernmodul</p><p class="module">{{{E(c.ModuleName)}}}{{{(c.ModuleVersion > 0 ? " (Version " + c.ModuleVersion + ")" : "")}}}</p>
+            <p>erfolgreich abgeschlossen hat.</p>
+            <p class="grade">Ergebnis {{{c.ScorePercent.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)}}} % · {{{E(grade)}}} · bestanden (Bestehensgrenze {{{c.PassPercent}}} %)</p>
+            {{{revoked}}}
+            <p class="meta">Ausgestellt am {{{c.IssuedAt.ToLocalTime():dd.MM.yyyy}}} · Zertifikatsnummer {{{E(c.Number)}}}<br>Aussteller: {{{E(IssuerId)}}}<br>Prüfung online: {{{E(verify)}}}<br>Digitales Open Badge (signiert) über „Badge herunterladen“ in LearnCards.</p>
+            <section class="noprint jwt"><h2>Digitaler Nachweis (JWT)</h2>
+            <p>Zum Prüfen unter <a href="{{{E(BaseUrl)}}}/verify">{{{E(BaseUrl)}}}/verify</a> einfügen.</p>
+            <textarea id="jwt" readonly rows="5" aria-label="Badge als JWT">{{{E(c.BadgeJws)}}}</textarea>
+            <p><button type="button" id="cp">JWT kopieren</button> <span id="ok" role="status"></span></p></section>
+            </main>
+            <script>
+            document.getElementById("cp").onclick=function(){var t=document.getElementById("jwt");t.select();var done=function(){document.getElementById("ok").textContent="Kopiert."};
+            if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(t.value).then(done)}else{document.execCommand("copy");done()}};
+            </script></body></html>
+            """;
     }
 
     // ─── Abruf ──────────────────────────────────────────────────────────────
@@ -236,7 +282,8 @@ public sealed class CertificateService
 
         var jv = _signer.Verify(jws);
         v.SignatureValid = jv.SignatureValid; v.SignatureError = jv.Error;
-        v.IssuerValid = jv.SignatureValid && jv.Payload?["issuer"]?["id"]?.GetValue<string>() == IssuerId;
+        v.IssuerValid = jv.SignatureValid && (jv.Payload?["issuer"]?["id"]?.GetValue<string>() is { } iss && (iss == IssuerId || iss.EndsWith("/badges/issuer", StringComparison.Ordinal)));
+        // Maßgeblich ist die gültige Signatur mit dem Schlüssel dieser Installation; die Aussteller-URL darf sich ändern (Test-/Entwicklungssystem, Umzug der Domain).
         if (jv.SignatureValid && embedded is not null) v.ContentMatches = JsonNode.DeepEquals(embedded, jv.Payload);
         v.BadgeHash = BadgeSigner.HashHex(jws);
         if (jv.Payload is not null)

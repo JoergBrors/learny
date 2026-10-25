@@ -133,6 +133,12 @@ if (!app.Environment.IsDevelopment())
 }
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
 
+if (app.Environment.IsDevelopment() && string.IsNullOrEmpty(cfg.Blockchain.PublicBaseUrl))
+{
+    // Entwicklung ohne PUBLIC_BASE_URL: Badge-URLs zeigen auf die tatsächlich genutzte Adresse (Host/Port der Anfrage).
+    var certSvc = app.Services.GetRequiredService<CertificateService>();
+    app.Use(async (ctx, next) => { certSvc.ObservedOrigin ??= $"{ctx.Request.Scheme}://{ctx.Request.Host}"; await next(); });
+}
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();

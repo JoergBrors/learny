@@ -1,0 +1,70 @@
+@page "/verify"
+@page "/verify/{Id}"
+@attribute [AllowAnonymous]
+@rendermode InteractiveServer
+@layout Layout.MainLayout
+@using System.Text.Json
+@using LearnCards.Web.Api
+@using System.Text.Json.Nodes
+@inject CertificateService Certs
+
+<PageTitle>Zertifikat prüfen — LearnCards</PageTitle>
+
+<div class="card panel" style="max-width:46rem;margin:1.5rem auto">
+    <h1 class="panel-title">Zertifikat prüfen</h1>
+    <p class="muted">Öffentliche Prüfung ohne Anmeldung. Angezeigt werden nur Status und Nachweisdaten, keine Angaben zu Lernenden oder privaten Modulen.</p>
+
+    @if (!string.IsNullOrEmpty(Id))
+    {
+        @if (_status is null)
+        {
+            <p class="badge" role="alert">Kein Zertifikat mit dieser Kennung gefunden.</p>
+        }
+        else
+        {
+            var revoked = Str("status") == "revoked";
+            <p class="@(revoked ? "badge" : "badge badge-pass")" role="status">@(revoked ? "✖ Widerrufen" : "✔ Gültig — von LearnCards ausgestellt")</p>
+            <dl>
+                <dt>Zertifikatsnummer</dt><dd>@Str("number")</dd>
+                @if (Str("module_name") is { Length: > 0 } mn) { <dt>Modul</dt><dd>@mn @(Str("module_version") is { Length: > 0 } mv && mv != "0" ? $"(Version {mv})" : "")</dd> }
+                <dt>Ausgestellt am</dt><dd>@(DateTime.TryParse(Str("issued_at"), out var d) ? d.ToLocalTime().ToString("dd.MM.yyyy") : "")</dd>
+                @if (revoked) { <dt>Widerrufen</dt><dd>@Str("revoked_reason")</dd> }
+                <dt>Blockchain</dt><dd>@(_status["chain"]?["label"]?.GetValue<string>())@(_status["chain"]?["network_label"] is { } nl && _status["chain"]?["status"]?.GetValue<string>() == "confirmed" ? $" · {nl.GetValue<string>()}" : "")</dd>
+                @if (_status["chain"]?["explorer_url"]?.GetValue<string>() is { Length: > 0 } ex && ex.StartsWith("https://")) { <dt>Transaktion</dt><dd><a href="@ex" rel="noopener noreferrer" target="_blank">Im Explorer ansehen</a></dd> }
+                <dt>Prüfsumme (SHA-256)</dt><dd style="word-break:break-all"><code>@Str("badge_hash")</code></dd>
+            </dl>
+        }
+    }
+
+    <h2 class="panel-title">Badge-Datei prüfen</h2>
+    <p class="muted">Füge den Inhalt einer heruntergeladenen Badge-Datei (JSON oder JWT) ein. Die Signatur wird mit dem Schlüssel dieser Installation geprüft.</p>
+    <textarea class="input" rows="6" style="width:100%" @bind="_input" @bind:event="oninput" aria-label="Badge-Inhalt" maxlength="20000"></textarea>
+    <p><button class="btn btn-primary" @onclick="CheckAsync" disabled="@string.IsNullOrWhiteSpace(_input)">Prüfen</button></p>
+    @if (_result is { } v)
+    {
+        <p class="@(v.Valid ? "badge badge-pass" : "badge")" role="status">@(v.Valid ? "✔ Signatur gültig, Aussteller bestätigt" : "✖ Nicht gültig")</p>
+        <ul>
+            <li>Signatur: @(v.SignatureValid ? "gültig" : v.SignatureError ?? "ungültig")</li>
+            <li>Inhalt unverändert: @(v.ContentMatches is null ? "nicht geprüft" : v.ContentMatches == true ? "ja" : "nein")</li>
+            <li>Zertifikat bekannt: @(v.Known ? "ja" : "nein")@(v.Revoked ? " — widerrufen" : "")</li>
+        </ul>
+    }
+</div>
+
+@code {
+    [Parameter] public string? Id { get; set; }
+    private JsonNode? _status;
+    private string _input = "";
+    private BadgeVerification? _result;
+
+    private string Str(string key) => _status?[key]?.ToString() ?? "";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _status = null;
+        if (!string.IsNullOrEmpty(Id) && await Certs.GetPublicStatusAsync(Id) is { } s)
+            _status = JsonSerializer.SerializeToNode(s, AppJson.Options);
+    }
+
+    private async Task CheckAsync() => _result = await Certs.VerifyAsync(_input.Length > 20000 ? _input[..20000] : _input);
+}

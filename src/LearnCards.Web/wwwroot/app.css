@@ -757,3 +757,8 @@ a.user-chip { text-decoration: none; }
   .preview-overlay-head { cursor: default; }
   .preview-overlay-hint { display: none; }
 }
+
+/* ─── Bestanden / Zertifikat (ADR 0021) ─────────────────────────── */
+.badge-pass { background: color-mix(in srgb, var(--ok) 16%, var(--surface)); color: var(--ok); border: 1px solid color-mix(in srgb, var(--ok) 55%, var(--border)); border-radius: 999px; padding: .15rem .6rem; font-size: .8rem; font-weight: 700; display: inline-block; }
+.module-pass { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin: .4rem 0 0; }
+.cert-filter { max-width: 28rem; }
