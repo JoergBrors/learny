@@ -519,7 +519,7 @@ jobs:
           }
 
       - name: Prepare Secure Config And Key Paths
-        shell: pwsh
+        shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
           Import-Module WebAdministration
@@ -617,13 +617,19 @@ jobs:
           [IO.File]::WriteAllText($tmp, (($lines -join "`n") + "`n"), (New-Object Text.UTF8Encoding($false)))
           Set-StrictAcl -Path $tmp -PoolRights "R" -Container $false
           if (Test-Path -LiteralPath $envFile) { Set-StrictAcl -Path $envFile -PoolRights "R" -Container $false }   # bekannte ACL, damit der atomare Austausch möglich ist
-          [IO.File]::Move($tmp, $envFile, $true)
+          if (Test-Path -LiteralPath $envFile) { [IO.File]::Replace($tmp, $envFile, $null) } else { [IO.File]::Move($tmp, $envFile) }
           Write-Host ".env geschützt abgelegt ($envFile); $keep vorhandene Werte statt leerer Platzhalter beibehalten."
 
           # 5. App-Pool: Benutzerprofil laden (CNG), Pfad der .env als Umgebungsvariable (kein Geheimnis)
           $poolPath = "IIS:\AppPools\$poolName"
           Set-ItemProperty $poolPath -Name processModel.loadUserProfile -Value $true
-          if ((Get-ItemProperty $poolPath -Name processModel.identityType).ToString() -ne "ApplicationPoolIdentity") { throw "App-Pool läuft nicht als ApplicationPoolIdentity." }
+          function Get-PoolValue([string]$Name) {
+            $v = Get-ItemProperty $poolPath -Name $Name
+            if ($null -ne $v -and $v.PSObject.Properties["Value"]) { $v = $v.Value }
+            return $v
+          }
+          $identityType = [string](Get-PoolValue "processModel.identityType")
+          if ($identityType -notin @("ApplicationPoolIdentity", "4")) { throw "App-Pool läuft nicht als ApplicationPoolIdentity (gefunden: $identityType)." }
           $filter = "system.applicationHost/applicationPools/add[@name='$poolName']/environmentVariables"
           try { Remove-WebConfigurationProperty -PSPath "MACHINE/WEBROOT/APPHOST" -Filter $filter -Name "." -AtElement @{ name = "ENV_FILE" } -ErrorAction Stop } catch { }
           Add-WebConfigurationProperty -PSPath "MACHINE/WEBROOT/APPHOST" -Filter $filter -Name "." -Value @{ name = "ENV_FILE"; value = $envFile }
@@ -634,7 +640,7 @@ jobs:
           # 7. Berechtigungen erneut prüfen, bevor die Anwendung startet
           foreach ($p in @($configDir, $envFile, $keysDir)) { Assert-NoBroadAccess $p }
           if ($keyExists) { Assert-NoBroadAccess $keyFile }
-          if ((Get-ItemProperty $poolPath -Name processModel.loadUserProfile).Value -ne $true) { throw "loadUserProfile ist nicht aktiv." }
+          if (-not [System.Convert]::ToBoolean((Get-PoolValue "processModel.loadUserProfile"))) { throw "loadUserProfile ist nicht aktiv." }
 
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "## Sichere Konfiguration"
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ("- .env: ``{0}``" -f $envFile)
