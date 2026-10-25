@@ -638,12 +638,17 @@ jobs:
           Add-WebConfigurationProperty -PSPath "MACHINE/WEBROOT/APPHOST" -Filter $filter -Name "." -Value @{ name = "ENV_FILE"; value = $envFile }
 
           # 6. Request Filtering muss verfügbar sein (web.config sperrt .env/.pem/data/keys/logs)
-          $rfDll = Join-Path $env:windir "System32\inetsrv\requestfiltering.dll"
-          if (-not (Test-Path -LiteralPath $rfDll) -and (Get-Command Install-WindowsFeature -ErrorAction SilentlyContinue)) {
+          # Request-Filtering-Modul: modrqflt.dll (Windows-Feature Web-Filtering)
+          function Test-RequestFiltering {
+            if (Test-Path -LiteralPath (Join-Path $env:windir "System32\inetsrv\modrqflt.dll")) { return $true }
+            if (Get-Command Get-WindowsFeature -ErrorAction SilentlyContinue) { return [bool](Get-WindowsFeature -Name Web-Filtering).Installed }
+            return $false
+          }
+          if (-not (Test-RequestFiltering) -and (Get-Command Install-WindowsFeature -ErrorAction SilentlyContinue)) {
             Write-Host "IIS Request Filtering fehlt - installiere Windows-Feature Web-Filtering."
             Install-WindowsFeature Web-Filtering | Out-Null
           }
-          if (-not (Test-Path -LiteralPath $rfDll)) { throw "IIS Request Filtering (Web-Filtering) ist nicht installiert und konnte nicht installiert werden - die web.config ohne dieses Modul würde HTTP 500.19 verursachen." }
+          if (-not (Test-RequestFiltering)) { throw "IIS Request Filtering (Web-Filtering) ist nicht installiert und konnte nicht installiert werden - die web.config ohne dieses Modul würde HTTP 500.19 verursachen." }
 
           # 7. Berechtigungen erneut prüfen, bevor die Anwendung startet
           foreach ($p in @($configDir, $envFile, $keysDir)) { Assert-NoBroadAccess $p }
