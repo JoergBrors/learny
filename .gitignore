@@ -10,3 +10,7 @@ data/
 *.db-wal
 .env
 demoodule/kvno_seed_module.json
+
+# Privater Badge-Signaturschlüssel (nie committen)
+src/LearnCards.Web/Data/badge-signing-key.pem
+*.pem
