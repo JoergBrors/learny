@@ -558,9 +558,12 @@ jobs:
           }
           function Assert-NoBroadAccess {
             param([string]$Path)
-            $acl = (& icacls.exe $Path) -join "`n"
-            foreach ($bad in @("Everyone", "BUILTIN\Users", "Authenticated Users", "NT AUTHORITY\INTERACTIVE")) {
-              if ($acl -match [regex]::Escape($bad)) { throw "Zu weitreichende Berechtigung ('$bad') auf '$Path'." }
+            # Sprachunabhängig über SIDs: Jeder, Benutzer, Authentifizierte Benutzer, Interaktiv
+            $broad = @("S-1-1-0", "S-1-5-32-545", "S-1-5-11", "S-1-5-4")
+            foreach ($rule in (Get-Acl -LiteralPath $Path).Access) {
+              if ($rule.AccessControlType -ne "Allow") { continue }
+              $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
+              if ($broad -contains $sid) { throw "Zu weitreichende Berechtigung ($sid) auf $Path." }
             }
           }
 
@@ -631,11 +634,16 @@ jobs:
           $identityType = [string](Get-PoolValue "processModel.identityType")
           if ($identityType -notin @("ApplicationPoolIdentity", "4")) { throw "App-Pool läuft nicht als ApplicationPoolIdentity (gefunden: $identityType)." }
           $filter = "system.applicationHost/applicationPools/add[@name='$poolName']/environmentVariables"
-          try { Remove-WebConfigurationProperty -PSPath "MACHINE/WEBROOT/APPHOST" -Filter $filter -Name "." -AtElement @{ name = "ENV_FILE" } -ErrorAction Stop } catch { }
+          try { Remove-WebConfigurationProperty -PSPath "MACHINE/WEBROOT/APPHOST" -Filter $filter -Name "." -AtElement @{ name = "ENV_FILE" } -ErrorAction Stop -WarningAction SilentlyContinue } catch { }
           Add-WebConfigurationProperty -PSPath "MACHINE/WEBROOT/APPHOST" -Filter $filter -Name "." -Value @{ name = "ENV_FILE"; value = $envFile }
 
           # 6. Request Filtering muss verfügbar sein (web.config sperrt .env/.pem/data/keys/logs)
-          if (-not (Test-Path (Join-Path $env:windir "System32\inetsrv\requestfiltering.dll"))) { throw "IIS Request Filtering (Web-Filtering) ist nicht installiert." }
+          $rfDll = Join-Path $env:windir "System32\inetsrv\requestfiltering.dll"
+          if (-not (Test-Path -LiteralPath $rfDll) -and (Get-Command Install-WindowsFeature -ErrorAction SilentlyContinue)) {
+            Write-Host "IIS Request Filtering fehlt - installiere Windows-Feature Web-Filtering."
+            Install-WindowsFeature Web-Filtering | Out-Null
+          }
+          if (-not (Test-Path -LiteralPath $rfDll)) { throw "IIS Request Filtering (Web-Filtering) ist nicht installiert und konnte nicht installiert werden - die web.config ohne dieses Modul würde HTTP 500.19 verursachen." }
 
           # 7. Berechtigungen erneut prüfen, bevor die Anwendung startet
           foreach ($p in @($configDir, $envFile, $keysDir)) { Assert-NoBroadAccess $p }
