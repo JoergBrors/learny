@@ -112,3 +112,7 @@ Mit dem Image [`joergb23/learny-mcp`](https://hub.docker.com/r/joergb23/learny-m
 - Das Image enthält keine Datenbank, keine Schlüssel und keine Zugangsdaten.
 
 Lizenz: MIT · Quelle: <https://github.com/JoergBrors/learny>
+
+## Neu: Module und Themen als JSON (ab Version 0.1.11)
+
+Module (Karten, Bilder, Quiz, Konfiguration) und Themen (Lernpfade aus eigenen Modulen mit Modul- und Abschlussprüfung) lassen sich vollständig als JSON exportieren und importieren (`learny-module`, `learny-topic`, stabile Modulreferenz `reference_id`/`module_ref`); globale Module werden vor der Verwendung in Themen in eigene Module geklont. Importe erzeugen private Objekte bzw. Entwürfe und veröffentlichen nie; Dateien sind auf 30 MB begrenzt (Kestrel-Standard). Beim Update wird die Datenbank automatisch um `modules.reference_id` ergänzt (idempotent, keine Konfigurationsänderung). Schemas: `/api/schema/import/module`, `/api/schema/import/topic`. Details: [ADR 0028](https://github.com/JoergBrors/learny/blob/main/docs/adr/0028-themenmodule-json-und-mcp-verwaltung.md).

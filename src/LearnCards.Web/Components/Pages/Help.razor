@@ -383,6 +383,7 @@ Hier sind meine Folien / Notizen:
         <h3>MCP-Werkzeuge für Themen und Module</h3>
         <p class="muted">Ein KI-Client arbeitet nur mit seinem Benutzertoken und nur mit eigenen Inhalten: <code>get_topic_import_schema</code> → <code>list_modules</code> → <code>create_topic</code> (oder <code>import_topic</code>) → <code>get_topic</code>; Anpassungen mit <code>update_topic</code> (ersetzt den Entwurf), Sicherung mit <code>export_topic</code>. Für Module: <code>get_module_import_schema</code>, <code>export_module</code>, <code>import_module</code> und <code>clone_global_module</code>. Lesen: <code>list_topics</code>, <code>get_topic</code>, <code>get_topic_exam_structure</code>. Nicht über MCP möglich: Veröffentlichen, globale Freigaben, Administration, Freigaben und Zuweisungen an andere Benutzer.</p>
         <p class="muted">Prüfungen werden serverseitig bewertet und funktionieren auch ohne KI-Schlüssel.</p>
+        <p class="muted"><strong>Grenzen:</strong> Modul- und Themen-JSON dürfen höchstens 30 MB groß sein (die Weboberfläche nimmt Dateien bis 28 MB an); je Karte höchstens 5 Bilder à 2 MiB, je Modul höchstens 2000 Karten. Referenzen (<code>module_ref</code>/<code>reference_id</code>) werden nur unter <em>deinen</em> eigenen Modulen aufgelöst — dieselbe GUID bei einem anderen Benutzer ist ein anderes Modul. Fehlerhafte Importe legen nichts an.</p>
     </section>
 
     <section class="card panel">

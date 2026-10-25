@@ -113,3 +113,13 @@ docker run -i --rm \
 Logs: `docker compose logs -f mcp`. Der Server protokolliert keine Tokens oder Schlüssel.
 
 Lizenz: MIT · Quelle: <https://github.com/JoergBrors/learny>
+
+## Werkzeuge für Module und Themen (ab Version 0.1.11)
+
+Zusätzlich zu den Karten-Werkzeugen (`get_import_schema`, `import_cards`, `list_modules`, `list_cards` …) bietet der Server — immer nur im Bereich des angemeldeten Benutzers:
+
+- Lesen: `list_topics`, `get_topic`, `get_topic_exam_structure`.
+- Themenentwürfe per JSON: `get_topic_import_schema`, `create_topic`, `import_topic`, `update_topic` (ersetzt nur den Entwurf), `export_topic`.
+- Module per JSON: `get_module_import_schema`, `export_module`, `import_module`, `clone_global_module` (globales Modul in ein eigenes klonen).
+
+Module werden in Themen über die stabile Referenz (`module_ref` = `reference_id`) und nur aus **eigenen** Modulen zugeordnet. Veröffentlichen, globale Freigaben, Freigaben/Zuweisungen an andere Benutzer und Administration sind über MCP nicht möglich; der Dienstschlüssel `MCP_API_KEY` gewährt keinen Datenzugriff. Dokumentation: [ADR 0028](https://github.com/JoergBrors/learny/blob/main/docs/adr/0028-themenmodule-json-und-mcp-verwaltung.md).
