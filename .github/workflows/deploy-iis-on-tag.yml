@@ -576,6 +576,13 @@ jobs:
           function Set-StrictAcl {
             param([string]$Path, [string]$PoolRights, [bool]$Container)
             $inherit = if ($Container) { "(OI)(CI)" } else { "" }
+            # Vom App-Pool angelegte Dateien (z. B. der Marker des Badge-Schlüssels) gehören dem Pool-Konto: Das Deploy-Konto übernimmt zuerst das Eigentum
+            # (Administratoren dürfen das), sonst scheitert die Rechteänderung mit "Zugriff verweigert".
+            if (Test-Path -LiteralPath $Path) {
+              & takeown.exe /F $Path 2>&1 | Out-Null
+              & icacls.exe $Path /grant "*S-1-5-32-544:${inherit}F" 2>&1 | Out-Null
+              $global:LASTEXITCODE = 0
+            }
             Invoke-Icacls @($Path, "/inheritance:r")
             Invoke-Icacls @($Path, "/grant:r", "*S-1-5-18:${inherit}F", "*S-1-5-32-544:${inherit}F", "*${runnerSid}:${inherit}F", "${poolIdentity}:${inherit}${PoolRights}")
           }
