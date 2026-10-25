@@ -106,14 +106,33 @@ async function main() {
     check(await ev(`!!document.querySelectorAll('.rte-surface')[${defIdx}].querySelector('a[href^="https://learn.microsoft.com"]')`), 'Link: https-Adresse wird gesetzt');
     await shot('02-editor-formatiert');
 
-    // ── Vorschau
+    // ── Vorschau als verschiebbares Overlay (Live-Aktualisierung, Position bleibt erhalten)
     check(await click('.editor-bar .btn', 'Vorschau'), 'Vorschau öffnen');
-    check(await waitFor(`!!document.querySelector('.editor-preview .rt')`, 'Vorschau'), 'Vorschau zeigt den formatierten Text');
-    if (process.env.DEBUG_EDITOR) console.log('  DEBUG preview=', await ev(`document.querySelector('.editor-preview').innerHTML.slice(0,600)`));
+    check(await waitFor(`!!document.querySelector('.preview-overlay .editor-preview .rt')`, 'Vorschau'), 'Vorschau erscheint als Overlay neben dem Editor (Formular bleibt sichtbar)');
+    check(await ev(`!!document.querySelector('.editor-form') && getComputedStyle(document.querySelector('.preview-overlay')).position === 'fixed'`), 'Overlay ist nicht modal: das Formular bleibt bedienbar');
+    if (process.env.DEBUG_EDITOR) console.log('  DEBUG preview=', await ev(`document.querySelector('.editor-preview').innerHTML.slice(0,300)`));
     check(await ev(`(() => { const p = document.querySelector('.editor-preview'); return !!p.querySelector('strong') && !!p.querySelector('ul li') && !!p.querySelector('a[rel*=noopener]'); })()`), 'Vorschau: fett, Liste und Link (rel=noopener) werden serverseitig gerendert');
-    await shot('03-vorschau');
-    await click('.editor-bar .btn', 'Bearbeiten'); await sleep(500);
-    check(await ev(`document.querySelectorAll('.rte-surface')[${await surfaceIndex('Antwort / Definition')}].innerHTML.includes('<li>')`), 'Zurück zum Bearbeiten: Inhalt bleibt erhalten');
+    await typeInSurface(defIdx, ' LIVEWORT');
+    check(await waitFor(`document.querySelector('.preview-overlay .editor-preview').textContent.includes('LIVEWORT')`, 'live'), 'Live-Vorschau: Eingaben im Textfeld erscheinen sofort in der Vorschau');
+    await labelInput('Begriff', 'Live-Titel'); 
+    check(await waitFor(`document.querySelector('.preview-overlay .editor-preview h2').textContent === 'Live-Titel'`, 'live2'), 'Live-Vorschau: Änderung des Titels erscheint sofort');
+    const rect0 = await ev(`(() => { const r = document.querySelector('.preview-overlay').getBoundingClientRect(); const h = document.querySelector('#preview-overlay-head').getBoundingClientRect(); return { l: r.left, t: r.top, w: r.width, hx: h.left + 40, hy: h.top + h.height / 2 }; })()`);
+    const mouse = (type, x, y) => send('Input.dispatchMouseEvent', { type, x, y, button: 'left', buttons: type === 'mouseReleased' ? 0 : 1, clickCount: 1, pointerType: 'mouse' });
+    await mouse('mousePressed', rect0.hx, rect0.hy); await mouse('mouseMoved', rect0.hx - 150, rect0.hy + 60); await mouse('mouseMoved', rect0.hx - 320, rect0.hy + 140); await mouse('mouseReleased', rect0.hx - 320, rect0.hy + 140); await sleep(300);
+    const rect1 = await ev(`(() => { const r = document.querySelector('.preview-overlay').getBoundingClientRect(); return { l: r.left, t: r.top }; })()`);
+    check(Math.abs(rect1.l - (rect0.l - 320)) < 6 && Math.abs(rect1.t - (rect0.t + 140)) < 6, 'Overlay lässt sich am Kopf verschieben (' + Math.round(rect1.l) + ',' + Math.round(rect1.t) + ')');
+    await shot('03-vorschau-overlay');
+    await click('.preview-overlay-actions .btn', '✕'); await sleep(500);
+    check(await ev(`!document.querySelector('.preview-overlay')`), 'Vorschau schließen');
+    await click('.editor-bar .btn', 'Vorschau'); await waitFor(`!!document.querySelector('.preview-overlay')`, 'Overlay'); await sleep(400);
+    const rect2 = await ev(`(() => { const r = document.querySelector('.preview-overlay').getBoundingClientRect(); return { l: r.left, t: r.top }; })()`);
+    check(Math.abs(rect2.l - rect1.l) < 3 && Math.abs(rect2.t - rect1.t) < 3, 'Nach dem Schließen und erneuten Öffnen erscheint das Overlay an derselben Stelle');
+    await click('.preview-overlay-actions .btn', '⟲'); await sleep(400);
+    const rect3 = await ev(`(() => { const r = document.querySelector('.preview-overlay').getBoundingClientRect(); return { l: r.left, t: r.top, ok: r.right <= innerWidth && r.top >= 0 }; })()`);
+    check(rect3.ok && Math.abs(rect3.l - rect0.l) < 6 && Math.abs(rect3.t - rect0.t) < 6, 'Zurücksetzen bringt das Overlay an die Standardposition');
+    await labelInput('Begriff', 'Editor-Begriff');
+    await click('.preview-overlay-actions .btn', '✕'); await sleep(300);
+    check(await ev(`document.querySelectorAll('.rte-surface')[${await surfaceIndex('Antwort / Definition')}].innerHTML.includes('<li>')`), 'Editor-Inhalt bleibt beim Öffnen/Schließen der Vorschau erhalten');
 
     // ── Bild hochladen
     const doc = await send('DOM.getDocument', { depth: -1 });
@@ -214,7 +233,7 @@ async function main() {
       definition: '<script>window.__xss=1</script><img src=x onerror="window.__xss=2">\n\n[Klick](javascript:window.__xss=3) und [ok](https://example.com/?a=1&b=2)\n\n<b onclick="window.__xss=4">x</b>' });
     await send('Page.navigate', { url: `${BASE}/module/${moduleId}/edit?card=${second.id}` });
     await waitFor(`!!document.querySelector('.editor-form')`, 'Karte laden'); await sleep(2000);
-    await click('.editor-bar .btn', 'Vorschau'); await sleep(600);
+    await click('.editor-bar .btn', 'Vorschau'); await sleep(900);
     check(await ev(`(() => { const p = document.querySelector('.editor-preview'); return !!p && !p.querySelector('script, img, [onclick], [onerror]') && !p.querySelector('[href^="javascript:"], [src]') && p.textContent.includes('<script>'); })()`), 'Sicherheit: Skript, Event-Handler und javascript:-Link erscheinen in der Vorschau nur als Text');
     check(await ev(`window.__xss === undefined`), 'Sicherheit: kein eingeschleuster Code wurde ausgeführt');
     check(await ev(`(() => { const a = [...document.querySelectorAll('.editor-preview a')]; return a.length === 1 && a[0].href.startsWith('https://example.com/') && a[0].rel.includes('noopener'); })()`), 'Sicherheit: nur der https-Link wird als Link ausgegeben');
@@ -226,6 +245,12 @@ async function main() {
     await waitFor(`!!document.querySelector('.editor-form')`, 'Karte'); await sleep(2000);
     await setViewport(390, 844, true); await sleep(500);
     await shot('06-editor-mobil-hell');
+    await click('.editor-bar .btn', 'Vorschau'); await sleep(900);
+    if (process.env.DEBUG_EDITOR) console.log('  DEBUG sheet', await ev(`JSON.stringify([document.querySelector('.preview-overlay').getBoundingClientRect(), innerWidth, innerHeight])`));
+    check(await ev(`(() => { const o = document.querySelector('.preview-overlay'); if (!o) return false; const r = o.getBoundingClientRect(); return r.left <= 1 && r.right >= document.documentElement.clientWidth - 1 && r.bottom >= innerHeight - 1 && r.height < innerHeight * 0.6; })()`), 'Mobil: Vorschau liegt als Fenster am unteren Rand (Formular darüber weiter bedienbar)');
+    await shot('06b-editor-mobil-vorschau');
+    check(!(await hScroll()), 'Mobil: kein horizontaler Scroll mit geöffneter Vorschau');
+    await click('.preview-overlay-actions .btn', '✕'); await sleep(300);
     check(!(await hScroll()), 'Mobil (390 px): kein horizontaler Seitenscroll im Editor');
     check(await ev(`[...document.querySelectorAll('.rte-toolbar .btn, .editor-bar .btn')].every(b => b.getBoundingClientRect().height >= 28 && b.getBoundingClientRect().right <= innerWidth + 1)`), 'Mobil: Bedienelemente der Werkzeugleiste bleiben im sichtbaren Bereich');
     await setTheme('dark'); await sleep(400); await shot('07-editor-mobil-dunkel');

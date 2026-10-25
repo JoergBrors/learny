@@ -192,5 +192,36 @@ window.lcRte = (function () {
             window.onbeforeunload = on ? (e => { e.preventDefault(); e.returnValue = ''; return ''; }) : null;
         },
         wasConfirmed() { return Date.now() < confirmedUntil; },
+        // Verschiebbares Vorschau-Fenster (nicht modal): Position/Größe bleiben über Schließen und Öffnen erhalten (localStorage, optional)
+        dragInit(id, headId) {
+            const el = document.getElementById(id), head = document.getElementById(headId);
+            if (!el || !head) return;
+            const KEY = 'lc-preview-pos';
+            const clamp = (x, y) => [Math.min(Math.max(x, 80 - el.offsetWidth), innerWidth - 80), Math.min(Math.max(y, 0), innerHeight - 40)];
+            const place = (x, y) => { [x, y] = clamp(x, y); el.style.left = x + 'px'; el.style.top = y + 'px'; el.style.right = 'auto'; el.style.bottom = 'auto'; };
+            const save = () => { try { localStorage.setItem(KEY, JSON.stringify({ x: el.offsetLeft, y: el.offsetTop, w: el.offsetWidth, h: el.offsetHeight })); } catch { } };
+            if (innerWidth < 700) return;   // schmale Bildschirme: festes Fenster am unteren Rand (CSS)
+            try {
+                const saved = JSON.parse(localStorage.getItem(KEY) || 'null');
+                if (saved) { if (saved.w) el.style.width = saved.w + 'px'; if (saved.h) el.style.height = saved.h + 'px'; place(saved.x, saved.y); }
+            } catch { }
+            let drag = null;
+            head.addEventListener('pointerdown', e => {
+                if (e.target.closest('button')) return;
+                drag = { dx: e.clientX - el.offsetLeft, dy: e.clientY - el.offsetTop };
+                head.setPointerCapture(e.pointerId);
+                e.preventDefault();
+            });
+            head.addEventListener('pointermove', e => { if (drag) place(e.clientX - drag.dx, e.clientY - drag.dy); });
+            const end = () => { if (drag) { drag = null; save(); } };
+            head.addEventListener('pointerup', end);
+            head.addEventListener('pointercancel', end);
+            el.addEventListener('mouseup', save);   // nach Größenänderung (resize: both)
+        },
+        dragReset(id) {
+            const el = document.getElementById(id);
+            if (el) ['left', 'top', 'right', 'bottom', 'width', 'height'].forEach(k => el.style[k] = '');
+            try { localStorage.removeItem('lc-preview-pos'); } catch { }
+        },
     };
 })();

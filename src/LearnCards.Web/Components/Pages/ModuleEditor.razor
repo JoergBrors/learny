@@ -89,7 +89,7 @@
                     <div class="editor-bar" role="status" aria-live="polite">
                         <span class="editor-state @(dirty ? "editor-state-dirty" : "editor-state-clean")">@(dirty ? "● Ungespeicherte Änderungen" : (_draft.Id is null ? "Neue Karte" : "Gespeichert"))</span>
                         <div class="editor-bar-actions">
-                            <button class="btn btn-ghost" @onclick="TogglePreview">@(_preview ? "Bearbeiten" : "👁 Vorschau")</button>
+                            <button class="btn btn-ghost" @onclick="TogglePreview">@(_preview ? "Vorschau schließen" : "👁 Vorschau")</button>
                             <button class="btn btn-ghost" @onclick="DiscardAsync" disabled="@(!dirty)">Änderungen verwerfen</button>
                             <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_saving">@(_saving ? "Speichert…" : "Speichern")</button>
                         </div>
@@ -103,196 +103,207 @@
                     }
                     @if (_status is not null) { <div class="alert alert-ok" role="status">@_status</div> }
 
-                    @if (_preview)
-                    {
-                        <article class="editor-preview" aria-label="Vorschau">
-                            <span class="pill pill-brand">@_draft.Category</span>
-                            <h2>@_draft.Term</h2>
-                            <p class="editor-preview-q">@_draft.Question</p>
-                            <RichTextView Value="@_draft.Definition" />
-                            @if (!string.IsNullOrWhiteSpace(_draft.HowItWorks)) { <h3>Wie funktioniert es?</h3><RichTextView Value="@_draft.HowItWorks" /> }
-                            @if (!string.IsNullOrWhiteSpace(_draft.Context)) { <h3>Kontext</h3><RichTextView Value="@_draft.Context" /> }
-                            @if (!string.IsNullOrWhiteSpace(_draft.KeyFact)) { <div class="keyfact">🎯 <strong>Key Fact:</strong><RichTextView Value="@_draft.KeyFact" /></div> }
-                            @foreach (var img in _draft.Images)
+                    <div class="editor-form">
+                        <fieldset class="editor-section">
+                            <legend>Grunddaten</legend>
+                            <div class="form-grid">
+                                <label>Kategorie <input class="input" list="editor-categories" maxlength="200" @bind="_draft.Category" @bind:event="oninput" /></label>
+                                <label>Begriff (Titel) <input class="input" maxlength="300" @bind="_draft.Term" @bind:event="oninput" /></label>
+                            </div>
+                            <datalist id="editor-categories">@foreach (var cat in _cards.Select(c => c.Category).Distinct()) { <option value="@cat"></option> }</datalist>
+                            <label class="form-label">Frage auf der Kartenvorderseite
+                                <textarea class="input" rows="2" @bind="_draft.Question" @bind:event="oninput"></textarea>
+                            </label>
+                        </fieldset>
+
+                        <fieldset class="editor-section">
+                            <legend>Texte (formatierbar)</legend>
+                            <RichTextEditor Label="Antwort / Definition" Value="@_draft.Definition" ValueChanged="v => SetText(t => t.Definition = v)" />
+                            <RichTextEditor Label="Wie funktioniert es?" Value="@_draft.HowItWorks" ValueChanged="v => SetText(t => t.HowItWorks = v)" />
+                            <RichTextEditor Label="Kontext" Value="@_draft.Context" ValueChanged="v => SetText(t => t.Context = v)" />
+                            <RichTextEditor Label="Key Fact" Value="@_draft.KeyFact" ValueChanged="v => SetText(t => t.KeyFact = v)" />
+                            <RichTextEditor Label="Referenzantwort (für die Quizbewertung)" Value="@_draft.ReferenceAnswer" ValueChanged="v => SetText(t => t.ReferenceAnswer = v)" />
+                            <label class="form-label">Chat-Prompt (Anweisung für den KI-Chat dieser Karte)
+                                <textarea class="input" rows="2" @bind="_draft.ChatPrompt" @bind:event="oninput"></textarea>
+                            </label>
+                        </fieldset>
+
+                        <fieldset class="editor-section">
+                            <legend>Offizielle Quellen</legend>
+                            @for (var i = 0; i < _draft.Sources.Count; i++)
                             {
-                                <figure class="card-image">
-                                    <img src="@ImageSrc(img)" alt="@img.Alt" loading="lazy" />
-                                    @if (!string.IsNullOrWhiteSpace(img.Caption)) { <figcaption>@img.Caption</figcaption> }
-                                </figure>
-                            }
-                            @if (_draft.Quiz.Count + _poolQs.Count > 0)
-                            {
-                                <h3>Quizfragen (richtige Antworten markiert)</h3>
-                                <ol class="editor-quiz-preview">
-                                    @foreach (var q in _draft.Quiz) { <li>@PreviewQuestion(q)</li> }
-                                    @foreach (var q in _poolQs.Where(p => p.Active)) { <li>@PreviewQuestion(QuizPoolService.ToInput(q)) <span class="pill pill-muted">@(q.Origin == "ai" ? "KI" : "Editor")</span></li> }
-                                </ol>
-                            }
-                            @if (_draft.Id is not null)
-                            {
-                                <button class="btn btn-ghost" @onclick="OpenQuizPreview" disabled="@dirty" title="@(dirty ? "Erst speichern, dann ausprobieren" : "Quiz dieser Karte ausprobieren")">📝 Quiz dieser Karte ausprobieren</button>
-                                @if (dirty) { <span class="muted"> — erst speichern</span> }
-                            }
-                        </article>
-                    }
-                    else
-                    {
-                        <div class="editor-form">
-                            <fieldset class="editor-section">
-                                <legend>Grunddaten</legend>
-                                <div class="form-grid">
-                                    <label>Kategorie <input class="input" list="editor-categories" maxlength="200" @bind="_draft.Category" @bind:event="oninput" /></label>
-                                    <label>Begriff (Titel) <input class="input" maxlength="300" @bind="_draft.Term" @bind:event="oninput" /></label>
+                                var src = _draft.Sources[i];
+                                var si = i;
+                                <div class="editor-source">
+                                    <input class="input" placeholder="Titel" aria-label="Quelle @(si + 1) Titel" @bind="src.Title" @bind:event="oninput" />
+                                    <input class="input" placeholder="https://…" aria-label="Quelle @(si + 1) Adresse" @bind="src.Url" @bind:event="oninput" />
+                                    <input class="input" placeholder="Herausgeber" aria-label="Quelle @(si + 1) Herausgeber" @bind="src.Publisher" @bind:event="oninput" />
+                                    <button type="button" class="btn btn-ghost btn-sm" aria-label="Quelle @(si + 1) entfernen" @onclick="() => RemoveSource(si)">✕</button>
                                 </div>
-                                <datalist id="editor-categories">@foreach (var cat in _cards.Select(c => c.Category).Distinct()) { <option value="@cat"></option> }</datalist>
-                                <label class="form-label">Frage auf der Kartenvorderseite
-                                    <textarea class="input" rows="2" @bind="_draft.Question" @bind:event="oninput"></textarea>
-                                </label>
-                            </fieldset>
+                            }
+                            <button type="button" class="btn btn-ghost btn-sm" @onclick="AddSource">+ Quelle</button>
+                        </fieldset>
 
-                            <fieldset class="editor-section">
-                                <legend>Texte (formatierbar)</legend>
-                                <RichTextEditor Label="Antwort / Definition" Value="@_draft.Definition" ValueChanged="v => SetText(t => t.Definition = v)" />
-                                <RichTextEditor Label="Wie funktioniert es?" Value="@_draft.HowItWorks" ValueChanged="v => SetText(t => t.HowItWorks = v)" />
-                                <RichTextEditor Label="Kontext" Value="@_draft.Context" ValueChanged="v => SetText(t => t.Context = v)" />
-                                <RichTextEditor Label="Key Fact" Value="@_draft.KeyFact" ValueChanged="v => SetText(t => t.KeyFact = v)" />
-                                <RichTextEditor Label="Referenzantwort (für die Quizbewertung)" Value="@_draft.ReferenceAnswer" ValueChanged="v => SetText(t => t.ReferenceAnswer = v)" />
-                                <label class="form-label">Chat-Prompt (Anweisung für den KI-Chat dieser Karte)
-                                    <textarea class="input" rows="2" @bind="_draft.ChatPrompt" @bind:event="oninput"></textarea>
-                                </label>
-                            </fieldset>
+                        <fieldset class="editor-section">
+                            <legend>Folienmodus (optional)</legend>
+                            <div class="form-grid">
+                                <label>Foliennummer <input class="input" type="number" min="1" @bind="_draft.SlideNumber" /></label>
+                                <label>Zielzeit (Sekunden) <input class="input" type="number" min="1" @bind="_draft.TargetTimeSec" /></label>
+                            </div>
+                        </fieldset>
 
-                            <fieldset class="editor-section">
-                                <legend>Offizielle Quellen</legend>
-                                @for (var i = 0; i < _draft.Sources.Count; i++)
-                                {
-                                    var src = _draft.Sources[i];
-                                    var si = i;
-                                    <div class="editor-source">
-                                        <input class="input" placeholder="Titel" aria-label="Quelle @(si + 1) Titel" @bind="src.Title" @bind:event="oninput" />
-                                        <input class="input" placeholder="https://…" aria-label="Quelle @(si + 1) Adresse" @bind="src.Url" @bind:event="oninput" />
-                                        <input class="input" placeholder="Herausgeber" aria-label="Quelle @(si + 1) Herausgeber" @bind="src.Publisher" @bind:event="oninput" />
-                                        <button type="button" class="btn btn-ghost btn-sm" aria-label="Quelle @(si + 1) entfernen" @onclick="() => RemoveSource(si)">✕</button>
-                                    </div>
-                                }
-                                <button type="button" class="btn btn-ghost btn-sm" @onclick="AddSource">+ Quelle</button>
-                            </fieldset>
-
-                            <fieldset class="editor-section">
-                                <legend>Folienmodus (optional)</legend>
-                                <div class="form-grid">
-                                    <label>Foliennummer <input class="input" type="number" min="1" @bind="_draft.SlideNumber" /></label>
-                                    <label>Zielzeit (Sekunden) <input class="input" type="number" min="1" @bind="_draft.TargetTimeSec" /></label>
-                                </div>
-                            </fieldset>
-
-                            <fieldset class="editor-section">
-                                <legend>Bilder (@_draft.Images.Count von @CardImageLimits.MaxImagesPerCard)</legend>
-                                <p class="muted">PNG, JPEG oder WebP, höchstens 2 MiB je Bild. Alternativtext beschreibt das Bild für Screenreader; die Bildunterschrift erscheint unter dem Bild.</p>
-                                @for (var i = 0; i < _draft.Images.Count; i++)
-                                {
-                                    var img = _draft.Images[i];
-                                    var ii = i;
-                                    <div class="editor-image">
-                                        <img src="@ImageSrc(img)" alt="@(string.IsNullOrWhiteSpace(img.Alt) ? "Bildvorschau" : img.Alt)" class="editor-image-thumb" />
-                                        <div class="editor-image-fields">
-                                            <label>Alternativtext <input class="input" maxlength="300" @bind="img.Alt" @bind:event="oninput" /></label>
-                                            <label>Bildunterschrift <input class="input" maxlength="300" @bind="img.Caption" @bind:event="oninput" /></label>
-                                            <div class="editor-image-actions">
-                                                <button type="button" class="btn btn-ghost btn-sm" aria-label="Bild @(ii + 1) nach oben" disabled="@(ii == 0)" @onclick="() => MoveImage(ii, -1)">↑</button>
-                                                <button type="button" class="btn btn-ghost btn-sm" aria-label="Bild @(ii + 1) nach unten" disabled="@(ii == _draft.Images.Count - 1)" @onclick="() => MoveImage(ii, 1)">↓</button>
-                                                @if (img.ConfirmRemove)
-                                                {
-                                                    <span class="muted">Bild wirklich entfernen?</span>
-                                                    <button type="button" class="btn btn-danger btn-sm" @onclick="() => RemoveImage(ii)">Ja, entfernen</button>
-                                                    <button type="button" class="btn btn-ghost btn-sm" @onclick="() => img.ConfirmRemove = false">Abbrechen</button>
-                                                }
-                                                else
-                                                {
-                                                    <button type="button" class="btn btn-ghost btn-sm" @onclick="() => img.ConfirmRemove = true">Bild entfernen</button>
-                                                }
-                                            </div>
-                                        </div>
-                                    </div>
-                                }
-                                @if (_draft.Images.Count < CardImageLimits.MaxImagesPerCard)
-                                {
-                                    <label class="btn btn-ghost editor-upload">🖼 Bild hinzufügen
-                                        <InputFile OnChange="OnImagesSelected" accept="image/png,image/jpeg,image/webp" class="visually-hidden" aria-label="Bild hochladen" />
-                                    </label>
-                                }
-                                @if (_imageError is not null) { <div class="alert alert-error" role="alert">@_imageError</div> }
-                            </fieldset>
-
-                            <fieldset class="editor-section">
-                                <legend>Feste Quizfragen dieser Karte (Teil des Karten-JSON)</legend>
-                                <p class="muted">Diese Fragen stehen im <code>quiz[]</code> der Karte (Import/Export) und werden <strong>mit der Karte</strong> gespeichert. Das Karten-<code>quiz[]</code> ist ihre einzige Quelle; der Fragenpool enthält davon nur eine Kopie.</p>
-                                @for (var i = 0; i < _draft.Quiz.Count; i++)
-                                {
-                                    var q = _draft.Quiz[i];
-                                    var qi = i;
-                                    <div class="editor-question">
-                                        <div class="editor-question-head"><strong>Frage @(qi + 1)</strong>
-                                            <button type="button" class="btn btn-ghost btn-sm" aria-label="Frage @(qi + 1) entfernen" @onclick="() => RemoveCardQuestion(qi)">Entfernen</button></div>
-                                        <QuizQuestionForm Model="q" FixedFourOptions="true" OnChanged="Touch" />
-                                    </div>
-                                }
-                                <button type="button" class="btn btn-ghost btn-sm" @onclick="AddCardQuestion">+ Feste Frage</button>
-                            </fieldset>
-
-                            <fieldset class="editor-section">
-                                <legend>Weitere Fragen im Fragenpool (Editor und KI)</legend>
-                                @if (_draft.Id is null)
-                                {
-                                    <p class="muted">Speichere die Karte zuerst, dann kannst du ihr Fragen aus dem Fragenpool zuordnen.</p>
-                                }
-                                else
-                                {
-                                    <p class="muted">Diese Fragen liegen im zentralen <strong>Fragenpool</strong> des Moduls (unabhängig vom Karten-JSON) und werden <strong>sofort einzeln</strong> gespeichert — nicht mit dem Button „Speichern“ der Karte. KI-generierte Fragen kannst du hier prüfen und korrigieren.</p>
-                                    @if (_poolError is not null) { <div class="alert alert-error" role="alert">@_poolError</div> }
-                                    @foreach (var pq in _poolQs)
-                                    {
-                                        var p = pq;
-                                        <div class="editor-question @(p.Active ? "" : "editor-question-off")">
-                                            <div class="editor-question-head">
-                                                <span><span class="pill pill-muted">@(p.Origin == "ai" ? "KI" : "Editor")</span> <strong>@p.Question</strong> <span class="muted">(@TypeLabel(p.Type)@(p.Active ? "" : ", deaktiviert"))</span></span>
-                                                <span class="editor-question-actions">
-                                                    <button type="button" class="btn btn-ghost btn-sm" @onclick="() => EditPoolAsync(p)">Bearbeiten</button>
-                                                    <button type="button" class="btn btn-ghost btn-sm" @onclick="() => TogglePoolActiveAsync(p)">@(p.Active ? "Deaktivieren" : "Aktivieren")</button>
-                                                </span>
-                                            </div>
-                                            @if (_poolEditId == p.Id && _poolEdit is not null)
+                        <fieldset class="editor-section">
+                            <legend>Bilder (@_draft.Images.Count von @CardImageLimits.MaxImagesPerCard)</legend>
+                            <p class="muted">PNG, JPEG oder WebP, höchstens 2 MiB je Bild. Alternativtext beschreibt das Bild für Screenreader; die Bildunterschrift erscheint unter dem Bild.</p>
+                            @for (var i = 0; i < _draft.Images.Count; i++)
+                            {
+                                var img = _draft.Images[i];
+                                var ii = i;
+                                <div class="editor-image">
+                                    <img src="@ImageSrc(img)" alt="@(string.IsNullOrWhiteSpace(img.Alt) ? "Bildvorschau" : img.Alt)" class="editor-image-thumb" />
+                                    <div class="editor-image-fields">
+                                        <label>Alternativtext <input class="input" maxlength="300" @bind="img.Alt" @bind:event="oninput" /></label>
+                                        <label>Bildunterschrift <input class="input" maxlength="300" @bind="img.Caption" @bind:event="oninput" /></label>
+                                        <div class="editor-image-actions">
+                                            <button type="button" class="btn btn-ghost btn-sm" aria-label="Bild @(ii + 1) nach oben" disabled="@(ii == 0)" @onclick="() => MoveImage(ii, -1)">↑</button>
+                                            <button type="button" class="btn btn-ghost btn-sm" aria-label="Bild @(ii + 1) nach unten" disabled="@(ii == _draft.Images.Count - 1)" @onclick="() => MoveImage(ii, 1)">↓</button>
+                                            @if (img.ConfirmRemove)
                                             {
-                                                <QuizQuestionForm Model="_poolEdit" />
-                                                <div class="modal-actions">
-                                                    <button class="btn btn-ghost btn-sm" @onclick="CancelPoolEdit">Abbrechen</button>
-                                                    <button class="btn btn-primary btn-sm" @onclick="SavePoolAsync">Frage speichern</button>
-                                                </div>
+                                                <span class="muted">Bild wirklich entfernen?</span>
+                                                <button type="button" class="btn btn-danger btn-sm" @onclick="() => RemoveImage(ii)">Ja, entfernen</button>
+                                                <button type="button" class="btn btn-ghost btn-sm" @onclick="() => img.ConfirmRemove = false">Abbrechen</button>
+                                            }
+                                            else
+                                            {
+                                                <button type="button" class="btn btn-ghost btn-sm" @onclick="() => img.ConfirmRemove = true">Bild entfernen</button>
                                             }
                                         </div>
-                                    }
-                                    @if (_poolEdit is not null && _poolEditId is null)
-                                    {
-                                        <div class="editor-question">
-                                            <strong>Neue Frage</strong>
+                                    </div>
+                                </div>
+                            }
+                            @if (_draft.Images.Count < CardImageLimits.MaxImagesPerCard)
+                            {
+                                <label class="btn btn-ghost editor-upload">🖼 Bild hinzufügen
+                                    <InputFile OnChange="OnImagesSelected" accept="image/png,image/jpeg,image/webp" class="visually-hidden" aria-label="Bild hochladen" />
+                                </label>
+                            }
+                            @if (_imageError is not null) { <div class="alert alert-error" role="alert">@_imageError</div> }
+                        </fieldset>
+
+                        <fieldset class="editor-section">
+                            <legend>Feste Quizfragen dieser Karte (Teil des Karten-JSON)</legend>
+                            <p class="muted">Diese Fragen stehen im <code>quiz[]</code> der Karte (Import/Export) und werden <strong>mit der Karte</strong> gespeichert. Das Karten-<code>quiz[]</code> ist ihre einzige Quelle; der Fragenpool enthält davon nur eine Kopie.</p>
+                            @for (var i = 0; i < _draft.Quiz.Count; i++)
+                            {
+                                var q = _draft.Quiz[i];
+                                var qi = i;
+                                <div class="editor-question">
+                                    <div class="editor-question-head"><strong>Frage @(qi + 1)</strong>
+                                        <button type="button" class="btn btn-ghost btn-sm" aria-label="Frage @(qi + 1) entfernen" @onclick="() => RemoveCardQuestion(qi)">Entfernen</button></div>
+                                    <QuizQuestionForm Model="q" FixedFourOptions="true" OnChanged="Touch" />
+                                </div>
+                            }
+                            <button type="button" class="btn btn-ghost btn-sm" @onclick="AddCardQuestion">+ Feste Frage</button>
+                        </fieldset>
+
+                        <fieldset class="editor-section">
+                            <legend>Weitere Fragen im Fragenpool (Editor und KI)</legend>
+                            @if (_draft.Id is null)
+                            {
+                                <p class="muted">Speichere die Karte zuerst, dann kannst du ihr Fragen aus dem Fragenpool zuordnen.</p>
+                            }
+                            else
+                            {
+                                <p class="muted">Diese Fragen liegen im zentralen <strong>Fragenpool</strong> des Moduls (unabhängig vom Karten-JSON) und werden <strong>sofort einzeln</strong> gespeichert — nicht mit dem Button „Speichern“ der Karte. KI-generierte Fragen kannst du hier prüfen und korrigieren.</p>
+                                @if (_poolError is not null) { <div class="alert alert-error" role="alert">@_poolError</div> }
+                                @foreach (var pq in _poolQs)
+                                {
+                                    var p = pq;
+                                    <div class="editor-question @(p.Active ? "" : "editor-question-off")">
+                                        <div class="editor-question-head">
+                                            <span><span class="pill pill-muted">@(p.Origin == "ai" ? "KI" : "Editor")</span> <strong>@p.Question</strong> <span class="muted">(@TypeLabel(p.Type)@(p.Active ? "" : ", deaktiviert"))</span></span>
+                                            <span class="editor-question-actions">
+                                                <button type="button" class="btn btn-ghost btn-sm" @onclick="() => EditPoolAsync(p)">Bearbeiten</button>
+                                                <button type="button" class="btn btn-ghost btn-sm" @onclick="() => TogglePoolActiveAsync(p)">@(p.Active ? "Deaktivieren" : "Aktivieren")</button>
+                                            </span>
+                                        </div>
+                                        @if (_poolEditId == p.Id && _poolEdit is not null)
+                                        {
                                             <QuizQuestionForm Model="_poolEdit" />
                                             <div class="modal-actions">
                                                 <button class="btn btn-ghost btn-sm" @onclick="CancelPoolEdit">Abbrechen</button>
                                                 <button class="btn btn-primary btn-sm" @onclick="SavePoolAsync">Frage speichern</button>
                                             </div>
-                                        </div>
-                                    }
-                                    else if (_poolEdit is null)
-                                    {
-                                        <button type="button" class="btn btn-ghost btn-sm" @onclick="NewPoolQuestion">+ Neue Frage im Fragenpool</button>
-                                    }
+                                        }
+                                    </div>
                                 }
-                            </fieldset>
-                        </div>
-                    }
+                                @if (_poolEdit is not null && _poolEditId is null)
+                                {
+                                    <div class="editor-question">
+                                        <strong>Neue Frage</strong>
+                                        <QuizQuestionForm Model="_poolEdit" />
+                                        <div class="modal-actions">
+                                            <button class="btn btn-ghost btn-sm" @onclick="CancelPoolEdit">Abbrechen</button>
+                                            <button class="btn btn-primary btn-sm" @onclick="SavePoolAsync">Frage speichern</button>
+                                        </div>
+                                    </div>
+                                }
+                                else if (_poolEdit is null)
+                                {
+                                    <button type="button" class="btn btn-ghost btn-sm" @onclick="NewPoolQuestion">+ Neue Frage im Fragenpool</button>
+                                }
+                            }
+                        </fieldset>
+                    </div>
                 }
             </section>
         </div>
+
+        @if (_preview && _draft is not null)
+        {
+            var overlayDirty = IsDirty;
+            <div class="preview-overlay" id="preview-overlay" role="dialog" aria-label="Live-Vorschau" aria-modal="false">
+                <div class="preview-overlay-head" id="preview-overlay-head">
+                    <strong>👁 Live-Vorschau</strong>
+                    <span class="muted preview-overlay-hint">verschiebbar · zeigt Änderungen sofort</span>
+                    <span class="preview-overlay-actions">
+                        <button type="button" class="btn btn-ghost btn-sm" title="Position zurücksetzen" aria-label="Position der Vorschau zurücksetzen" @onclick="ResetPreviewPosition">⟲</button>
+                        <button type="button" class="btn btn-ghost btn-sm" aria-label="Vorschau schließen" @onclick="TogglePreview">✕</button>
+                    </span>
+                </div>
+                <div class="preview-overlay-body">
+            <article class="editor-preview" aria-label="Vorschau">
+                <span class="pill pill-brand">@_draft.Category</span>
+                <h2>@_draft.Term</h2>
+                <p class="editor-preview-q">@_draft.Question</p>
+                <RichTextView Value="@_draft.Definition" />
+                @if (!string.IsNullOrWhiteSpace(_draft.HowItWorks)) { <h3>Wie funktioniert es?</h3><RichTextView Value="@_draft.HowItWorks" /> }
+                @if (!string.IsNullOrWhiteSpace(_draft.Context)) { <h3>Kontext</h3><RichTextView Value="@_draft.Context" /> }
+                @if (!string.IsNullOrWhiteSpace(_draft.KeyFact)) { <div class="keyfact">🎯 <strong>Key Fact:</strong><RichTextView Value="@_draft.KeyFact" /></div> }
+                @foreach (var img in _draft.Images)
+                {
+                    <figure class="card-image">
+                        <img src="@ImageSrc(img)" alt="@img.Alt" loading="lazy" />
+                        @if (!string.IsNullOrWhiteSpace(img.Caption)) { <figcaption>@img.Caption</figcaption> }
+                    </figure>
+                }
+                @if (_draft.Quiz.Count + _poolQs.Count > 0)
+                {
+                    <h3>Quizfragen (richtige Antworten markiert)</h3>
+                    <ol class="editor-quiz-preview">
+                        @foreach (var q in _draft.Quiz) { <li>@PreviewQuestion(q)</li> }
+                        @foreach (var q in _poolQs.Where(p => p.Active)) { <li>@PreviewQuestion(QuizPoolService.ToInput(q)) <span class="pill pill-muted">@(q.Origin == "ai" ? "KI" : "Editor")</span></li> }
+                    </ol>
+                }
+                @if (_draft.Id is not null)
+                {
+                    <button class="btn btn-ghost" @onclick="OpenQuizPreview" disabled="@overlayDirty" title="@(overlayDirty ? "Erst speichern, dann ausprobieren" : "Quiz dieser Karte ausprobieren")">📝 Quiz dieser Karte ausprobieren</button>
+                    @if (overlayDirty) { <span class="muted"> — erst speichern</span> }
+                }
+            </article>
+                </div>
+            </div>
+        }
 
         @if (_quizPreviewOpen && _draft?.Id is not null)
         {
@@ -395,7 +406,7 @@
             .Where(q => q.Source != QuizSources.CardJson).ToList();   // card_json-Fragen gehören dem Karten-JSON und werden oben mit der Karte bearbeitet
     }
 
-    private void ResetBaseline() { _baseline = Snapshot(); _error = null; _status = null; _conflict = false; _imageError = null; _preview = false; }
+    private void ResetBaseline() { _baseline = Snapshot(); _error = null; _status = null; _conflict = false; _imageError = null; }
 
     // ─── Ungespeicherte Änderungen ─────────────────────────────────────────
 
@@ -410,8 +421,16 @@
 
     private bool IsDirty => _draft is not null && Snapshot() != _baseline;
 
+    private bool _overlayInit;
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (_preview && !_overlayInit)
+        {
+            _overlayInit = true;
+            try { await JS.InvokeVoidAsync("lcRte.dragInit", "preview-overlay", "preview-overlay-head"); } catch (JSDisconnectedException) { }
+        }
+        else if (!_preview) _overlayInit = false;
         var dirty = !_loading && IsDirty;
         if (dirty != _beforeUnloadSet)
         {
@@ -554,6 +573,11 @@
     }
 
     private void TogglePreview() => _preview = !_preview;
+
+    private async Task ResetPreviewPosition()
+    {
+        try { await JS.InvokeVoidAsync("lcRte.dragReset", "preview-overlay"); } catch (JSDisconnectedException) { }
+    }
     private void ToggleConfig() => _configOpen = !_configOpen;
     private Task CloseConfig() { _configOpen = false; return Task.CompletedTask; }
     private void OpenQuizPreview() => _quizPreviewOpen = true;
