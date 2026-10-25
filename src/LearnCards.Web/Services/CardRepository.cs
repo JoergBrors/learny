@@ -760,9 +760,20 @@ public partial class CardRepository
         string insertValues,
         IReadOnlyList<(string Name, object? Value)> values)
     {
-        var exists = await _db.QueryAsync($"SELECT 1 FROM {table} WHERE {existingWhere} LIMIT 1", values);
-        if (exists.Count > 0)
-            return await _db.ExecuteAsync($"UPDATE {table} SET {updateSet} WHERE {existingWhere}", values);
-        return await _db.ExecuteAsync($"INSERT INTO {table} ({insertColumns}) VALUES ({insertValues})", values);
+        // Erst aktualisieren, nur bei 0 betroffenen Zeilen einfügen. Gewinnt bei parallelen Anfragen ein anderer Aufruf das Einfügen
+        // (Schlüsselverletzung), wird erneut aktualisiert — sonst entstünde bei gleichzeitigen Schreibzugriffen derselben Zeile ein Fehler.
+        var updateSql = $"UPDATE {table} SET {updateSet} WHERE {existingWhere}";
+        var updated = await _db.ExecuteAsync(updateSql, values);
+        if (updated > 0) return updated;
+        try
+        {
+            return await _db.ExecuteAsync($"INSERT INTO {table} ({insertColumns}) VALUES ({insertValues})", values);
+        }
+        catch (Exception)
+        {
+            var retried = await _db.ExecuteAsync(updateSql, values);
+            if (retried > 0) return retried;
+            throw;
+        }
     }
 }

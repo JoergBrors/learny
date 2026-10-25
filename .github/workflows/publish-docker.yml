@@ -70,6 +70,19 @@ jobs:
     name: Build und Integrationstests
     runs-on: ubuntu-latest
     needs: validate
+    services:
+      # PostgreSQL ist der Produktionsprovider: Die Tests laufen zusätzlich dagegen. Der Host-Port wird von Docker zufällig vergeben.
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: learncards
+          POSTGRES_PASSWORD: ci-${{ github.run_id }}-${{ github.run_attempt }}
+          POSTGRES_DB: learncards
+        ports:
+          - 5432
+        options: >-
+          --health-cmd "pg_isready -U learncards -d learncards"
+          --health-interval 5s --health-timeout 5s --health-retries 12
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
@@ -79,6 +92,18 @@ jobs:
         run: dotnet build LearnCards.slnx -c Release
       - name: Integrationstests
         env:
+          TEST_WEB_DLL: ${{ github.workspace }}/src/LearnCards.Web/bin/Release/net10.0/LearnCards.Web.dll
+          TEST_MCP_DLL: ${{ github.workspace }}/src/LearnCards.McpServer/bin/Release/net10.0/LearnCards.McpServer.dll
+        run: dotnet run --project tests/LearnCards.IntegrationTests -c Release --no-build
+      - name: Integrationstests gegen PostgreSQL (zufälliger Host-Port)
+        env:
+          TEST_DB_PROVIDER: postgres
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: ${{ job.services.postgres.ports['5432'] }}
+          POSTGRES_USER: learncards
+          POSTGRES_PASSWORD: ci-${{ github.run_id }}-${{ github.run_attempt }}
+          POSTGRES_DB: learncards
+          POSTGRES_SSLMODE: disable
           TEST_WEB_DLL: ${{ github.workspace }}/src/LearnCards.Web/bin/Release/net10.0/LearnCards.Web.dll
           TEST_MCP_DLL: ${{ github.workspace }}/src/LearnCards.McpServer/bin/Release/net10.0/LearnCards.McpServer.dll
         run: dotnet run --project tests/LearnCards.IntegrationTests -c Release --no-build
