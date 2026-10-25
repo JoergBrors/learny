@@ -199,6 +199,12 @@ Karten können optional bis zu 5 Bilder enthalten (PNG, JPEG oder WebP, je höch
 `data_base64` ist reines Base64 ohne `data:`-Präfix (PowerShell: `[Convert]::ToBase64String([IO.File]::ReadAllBytes("bild.png"))`). Fehlendes `images` bedeutet keine Bilder; beim Überschreiben bleiben vorhandene Bilder erhalten, `"images": []` entfernt sie.
 Fehlerhafte Bilder lehnen die betroffene Karte mit einer Begründung ab. Details, Limits und Hinweise für KI-Assistenten: Hilfe-Seite der Anwendung und [ADR 0016](docs/adr/0016-bilder-in-lernkarten.md).
 
+### Formatierte Texte
+
+Die Textfelder `definition`, `how_it_works`, `context`, `key_fact` und `reference_answer` verstehen eine kleine, sichere Formatierung (Markdown-Teilmenge, **kein HTML**): `**fett**`, `*kursiv*`, `++unterstrichen++`, `# Überschrift`, `- Liste`, `1. Nummerierung`, `[Text](https://…)`; Absatz = Leerzeile. Reiner Text bleibt gültig. Die Syntax erklärt das Live-Schema (`rich_text_rules`) und die Hilfeseite; ausgegeben wird sie ausschließlich serverseitig gesichert ([ADR 0020](docs/adr/0020-sichere-visuelle-bearbeitung-formatierter-lerninhalte.md)).
+
+Im Browser bearbeitest du Karten, Texte, Bilder und Quizfragen visuell: Modulseite → **✏ Karten bearbeiten** (nur eigene Module).
+
 ### Quizfragen (`quiz[]`)
 
 `quiz` ist optional (fehlt es oder ist es `[]`, hat die Karte keine festen Fragen); alte Dateien mit nur `single_choice` — auch ohne `type` — bleiben gültig. Pflicht je Eintrag: `question` und `explanation`.

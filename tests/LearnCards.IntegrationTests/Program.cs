@@ -1932,7 +1932,7 @@ try
                 allServed &= res.IsSuccessStatusCode && JsonNode.DeepEquals(JsonNode.Parse(await res.Content.ReadAsStringAsync()), JsonNode.Parse(File.ReadAllText(Path.Combine(contentRoot, "wwwroot", "templates", name))));
             }
             Check(allServed, "Hilfeseite: alle Template-Downloads funktionieren und liefern den Dateiinhalt");
-            var helpTerms = new[] { "single_choice", "multiple_response", "free_text", "correct_indexes", "Quiz-Einstellungen", "Bestehensgrenze", "/api/schema/import/cards", "KI-Fragen" };
+            var helpTerms = new[] { "single_choice", "multiple_response", "free_text", "correct_indexes", "Quiz-Einstellungen", "Bestehensgrenze", "/api/schema/import/cards", "KI-Fragen", "Lernkarten visuell bearbeiten", "Karten bearbeiten", "Alternativtext", "Fragenpool", "++unterstrichen++", "Konflikt", "ungespeicherte Änderungen" };
             var missing = helpTerms.Where(t => !help.Contains(t)).ToList();
             Check(missing.Count == 0, "Hilfeseite: erklärt Fragetypen, Quiz-Einstellungen, KI-Fragen und verweist auf das Live-Importschema" + (missing.Count > 0 ? " — fehlt: " + string.Join(", ", missing) : ""));
             Check(!help.Contains("WYSIWYG") && !help.Contains("Zertifikat"), "Hilfeseite: dokumentiert keine späteren Funktionen (Editor, Zertifikate) als verfügbar");

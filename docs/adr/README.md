@@ -28,6 +28,7 @@ Referenz dafür, *wie das System funktioniert und warum* — für Menschen und f
 | [0017](0017-konfigurierbare-bildspeicher.md) | Konfigurierbare Bildspeicherprovider, Bild-Cache, Migration | Akzeptiert |
 | [0018](0018-zentraler-image-proxy-und-storage-zugriff.md) | Zentraler Image-Proxy und Storage-Zugriffsdelegation (SAS-Broker) | Akzeptiert |
 | [0019](0019-einheitliches-quizsystem.md) | Einheitliche Quiz-Engine, Quizkonfiguration und persistenter Fragenpool | Akzeptiert |
+| [0020](0020-sichere-visuelle-bearbeitung-formatierter-lerninhalte.md) | Sichere visuelle Bearbeitung formatierter Lerninhalte (Rich-Text, Karteneditor) | Akzeptiert |
 
 Prüfberichte, die Anlass für ADRs sind, liegen unter [docs/reviews/](../reviews/) (aktuell: [Mehrbenutzer-Prüfbericht](../reviews/2026-10-24-mehrbenutzer-pruefbericht.md)).
 

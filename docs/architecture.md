@@ -133,6 +133,18 @@ Browser / MCP ──► GET /api/images/{id} ──► Berechtigung (privat/frei
 Clients erhalten Bilder ausschließlich über `/api/images/{id}` ([ADR 0018](adr/0018-zentraler-image-proxy-und-storage-zugriff.md)); Karten-JSON enthält nur diese URL (nie Provider, Schlüssel, SAS oder Cloud-URLs). `FlashCardView` zeigt sie mit `loading="lazy"`.
 Listenendpunkte liefern nur Metadaten; Base64 gibt es nur mit `?include_image_data=true`. Die Migration zwischen Providern ist eine ausdrücklich gestartete Admin-Aktion (`/api/admin/images/migrate`), die Quelle bleibt erhalten.
 
+## Karteneditor und formatierte Texte
+
+Der Karteneditor (`/module/{id}/edit`) ist eine reine Oberfläche über den vorhandenen Diensten ([ADR 0020](adr/0020-sichere-visuelle-bearbeitung-formatierter-lerninhalte.md)): Karten über `CardRepository` (anlegen, ändern mit Konflikterkennung, duplizieren, sortieren, archivieren), Bilder über `CardImageService`,
+Quizfragen über `QuizService`/`QuizPoolService`. Formatierte Kartentexte sind ein begrenztes Markup in den bestehenden Textfeldern; der Browser-Editor (`RichTextEditor` + `rte.js`) serialisiert in dieses Markup, `RichText.ToHtml` rendert es serverseitig gesichert (`RichTextView`, auch in `FlashCardView`).
+Es gibt keine zweite Persistenz und keine neuen Tabellen.
+
+```
+Browser (contenteditable) ─► rte.js: DOM → Markup ─► ModuleEditor ─► CardRepository / QuizService ─► Datenbank
+                                                         │ Validierung: CardJson.Validate (+ RichText.Validate)
+Lernansicht / Vorschau ◄── RichText.ToHtml (alles kodiert, feste Elementliste) ◄── Markup in den Textfeldern
+```
+
 ## Quiz-Engine
 
 Karten- und Modulquiz nutzen dieselbe Engine ([ADR 0019](adr/0019-einheitliches-quizsystem.md)). `QuizService.StartSessionAsync` wählt Fragen (gespeicherter Pool → ggf. KI-Generierung → Offline-Ableitung aus den Karten) nach der **Quizkonfiguration des Moduls**

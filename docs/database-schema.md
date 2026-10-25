@@ -324,6 +324,8 @@ Serverseitige Quizsitzung mit Lösungen (Grundlage der verifizierten Bewertung; 
 
 Index: `ix_quiz_sessions_user (user_sub, created_at)`.
 
+> **Hinweis (ADR 0020):** Der Karteneditor und die formatierten Texte benötigen **keine** Schemaänderung — das Markup liegt in den bestehenden Spalten `definition`, `how_it_works`, `context`, `key_fact`, `reference_answer`; die Reihenfolge nutzt `cards.sort_order`.
+
 ## Schema-Initialisierung und Migrationen
 
 Beim Start (`PostgresDatabase.InitAsync`, serialisiert über ein Gate):

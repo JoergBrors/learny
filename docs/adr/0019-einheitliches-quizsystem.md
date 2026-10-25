@@ -85,6 +85,11 @@ Auftrag 3 (Nachweise): `QuizService.GetVerifiedResultAsync(resultId, user)` → 
 5. Eine Sitzung kann beliebig oft neu gestartet werden (sofern Wiederholungen erlaubt sind) und Fragen sind nach dem ersten Versuch bekannt.
 Auftrag 3 muss für zertifizierende Quizze daher mindestens entscheiden: Lösungen aus dem Karten-JSON für Lernende ausblenden (eigene Prüfungsfragen, Prüfungspool getrennt vom Lernstoff), Versuche begrenzen, Fragenauswahl pro Versuch zufällig/neu, Ergebnisse nur über `GetVerifiedResultAsync`.
 
+## Nachtrag 2026-10-26: Nutzung durch den Karteneditor (Auftrag 2)
+
+Der visuelle Karteneditor ([ADR 0020](0020-sichere-visuelle-bearbeitung-formatierter-lerninhalte.md)) verwendet die vorhandenen Schnittstellen unverändert (`ListQuestionsAsync`, `CreateQuestionAsync`, `UpdateQuestionAsync`, `SetQuestionActiveAsync`, Konfiguration). Neu ist nur `QuizPoolService.CopyCardQuestionsAsync` (Editor-/KI-Fragen beim Duplizieren einer Karte).
+`card_json`-Fragen werden im Editor als Teil der Karte bearbeitet (Speichern mit der Karte); `ai`/`editor`-Fragen separat und sofort — die Oberfläche beschriftet beide Bereiche. Die Quizbewertung und die Sicherheitsgrenze (Lösungen im Karten-JSON sichtbar) sind unverändert.
+
 ## Offene Punkte
 
 - Lernende sehen `quiz[]`-Lösungen im Karten-JSON freigegebener/globaler Module (Vertrag aus ADR 0006); für zertifizierende Quizze (Auftrag 3) ggf. Lösungen dort ausblenden.

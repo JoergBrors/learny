@@ -41,3 +41,7 @@ Neues/geändertes Kartenfeld — **Checkliste**:
 ## Betroffener Code
 
 - `Domain/Models.cs`, `Api/CardImportSchema.cs`, `Services/CardRepository.cs`, `wwwroot/templates/*`, MCP `Program.cs`
+
+## Nachtrag 2026-10-26 (ADR 0020)
+
+Die Textfelder `definition`, `how_it_works`, `context`, `key_fact` und `reference_answer` bleiben Strings und akzeptieren zusätzlich eine kleine Formatsyntax (Markdown-Teilmenge, kein HTML) mit Längenlimit 20 000 Zeichen — siehe [0020](0020-sichere-visuelle-bearbeitung-formatierter-lerninhalte.md) und `rich_text_rules` im Live-Schema. Es wurden **keine Felder** hinzugefügt, umbenannt oder entfernt; die Checkliste „neues Feld“ entfällt daher.
