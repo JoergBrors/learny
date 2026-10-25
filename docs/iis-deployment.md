@@ -274,7 +274,7 @@ Windows-Dienst wieder und belässt den MCP-Teil im reinen `stdio`-/Client-Start-
 - Beim Upgrade werden vorhandene `.env`-Werte nie durch leere ersetzt (nur wenn der neu gerenderte Wert leer und der alte gefüllt ist); eine bisherige `.env` im Webroot wird als Quelle übernommen und danach beim Spiegeln entfernt.
 - Der Workflow gibt keine Werte aus; Prüfungen nennen nur Pfade und Status.
 
-**App-Pool:** `ApplicationPoolIdentity`, **Benutzerprofil laden = True** (setzt das Deployment), Umgebungsvariable `ENV_FILE`. Request Filtering (`web.config`) sperrt zusätzlich `.env`, `.pem`, `.key`, `.initialized`, `.db`, `.config` sowie die Segmente `data`, `logs`, `keys`.
+**App-Pool:** `ApplicationPoolIdentity`, **Benutzerprofil laden = True** (setzt das Deployment), Umgebungsvariable `ENV_FILE`. Request Filtering (`web.config`) sperrt zusätzlich `.env`, `.pem`, `.key`, `.initialized`, `.db` (`.config` sperrt IIS bereits standardmäßig) sowie die Segmente `data`, `logs`, `keys`.
 
 **Erstinitialisierung:** Ist weder Schlüssel noch Marker vorhanden, erzeugt die Anwendung beim ersten Start einen ECDSA-P-256-Schlüssel — in einer temporären Datei im Schlüsselverzeichnis, dann ohne Überschreiben an den Zielort verschoben (atomar; bei parallelen Starts gewinnt genau einer). Danach wird der Schlüssel neu geladen, eine Signatur-Selbstprüfung ausgeführt und der Marker geschrieben. Das Deployment gibt dem Pool Schreibrecht auf das Schlüsselverzeichnis nur bis Schlüssel und Marker existieren; ab dem nächsten Deployment gilt nur Lesen.
 

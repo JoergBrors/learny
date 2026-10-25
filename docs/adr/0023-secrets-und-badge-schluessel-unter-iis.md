@@ -15,7 +15,7 @@ Das IIS-Deployment legte die gerenderte `.env` im Webroot ab und spiegelte das W
 2. NTFS: Vererbung entfernt; SYSTEM, Administratoren, Deploy-Konto Vollzugriff; App-Pool nur Lesen (Schlüsselverzeichnis schreibbar nur bis zur Erstinitialisierung). Webroot: App-Pool nur Lesen/Ausführen, Schreiben nur `data`, `logs`.
 3. `robocopy /MIR /XD data logs`; Backups schließen `.env`/`*.pem` aus.
 4. **Initialisierungsmarker** `badge-signing-key.pem.initialized` (Schlüssel-ID, kein Geheimnis): Ein fehlender Schlüssel wird nur ohne Marker (Neuinstallation) erzeugt — atomar (temporäre Datei, Move ohne Überschreiben), danach neu geladen und per Signatur-Selbstprüfung getestet. Mit Marker, bei abweichender Schlüssel-ID oder wenn bereits Zertifikate in der Datenbank liegen, bricht der Start ab (**fail-closed**, keine stille Rotation).
-5. Schlüsselimport über `ECParameters` (kein NCrypt-Schlüsselspeicher), „Benutzerprofil laden“ = True; Request Filtering sperrt `.env`, `.pem`, `.key`, `.initialized`, `.db`, `.config`, `data`, `logs`, `keys`.
+5. Schlüsselimport über `ECParameters` (kein NCrypt-Schlüsselspeicher), „Benutzerprofil laden“ = True; Request Filtering sperrt `.env`, `.pem`, `.key`, `.initialized`, `.db` (`.config` sperrt IIS bereits standardmäßig), `data`, `logs`, `keys`.
 6. Das Deployment prüft Rechte vor dem Start, danach HTTP (sensible Pfade) und die Schlüssel-ID gegen den Marker; Befunde lassen das Deployment fehlschlagen.
 
 ## Folgen
