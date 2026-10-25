@@ -23,20 +23,186 @@ public sealed class BadgeSigner : IDisposable
     public BadgeSigner(AppConfig config)
     {
         _cfg = config.Blockchain;
-        _key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        if (_cfg.BadgeKeyPem.Length > 0) _key.ImportFromPem(_cfg.BadgeKeyPem.Contains("-----BEGIN") ? _cfg.BadgeKeyPem : File.ReadAllText(_cfg.BadgeKeyPem));
-        else if (File.Exists(_cfg.BadgeKeyFile)) _key.ImportFromPem(File.ReadAllText(_cfg.BadgeKeyFile));
+        var pem = ReadPem(_cfg);
+        if (pem is not null)
+        {
+            _key = ImportKey(pem);
+            _keyId = ComputeKeyId(_key);
+            if (_cfg.BadgeKeyPem.Length == 0) CheckOrWriteMarker(_cfg.BadgeKeyFile, _keyId);
+        }
         else
         {
-            // Kein Schlüssel konfiguriert: einmalig erzeugen und im (persistenten) Datenverzeichnis ablegen — nicht im Repository, nicht in der Datenbank.
-            // Für Produktion BADGE_SIGNING_KEY_PEM aus einer Secret-Verwaltung setzen (der Start meldet eine Warnung).
-            GeneratedKeyFile = true;
-            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(_cfg.BadgeKeyFile))!);
-            File.WriteAllText(_cfg.BadgeKeyFile, _key.ExportPkcs8PrivateKeyPem());
-            if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(_cfg.BadgeKeyFile, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            // Kein Schlüssel vorhanden. Nur eine NEUE Installation darf einen Schlüssel erzeugen. Hat diese Installation bereits einen Schlüssel erzeugt
+            // (Marker neben der Schlüsseldatei), ist ein fehlender Schlüssel ein Verlust: abbrechen statt still zu rotieren, sonst würden alle Badges ungültig.
+            var markerFile = MarkerPath(_cfg.BadgeKeyFile);
+            if (File.Exists(markerFile))
+                throw new InvalidOperationException($"Der Badge-Signaturschlüssel fehlt ({Path.GetFileName(_cfg.BadgeKeyFile)}), obwohl diese Installation bereits initialisiert wurde (Marker vorhanden). " +
+                    "Es wird bewusst KEIN neuer Schlüssel erzeugt, damit ausgestellte Badges gültig bleiben. Schlüssel aus der Sicherung wiederherstellen oder BADGE_SIGNING_KEY_PEM/BADGE_SIGNING_KEY_FILE setzen (docs/iis-deployment.md).");
+            _key = CreateKeyFileAtomically(_cfg.BadgeKeyFile, out var created);
+            GeneratedKeyFile = created;
+            _keyId = ComputeKeyId(_key);
+            CheckOrWriteMarker(_cfg.BadgeKeyFile, _keyId);
         }
-        var p = _key.ExportParameters(false);
-        _keyId = Convert.ToHexString(SHA256.HashData(Concat(p.Q.X!, p.Q.Y!)))[..16].ToLowerInvariant();
+        // Betriebsprüfung: Der Schlüssel muss tatsächlich signieren und verifizieren können (Start bricht sonst ab — keine stille Deaktivierung).
+        var probe = Encoding.ASCII.GetBytes("learncards-selftest");
+        if (!_key.VerifyData(probe, _key.SignData(probe, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation), HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation))
+            throw new InvalidOperationException("Der Badge-Signaturschlüssel wurde geladen, besteht aber die Signatur-Selbstprüfung nicht.");
+    }
+
+    private static string ComputeKeyId(ECDsa key)
+    {
+        var p = key.ExportParameters(false);
+        return Convert.ToHexString(SHA256.HashData(Concat(p.Q.X!, p.Q.Y!)))[..16].ToLowerInvariant();
+    }
+
+    /// <summary>Marker „Installation initialisiert“ neben der Schlüsseldatei: enthält nur Schlüssel-ID und Zeitpunkt (kein Geheimnis).</summary>
+    public static string MarkerPath(string keyFile) => keyFile + ".initialized";
+
+    private static void CheckOrWriteMarker(string keyFile, string keyId)
+    {
+        var marker = MarkerPath(keyFile);
+        try
+        {
+            if (File.Exists(marker))
+            {
+                var recorded = JsonNode.Parse(File.ReadAllText(marker))?["key_id"]?.GetValue<string>();
+                if (!string.IsNullOrEmpty(recorded) && recorded != keyId)
+                    throw new InvalidOperationException($"Der Badge-Signaturschlüssel ({keyId}) passt nicht zur Initialisierung dieser Installation ({recorded}). Ein anderer Schlüssel würde ausgestellte Badges ungültig machen. " +
+                        "Richtigen Schlüssel wiederherstellen; nur bei bewusster Rotation den Marker entfernen (docs/iis-deployment.md).");
+                return;
+            }
+            var json = new JsonObject { ["key_id"] = keyId, ["created_at"] = DateTime.UtcNow.ToString("o") }.ToJsonString();
+            using var fs = new FileStream(marker, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            fs.Write(Encoding.UTF8.GetBytes(json));
+        }
+        catch (IOException) { /* paralleler Start hat den Marker bereits angelegt */ }
+        catch (UnauthorizedAccessException) { /* Marker ist optional lesbar/schreibbar; fehlende Schreibrechte verhindern den Start nicht */ }
+    }
+
+    /// <summary>
+    /// Erzeugt den Schlüssel in einer temporären Datei im selben Verzeichnis und verschiebt sie ohne Überschreiben an den Zielort (atomar, parallele Starts sicher).
+    /// Existiert das Ziel inzwischen, gewinnt der bereits vorhandene Schlüssel. Danach wird der Schlüssel aus der Datei neu geladen.
+    /// </summary>
+    private static ECDsa CreateKeyFileAtomically(string path, out bool created)
+    {
+        created = false;
+        var full = Path.GetFullPath(path);
+        var dir = Path.GetDirectoryName(full)!;
+        Directory.CreateDirectory(dir);
+        var tmp = Path.Combine(dir, ".badge-key-" + Guid.NewGuid().ToString("N") + ".tmp");
+        try
+        {
+            using (var gen = ECDsa.Create(ECCurve.NamedCurves.nistP256))
+            using (var fs = new FileStream(tmp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                fs.Write(Encoding.ASCII.GetBytes(gen.ExportPkcs8PrivateKeyPem()));
+            if (OperatingSystem.IsWindows()) RestrictAcl(tmp);
+            else File.SetUnixFileMode(tmp, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            try { File.Move(tmp, full, overwrite: false); created = true; }
+            catch (IOException) when (File.Exists(full)) { /* anderer Start war schneller */ }
+        }
+        finally { try { if (File.Exists(tmp)) File.Delete(tmp); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
+        return ImportKey(File.ReadAllText(full));
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static void RestrictAcl(string path)
+    {
+        try
+        {
+            var sec = new System.Security.AccessControl.FileSecurity();
+            sec.SetAccessRuleProtection(true, false);
+            foreach (var sid in new[] { System.Security.Principal.WindowsIdentity.GetCurrent().User!, new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.LocalSystemSid, null), new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.BuiltinAdministratorsSid, null) })
+                sec.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(sid, System.Security.AccessControl.FileSystemRights.FullControl, System.Security.AccessControl.AccessControlType.Allow));
+            new FileInfo(path).SetAccessControl(sec);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or InvalidOperationException or System.Security.SecurityException or IOException) { /* ACL-Härtung ist Zusatz; das Deployment prüft die Rechte erneut */ }
+    }
+
+    private static string? ReadPem(BlockchainSettings cfg)
+    {
+        try
+        {
+            if (cfg.BadgeKeyPem.Length > 0) return cfg.BadgeKeyPem.Contains("-----BEGIN") ? cfg.BadgeKeyPem : File.ReadAllText(cfg.BadgeKeyPem);
+            return File.Exists(cfg.BadgeKeyFile) ? File.ReadAllText(cfg.BadgeKeyFile) : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Nur Art des Fehlers nennen — nie Schlüsselinhalt.
+            throw new InvalidOperationException($"Die Schlüsseldatei für die Badge-Signierung ist nicht lesbar ({ex.GetType().Name}). Prüfe Pfad und Leserechte des Anwendungspools (BADGE_SIGNING_KEY_FILE / BADGE_SIGNING_KEY_PEM).", ex);
+        }
+    }
+
+    /// <summary>
+    /// Importiert den privaten P-256-Schlüssel. Unter Windows führt <c>ImportFromPem</c>/<c>ImportPkcs8PrivateKey</c> über den CNG-Schlüsseldienst (NCrypt), der ohne
+    /// geladenes Benutzerprofil (IIS-Anwendungspool mit „Load User Profile = false“) mit „Das System kann die angegebene Datei nicht finden“ fehlschlagen kann.
+    /// Deshalb wird der Schlüssel zuerst selbst aus PKCS#8/SEC1 in <see cref="ECParameters"/> zerlegt und flüchtig im Prozess importiert; erst danach der Standardweg.
+    /// </summary>
+    public static ECDsa ImportKey(string pem)
+    {
+        Exception? first = null;
+        try { if (TryParseParameters(pem, out var prm)) return ECDsa.Create(prm); }
+        catch (Exception ex) when (ex is CryptographicException or ArgumentException or System.Formats.Asn1.AsnContentException) { first = ex; }
+        try
+        {
+            var k = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+            k.ImportFromPem(pem);
+            return k;
+        }
+        catch (Exception ex) when (ex is CryptographicException or ArgumentException)
+        {
+            throw new InvalidOperationException(
+                "Der Badge-Signaturschlüssel konnte nicht geladen werden (" + (first ?? ex).GetType().Name + "). Erwartet wird ein ECDSA-P-256-Schlüssel als PKCS#8-PEM. " +
+                "Unter IIS zusätzlich: Anwendungspool → Erweiterte Einstellungen → „Benutzerprofil laden“ = True und Leserecht auf die Schlüsseldatei (docs/iis-deployment.md).", ex);
+        }
+    }
+
+    private static readonly string P256Oid = "1.2.840.10045.3.1.7";
+
+    private static bool TryParseParameters(string pem, out ECParameters prm)
+    {
+        prm = default;
+        if (!PemEncoding.TryFind(pem, out var f)) return false;
+        var label = pem[f.Label];
+        var der = Convert.FromBase64String(pem[f.Base64Data].ToString());
+        try
+        {
+            var r = new System.Formats.Asn1.AsnReader(der, System.Formats.Asn1.AsnEncodingRules.BER);
+            var seq = r.ReadSequence();
+            if (label == "PRIVATE KEY")
+            {
+                seq.ReadInteger();
+                var alg = seq.ReadSequence();
+                alg.ReadObjectIdentifier();
+                if (alg.ReadObjectIdentifier() != P256Oid) return false;
+                var ecKey = seq.ReadOctetString();
+                var inner = new System.Formats.Asn1.AsnReader(ecKey, System.Formats.Asn1.AsnEncodingRules.BER).ReadSequence();
+                return ReadEcPrivateKey(inner, out prm);
+            }
+            return label == "EC PRIVATE KEY" && ReadEcPrivateKey(seq, out prm);
+        }
+        finally { Array.Clear(der); }
+    }
+
+    private static bool ReadEcPrivateKey(System.Formats.Asn1.AsnReader seq, out ECParameters prm)
+    {
+        prm = default;
+        seq.ReadInteger();
+        var d = seq.ReadOctetString();
+        byte[]? pub = null;
+        while (seq.HasData)
+        {
+            var tag = seq.PeekTag();
+            if (tag.TagClass == System.Formats.Asn1.TagClass.ContextSpecific && tag.TagValue == 1)
+            {
+                var c = seq.ReadSequence(tag);
+                pub = c.ReadBitString(out _);
+            }
+            else seq.ReadEncodedValue();
+        }
+        if (d.Length is 0 or > 32 || pub is not { Length: 65 } || pub[0] != 4) return false; // ohne öffentlichen Anteil: Standardweg
+        var dd = new byte[32]; d.CopyTo(dd, 32 - d.Length);
+        prm = new ECParameters { Curve = ECCurve.NamedCurves.nistP256, D = dd, Q = new ECPoint { X = pub[1..33], Y = pub[33..65] } };
+        return true;
     }
 
     /// <summary>Wahr, wenn der Schlüssel beim Start in eine Datei im Datenverzeichnis erzeugt wurde (kein BADGE_SIGNING_KEY_PEM gesetzt).</summary>

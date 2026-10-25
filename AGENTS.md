@@ -34,6 +34,7 @@ UI-Texten und Dokumentation: **Deutsch**; Bezeichner: Englisch.
 | Chat, Quiz-Generierung, Bewertung | `Services/OpenAiClient.cs`, `QuizService.cs`, `ChatService.cs` | [0008](docs/adr/0008-ki-integration-und-fallback.md) |
 | Folienmodus | `FlashCardView.razor`, Felder `slide_number`/`target_time_sec` | [0010](docs/adr/0010-folienmodus-und-karten-quiz.md) |
 | Quiz (Karten- und Modulquiz), Quizkonfiguration, Fragenpool, Bewertung | `Services/QuizService.cs`, `QuizPoolService.cs`, `Domain/Quiz.cs`, `QuizRunner.razor`, `QuizPanel.razor`, `CardQuizPanel.razor`, `QuizConfigPanel.razor`, `ApiEndpoints.cs` (`/quiz/*`, `/modules/{id}/quiz-*`) | [0019](docs/adr/0019-einheitliches-quizsystem.md), [0010](docs/adr/0010-folienmodus-und-karten-quiz.md), [0008](docs/adr/0008-ki-integration-und-fallback.md) |
+| IIS-Deployment, `.env`-/Schlüsselablage, Badge-Schlüssel-Initialisierung | `.github/workflows/deploy-iis-on-tag.yml`, `deploy/iis/*`, `web.config`, `Services/Certificates/BadgeSigner.cs`, [docs/iis-deployment.md](docs/iis-deployment.md) | [0023](docs/adr/0023-secrets-und-badge-schluessel-unter-iis.md), [0009](docs/adr/0009-deployment-wege.md) |
 | Neue Umgebungsvariable | `Infrastructure/AppConfig.cs`, `.env.example`, `deploy/iis/web.env`, `docker-compose.yml`, Deployment-Doku | [0009](docs/adr/0009-deployment-wege.md) |
 | UI/Styling | `Components/**`, `wwwroot/app.css` (Farbsystem, Dark Mode beachten) | [0003](docs/adr/0003-eine-deploybare-einheit.md) |
 | Neue Abhängigkeit | — verboten ohne neue ADR | [0002](docs/adr/0002-keine-nuget-pakete.md) |

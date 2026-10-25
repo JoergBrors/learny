@@ -31,6 +31,7 @@ Referenz dafür, *wie das System funktioniert und warum* — für Menschen und f
 | [0020](0020-sichere-visuelle-bearbeitung-formatierter-lerninhalte.md) | Sichere visuelle Bearbeitung formatierter Lerninhalte (Rich-Text, Karteneditor) | Akzeptiert |
 | [0021](0021-zertifikate-und-open-badges.md) | Zertifikate und signierte Open Badges 3.0 | Akzeptiert (Oberfläche teilweise offen) |
 | [0022](0022-polygon-verankerung-und-kostenschranke.md) | Polygon-Verankerung, Merkle-Bündelung und harte Kostenschranke | Akzeptiert (Signierlösung offen) |
+| [0023](0023-secrets-und-badge-schluessel-unter-iis.md) | Geheimnisse und Badge-Schlüssel unter IIS (außerhalb des Webroots, Marker, fail-closed) | Akzeptiert (IIS-Test offen) |
 
 Prüfberichte, die Anlass für ADRs sind, liegen unter [docs/reviews/](../reviews/) (aktuell: [Mehrbenutzer-Prüfbericht](../reviews/2026-10-24-mehrbenutzer-pruefbericht.md)).
 

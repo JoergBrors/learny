@@ -158,6 +158,13 @@ if (syncedQuizCards > 0) app.Logger.LogInformation("Quiz: {Count} Karten in den 
 await app.Services.GetRequiredService<QuizService>().CleanupSessionsIfDueAsync(force: true);   // abgelaufene Quizsitzungen entfernen (ADR 0019)
 var badgeSigner = app.Services.GetRequiredService<BadgeSigner>();   // Schlüssel laden bzw. beim ersten Start erzeugen (ADR 0021)
 if (badgeSigner.GeneratedKeyFile) app.Logger.LogWarning("Badge-Signaturschlüssel wurde lokal in {File} erzeugt. Für Produktion BADGE_SIGNING_KEY_PEM aus einer Secret-Verwaltung setzen und die Datei sichern (ohne den Schlüssel sind ausgestellte Badges nicht mehr prüfbar).", cfg.Blockchain.BadgeKeyFile);
+if (badgeSigner.GeneratedKeyFile && (await db.QueryAsync("SELECT id FROM certificates LIMIT 1")).Count > 0)
+{
+    // Es gibt bereits Zertifikate, aber der Schlüssel musste neu erzeugt werden: Schlüsselverlust, kein Neubeginn. Den frisch erzeugten Schlüssel samt Marker wieder entfernen
+    // (sonst würde der nächste Start ihn stillschweigend verwenden) und abbrechen.
+    try { File.Delete(cfg.Blockchain.BadgeKeyFile); File.Delete(BadgeSigner.MarkerPath(cfg.Blockchain.BadgeKeyFile)); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+    throw new InvalidOperationException("Es existieren bereits Zertifikate, der Badge-Signaturschlüssel fehlt aber. Es wird kein neuer Schlüssel verwendet, damit ausgestellte Badges gültig bleiben. Schlüssel aus der Sicherung wiederherstellen (docs/iis-deployment.md).");
+}
 var imageService = app.Services.GetRequiredService<CardImageService>();
 var convertedImages = await imageService.MigrateLegacyInlineImagesAsync();
 if (convertedImages > 0) app.Logger.LogInformation("Bilder von {Count} Karten in den Bildspeicher überführt (images_json bleibt unverändert).", convertedImages);

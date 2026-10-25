@@ -59,6 +59,8 @@ Die Pipeline ersetzt die Platzhalter beim Deploy.
 
 ## GitHub Variables
 
+Neu: `IIS_CONFIG_ROOT` (optional) – Basisverzeichnis für `.env` und Badge-Schlüssel außerhalb des Webroots; Standard `%ProgramData%\LearnCards\<IIS_SITE_NAME>`. Darf nicht im Webroot liegen.
+
 Unter GitHub → `Settings` → `Secrets and variables` → `Actions` → `Variables` anlegen:
 
 - `IIS_SITE_NAME`
@@ -147,7 +149,7 @@ Bei einem neuen Tag:
    - ASP.NET Core Hosting Bundle vorhanden oder installierbar
    - .NET 10 ASP.NET Core Runtime vorhanden oder installierbar
    - Site/App Pool/Verzeichnis konfigurierbar
-6. Das Web-Paket wird nach `IIS_PHYSICAL_PATH` gespiegelt.
+6. Das Web-Paket wird nach `IIS_PHYSICAL_PATH` gespiegelt (`robocopy /MIR /XD data logs`: `data` und `logs` werden weder überschrieben noch gelöscht).
 7. Das MCP-Paket wird, falls `MCP_PHYSICAL_PATH` gesetzt ist, in dieses Verzeichnis gespiegelt.
 8. Im MCP-Verzeichnis werden zusätzlich erzeugt:
    - `learncards-mcp.cmd` als Startskript
@@ -157,7 +159,7 @@ Bei einem neuen Tag:
    - `deploy/iis/web.env` → gerenderte `.env`
    - `deploy/iis/mcpsettings.json` → gerenderte `mcpsettings.json`
 10. Die gerenderten Dateien werden auf den Zielserver gesetzt:
-   - gerenderte `.env` → `<IIS_PHYSICAL_PATH>\.env`
+   - gerenderte `.env` → **außerhalb des Webroots** `<IIS_CONFIG_ROOT>\config\.env` (Standard `%ProgramData%\LearnCards\<Site>`; siehe „Geheimnisse und Badge-Schlüssel“)
    - gerenderte `mcpsettings.json` → `<MCP_PHYSICAL_PATH>\mcpsettings.json`
    Falls die MCP-Datei im Repository fehlt, greift die Pipeline auf die bestehende Datei oder
    notfalls auf `mcpsettings.example.json` zurück.
@@ -256,3 +258,37 @@ auch als eigenständiger HTTP-Endpoint für MCP-fähige LLM-Clients betrieben we
 
 Wenn `transports.http.enabled=false` ist, entfernt die Pipeline einen eventuell vorhandenen
 Windows-Dienst wieder und belässt den MCP-Teil im reinen `stdio`-/Client-Start-Modus.
+
+## Geheimnisse und Badge-Schlüssel (ADR 0023)
+
+**Speicherorte** (außerhalb des Webroots, vom Spiegeln des Webroots unberührt; Basis `IIS_CONFIG_ROOT`, Standard `%ProgramData%\LearnCards\<IIS_SITE_NAME>`):
+
+| Was | Pfad | Rechte |
+|---|---|---|
+| Produktive `.env` | `<root>\config\.env` (die Anwendung findet sie über die App-Pool-Umgebungsvariable `ENV_FILE`) | SYSTEM, Administratoren, Deploy-Konto: Vollzugriff; App-Pool: **nur Lesen** |
+| Privater Badge-Schlüssel | `<root>\keys\badge-signing-key.pem` (`BADGE_SIGNING_KEY_FILE`, vom Deployment in die `.env` geschrieben) | wie oben; App-Pool nur Lesen, sobald Schlüssel **und** Marker existieren |
+| Marker „initialisiert“ | `<root>\keys\badge-signing-key.pem.initialized` (nur Schlüssel-ID und Zeitpunkt, kein Geheimnis) | wie der Schlüssel |
+
+- Vererbung ist entfernt; es gibt keinen Zugriff für `Users`/`Everyone`/`Authenticated Users` (das Deployment prüft das und bricht sonst ab).
+- Im Webroot: App-Pool nur Lesen/Ausführen; Schreiben nur in `data` und `logs`. Der Pool hat keine Administratorrechte.
+- Beim Upgrade werden vorhandene `.env`-Werte nie durch leere ersetzt (nur wenn der neu gerenderte Wert leer und der alte gefüllt ist); eine bisherige `.env` im Webroot wird als Quelle übernommen und danach beim Spiegeln entfernt.
+- Der Workflow gibt keine Werte aus; Prüfungen nennen nur Pfade und Status.
+
+**App-Pool:** `ApplicationPoolIdentity`, **Benutzerprofil laden = True** (setzt das Deployment), Umgebungsvariable `ENV_FILE`. Request Filtering (`web.config`) sperrt zusätzlich `.env`, `.pem`, `.key`, `.initialized`, `.db`, `.config` sowie die Segmente `data`, `logs`, `keys`.
+
+**Erstinitialisierung:** Ist weder Schlüssel noch Marker vorhanden, erzeugt die Anwendung beim ersten Start einen ECDSA-P-256-Schlüssel — in einer temporären Datei im Schlüsselverzeichnis, dann ohne Überschreiben an den Zielort verschoben (atomar; bei parallelen Starts gewinnt genau einer). Danach wird der Schlüssel neu geladen, eine Signatur-Selbstprüfung ausgeführt und der Marker geschrieben. Das Deployment gibt dem Pool Schreibrecht auf das Schlüsselverzeichnis nur bis Schlüssel und Marker existieren; ab dem nächsten Deployment gilt nur Lesen.
+
+**Bestehende Installationen:** Liegt ein Schlüssel im bisherigen Webroot (`data\badge-signing-key.pem`), wird er **kopiert** (nie gelöscht); der Marker entsteht beim ersten Start. Ein Schlüssel, der zur Initialisierung nicht passt (andere Schlüssel-ID), wird abgelehnt.
+
+**Schlüsselverlust:** Fehlt der Schlüssel bei vorhandenem Marker — oder entstünde ein neuer Schlüssel, obwohl bereits Zertifikate in der Datenbank liegen — bricht der Start mit einer klaren Meldung ab; es wird **kein** neuer Schlüssel erzeugt. Das Deployment bricht schon vorher ab. Wiederherstellung: Schlüsseldatei aus der Sicherung nach `<root>\keys\` kopieren. Nur bei bewusster Rotation (nicht automatisiert, macht ausgestellte Badges unprüfbar) Schlüssel und Marker gemeinsam entfernen.
+
+**Sicherung:** `<root>\keys\badge-signing-key.pem` und `<root>\config\.env` verschlüsselt sichern (Passwortmanager/Tresor/Key-Vault-Backup); nie ins Repository. Der Marker ist ersetzbar, der Schlüssel nicht.
+
+**Fehlerhafte PEM-Datei:** Der Start bricht mit „Der Badge-Signaturschlüssel konnte nicht geladen werden (…)“ ab (nur Fehlertyp, nie Inhalt). Erwartet: ECDSA P-256, PKCS#8 (`BEGIN PRIVATE KEY`) oder SEC1 (`BEGIN EC PRIVATE KEY`).
+
+**Prüfung nach einem Deployment** (Schritt „Verify Secure Configuration“, schlägt bei Befund fehl): `/.env`, `/data/…pem`, `/keys/…pem`, `/appsettings.json`, `/web.config`, `/LearnCards.Web.dll`, `/data/learncards.db` u. a. dürfen keinen Inhalt liefern (403/404 zulässig, 2xx mit sensiblem Inhalt = Fehler); Schlüssel und Marker müssen existieren; die veröffentlichte Schlüssel-ID (`/.well-known/jwks.json`) muss der des Markers entsprechen — also derselbe Schlüssel wie bei der Initialisierung. Signieren und Prüfen testet die Anwendung bei jedem Start selbst (Start bricht sonst ab, `/health` bleibt rot).
+
+### Fehlerbild HTTP 500.30: `The system cannot find the file specified` in `ECDsaCng.ImportPkcs8PrivateKey`
+
+- **Vermutete Ursache (nicht unter IIS nachgestellt):** `ImportFromPem`/`ImportPkcs8PrivateKey` laufen unter Windows über den CNG-Schlüsseldienst (NCrypt); ohne geladenes Benutzerprofil des App-Pool-Kontos kann dieser Weg so fehlschlagen. Weiterer Auslöser in diesem Repository: `robocopy /MIR` löschte frühere `data\`-Inhalte im Webroot.
+- **Behebung:** Der Schlüssel wird zuerst selbst in `ECParameters` zerlegt und flüchtig im Prozess importiert (ohne NCrypt-Schlüsselspeicher); „Benutzerprofil laden“ wird vom Deployment gesetzt; `data`/`logs` werden beim Spiegeln ausgenommen.

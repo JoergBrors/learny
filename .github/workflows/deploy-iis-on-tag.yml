@@ -89,6 +89,8 @@ jobs:
       IIS_SITE_NAME: ${{ vars.IIS_SITE_NAME }}
       IIS_APP_POOL: ${{ vars.IIS_APP_POOL }}
       IIS_PHYSICAL_PATH: ${{ vars.IIS_PHYSICAL_PATH }}
+      # Ablage für .env und Badge-Schlüssel außerhalb des Webroots (Standard: %ProgramData%\LearnCards\<Site>)
+      IIS_CONFIG_ROOT: ${{ vars.IIS_CONFIG_ROOT }}
       IIS_BINDING_URL: ${{ vars.IIS_BINDING_URL }}
       IIS_PORT: ${{ vars.IIS_PORT }}
       IIS_HOST_HEADER: ${{ vars.IIS_HOST_HEADER }}
@@ -97,6 +99,7 @@ jobs:
       MCP_SERVICE_NAME: ${{ vars.MCP_SERVICE_NAME }}
       MCP_HTTP_HEALTH_URL: ${{ vars.MCP_HTTP_HEALTH_URL }}
       DEPLOY_APP_DOMAIN: ${{ vars.APP_DOMAIN }}
+      DEPLOY_PUBLIC_BASE_URL: ${{ vars.PUBLIC_BASE_URL }}
       DEPLOY_DEBUG: ${{ vars.DEBUG }}
       DEPLOY_DB_PROVIDER: ${{ vars.DB_PROVIDER }}
       DEPLOY_SQLITE_PATH: ${{ vars.SQLITE_PATH }}
@@ -302,6 +305,7 @@ jobs:
           }
           Render-File -SourcePath $webTemplate -TargetPath $webTarget -Tokens @{
             "__APP_DOMAIN__" = $env:DEPLOY_APP_DOMAIN
+            "__PUBLIC_BASE_URL__" = $env:DEPLOY_PUBLIC_BASE_URL
             "__DEBUG__" = $env:DEPLOY_DEBUG
             "__DB_PROVIDER__" = $env:DEPLOY_DB_PROVIDER
             "__SQLITE_PATH__" = $env:DEPLOY_SQLITE_PATH
@@ -507,12 +511,136 @@ jobs:
           $appPoolIdentity = "IIS AppPool\$($env:IIS_APP_POOL)"
           Grant-DirectoryAccess -Path $env:IIS_PHYSICAL_PATH -Identity "NT AUTHORITY\SYSTEM" -Rights "(OI)(CI)(F)"
           Grant-DirectoryAccess -Path $env:IIS_PHYSICAL_PATH -Identity "BUILTIN\Administrators" -Rights "(OI)(CI)(F)"
-          Grant-DirectoryAccess -Path $env:IIS_PHYSICAL_PATH -Identity $appPoolIdentity -Rights "(OI)(CI)(M)"
+          Grant-DirectoryAccess -Path $env:IIS_PHYSICAL_PATH -Identity $appPoolIdentity -Rights "(OI)(CI)(RX)"
 
           if (-not [string]::IsNullOrWhiteSpace($env:MCP_PHYSICAL_PATH)) {
             Grant-DirectoryAccess -Path $env:MCP_PHYSICAL_PATH -Identity "NT AUTHORITY\SYSTEM" -Rights "(OI)(CI)(F)"
             Grant-DirectoryAccess -Path $env:MCP_PHYSICAL_PATH -Identity "BUILTIN\Administrators" -Rights "(OI)(CI)(F)"
           }
+
+      - name: Prepare Secure Config And Key Paths
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Import-Module WebAdministration
+
+          # 1. Zielkonfiguration validieren
+          foreach ($required in @("IIS_SITE_NAME", "IIS_APP_POOL", "IIS_PHYSICAL_PATH")) {
+            if ([string]::IsNullOrWhiteSpace((Get-Item -Path "Env:$required").Value)) { throw "Pflichtvariable '$required' fehlt." }
+          }
+          $configRoot = if ([string]::IsNullOrWhiteSpace($env:IIS_CONFIG_ROOT)) { Join-Path $env:ProgramData ("LearnCards\" + $env:IIS_SITE_NAME) } else { $env:IIS_CONFIG_ROOT }
+          $configRoot = [IO.Path]::GetFullPath($configRoot).TrimEnd('\')
+          $webRoot = [IO.Path]::GetFullPath($env:IIS_PHYSICAL_PATH).TrimEnd('\')
+          if ($configRoot -eq $webRoot -or $configRoot.StartsWith($webRoot + '\', [StringComparison]::OrdinalIgnoreCase) -or $webRoot.StartsWith($configRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
+            throw "IIS_CONFIG_ROOT ('$configRoot') darf nicht im oder über dem Webroot liegen - Geheimnisse gehören außerhalb des öffentlichen Verzeichnisses."
+          }
+          $configDir = Join-Path $configRoot "config"
+          $keysDir = Join-Path $configRoot "keys"
+          $envFile = Join-Path $configDir ".env"
+          $keyFile = Join-Path $keysDir "badge-signing-key.pem"
+          $marker = $keyFile + ".initialized"
+          $poolName = $env:IIS_APP_POOL
+          $poolIdentity = "IIS AppPool\$poolName"
+
+          function Invoke-Icacls {
+            param([string[]]$IcaclsArgs)
+            & icacls.exe @IcaclsArgs | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "icacls fehlgeschlagen ($($IcaclsArgs[0]))." }
+            $global:LASTEXITCODE = 0
+          }
+          # Vererbung entfernen und nur die genannten Konten berechtigen: Administratoren/SYSTEM/Deploy-Konto Vollzugriff, App-Pool nur $PoolRights.
+          $runnerSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          function Set-StrictAcl {
+            param([string]$Path, [string]$PoolRights, [bool]$Container)
+            $inherit = if ($Container) { "(OI)(CI)" } else { "" }
+            Invoke-Icacls @($Path, "/inheritance:r")
+            Invoke-Icacls @($Path, "/grant:r", "*S-1-5-18:${inherit}F", "*S-1-5-32-544:${inherit}F", "*${runnerSid}:${inherit}F", "${poolIdentity}:${inherit}${PoolRights}")
+          }
+          function Assert-NoBroadAccess {
+            param([string]$Path)
+            $acl = (& icacls.exe $Path) -join "`n"
+            foreach ($bad in @("Everyone", "BUILTIN\Users", "Authenticated Users", "NT AUTHORITY\INTERACTIVE")) {
+              if ($acl -match [regex]::Escape($bad)) { throw "Zu weitreichende Berechtigung ('$bad') auf '$Path'." }
+            }
+          }
+
+          # 2. Sichere Konfigurations- und Datenpfade vorbereiten (außerhalb des Webroots; vom Webroot-Sync unberührt)
+          foreach ($d in @($configRoot, $configDir, $keysDir)) { if (-not (Test-Path -LiteralPath $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null } }
+
+          # Bestehende Installation: Schlüssel aus dem bisherigen Datenverzeichnis übernehmen (kopieren, niemals löschen oder überschreiben)
+          $legacyKey = Join-Path $webRoot "data\badge-signing-key.pem"
+          if (-not (Test-Path -LiteralPath $keyFile) -and -not (Test-Path -LiteralPath $marker) -and (Test-Path -LiteralPath $legacyKey)) {
+            Copy-Item -LiteralPath $legacyKey -Destination $keyFile
+            Write-Host "Bestehender Badge-Schlüssel aus dem Webroot-Datenverzeichnis in den geschützten Schlüsselpfad übernommen."
+          }
+          # Fail-closed: Installation war bereits initialisiert, der Schlüssel fehlt jetzt -> NICHT neu erzeugen, Deployment abbrechen
+          if ((Test-Path -LiteralPath $marker) -and -not (Test-Path -LiteralPath $keyFile)) {
+            throw "Der Badge-Schlüssel fehlt in '$keysDir', obwohl die Installation bereits initialisiert wurde (Marker vorhanden). Kein neuer Schlüssel wird erzeugt. Schlüssel aus der Sicherung wiederherstellen."
+          }
+          $keyExists = Test-Path -LiteralPath $keyFile
+
+          # 3. Berechtigungen setzen
+          Set-StrictAcl -Path $configDir -PoolRights "R" -Container $true
+          # Schlüsselverzeichnis: Schreibrecht für den Pool nur, solange Schlüssel oder Marker noch fehlen (Erstinitialisierung durch die Anwendung); danach nur Lesen.
+          $initDone = $keyExists -and (Test-Path -LiteralPath $marker)
+          Set-StrictAcl -Path $keysDir -PoolRights $(if ($initDone) { "R" } else { "M" }) -Container $true
+          if ($keyExists) { Set-StrictAcl -Path $keyFile -PoolRights "R" -Container $false }
+          if (Test-Path -LiteralPath $marker) { Set-StrictAcl -Path $marker -PoolRights "R" -Container $false }
+          # Webroot: Pool darf nur lesen/ausführen; Schreibzugriff nur auf data und logs
+          foreach ($sub in @("data\keys", "logs")) { $p = Join-Path $webRoot $sub; if (-not (Test-Path -LiteralPath $p)) { New-Item -ItemType Directory -Path $p -Force | Out-Null } }
+          Invoke-Icacls @($webRoot, "/grant", "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F", "${poolIdentity}:(OI)(CI)RX")
+          foreach ($sub in @("data", "logs")) { Invoke-Icacls @((Join-Path $webRoot $sub), "/grant", "${poolIdentity}:(OI)(CI)M") }
+
+          # 4. .env geschützt und atomar ablegen; vorhandene Werte werden nie durch leere ersetzt
+          function Read-EnvMap {
+            param([string]$Path)
+            $m = @{}
+            if (Test-Path -LiteralPath $Path) {
+              foreach ($l in Get-Content -LiteralPath $Path) { if ($l -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$') { $m[$Matches[1]] = $Matches[2].Trim() } }
+            }
+            return $m
+          }
+          $rendered = Join-Path $env:PACKAGE_ROOT "rendered-config\web.env"
+          if (-not (Test-Path -LiteralPath $rendered)) { throw "Gerenderte Konfiguration fehlt: $rendered" }
+          $existing = Read-EnvMap $envFile
+          if ($existing.Count -eq 0) { $existing = Read-EnvMap (Join-Path $webRoot ".env") }   # Upgrade: bisherige .env im Webroot
+          $keep = 0
+          $lines = foreach ($line in Get-Content -LiteralPath $rendered) {
+            if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$' -and [string]::IsNullOrWhiteSpace($Matches[2]) -and $existing.ContainsKey($Matches[1]) -and -not [string]::IsNullOrWhiteSpace($existing[$Matches[1]])) {
+              $keep++
+              "$($Matches[1])=$($existing[$Matches[1]])"
+            } else { $line }
+          }
+          $renderedMap = Read-EnvMap $rendered
+          if (-not $renderedMap.ContainsKey("BADGE_SIGNING_KEY_FILE") -and -not $renderedMap.ContainsKey("BADGE_SIGNING_KEY_PEM")) { $lines = @($lines) + "BADGE_SIGNING_KEY_FILE=$keyFile" }
+          $tmp = Join-Path $configDir (".env.tmp-" + [guid]::NewGuid().ToString("N"))
+          [IO.File]::WriteAllText($tmp, (($lines -join "`n") + "`n"), (New-Object Text.UTF8Encoding($false)))
+          Set-StrictAcl -Path $tmp -PoolRights "R" -Container $false
+          if (Test-Path -LiteralPath $envFile) { Set-StrictAcl -Path $envFile -PoolRights "R" -Container $false }   # bekannte ACL, damit der atomare Austausch möglich ist
+          [IO.File]::Move($tmp, $envFile, $true)
+          Write-Host ".env geschützt abgelegt ($envFile); $keep vorhandene Werte statt leerer Platzhalter beibehalten."
+
+          # 5. App-Pool: Benutzerprofil laden (CNG), Pfad der .env als Umgebungsvariable (kein Geheimnis)
+          $poolPath = "IIS:\AppPools\$poolName"
+          Set-ItemProperty $poolPath -Name processModel.loadUserProfile -Value $true
+          if ((Get-ItemProperty $poolPath -Name processModel.identityType).ToString() -ne "ApplicationPoolIdentity") { throw "App-Pool läuft nicht als ApplicationPoolIdentity." }
+          $filter = "system.applicationHost/applicationPools/add[@name='$poolName']/environmentVariables"
+          try { Remove-WebConfigurationProperty -PSPath "MACHINE/WEBROOT/APPHOST" -Filter $filter -Name "." -AtElement @{ name = "ENV_FILE" } -ErrorAction Stop } catch { }
+          Add-WebConfigurationProperty -PSPath "MACHINE/WEBROOT/APPHOST" -Filter $filter -Name "." -Value @{ name = "ENV_FILE"; value = $envFile }
+
+          # 6. Request Filtering muss verfügbar sein (web.config sperrt .env/.pem/data/keys/logs)
+          if (-not (Test-Path (Join-Path $env:windir "System32\inetsrv\requestfiltering.dll"))) { throw "IIS Request Filtering (Web-Filtering) ist nicht installiert." }
+
+          # 7. Berechtigungen erneut prüfen, bevor die Anwendung startet
+          foreach ($p in @($configDir, $envFile, $keysDir)) { Assert-NoBroadAccess $p }
+          if ($keyExists) { Assert-NoBroadAccess $keyFile }
+          if ((Get-ItemProperty $poolPath -Name processModel.loadUserProfile).Value -ne $true) { throw "loadUserProfile ist nicht aktiv." }
+
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "## Sichere Konfiguration"
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ("- .env: ``{0}``" -f $envFile)
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ("- Schlüsselpfad: ``{0}`` (vorhanden: {1}, Marker: {2})" -f $keyFile, $keyExists, (Test-Path -LiteralPath $marker))
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ("- App-Pool: ``{0}``, Benutzerprofil laden: True" -f $poolIdentity)
+          if (-not $keyExists) { Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- Erstinitialisierung: Die Anwendung erzeugt den Schlüssel beim ersten Start." }
 
       - name: Install Web Deployment Package
         shell: powershell
@@ -542,7 +670,7 @@ jobs:
 
           New-Item -ItemType Directory -Path $backupPath -Force | Out-Null
           if (Test-Path -LiteralPath $env:IIS_PHYSICAL_PATH) {
-            robocopy $env:IIS_PHYSICAL_PATH $backupPath /E /NFL /NDL /NJH /NJS /NP | Out-Null
+            robocopy $env:IIS_PHYSICAL_PATH $backupPath /E /XF .env *.pem *.initialized /NFL /NDL /NJH /NJS /NP | Out-Null
             $backupRobocopyExit = $LASTEXITCODE
             if ($backupRobocopyExit -gt 7) {
               throw "Backup-Robocopy fehlgeschlagen mit Exit-Code $backupRobocopyExit."
@@ -550,17 +678,15 @@ jobs:
             $global:LASTEXITCODE = 0
           }
 
-          robocopy $extractPath $env:IIS_PHYSICAL_PATH /MIR /R:2 /W:2 /NFL /NDL /NJH /NJS /NP
+          # data (Datenbank, Data-Protection-Schlüssel) und logs liegen nur im Ziel und dürfen vom Spiegeln weder überschrieben noch gelöscht werden
+          robocopy $extractPath $env:IIS_PHYSICAL_PATH /MIR /XD data logs /R:2 /W:2 /NFL /NDL /NJH /NJS /NP
           $robocopyExit = $LASTEXITCODE
           if ($robocopyExit -gt 7) {
             throw "Robocopy fehlgeschlagen mit Exit-Code $robocopyExit."
           }
           $global:LASTEXITCODE = 0
 
-          $repoEnvFile = Join-Path $env:PACKAGE_ROOT "rendered-config\web.env"
-          if (Test-Path -LiteralPath $repoEnvFile) {
-            Copy-Item -LiteralPath $repoEnvFile -Destination (Join-Path $env:IIS_PHYSICAL_PATH ".env") -Force
-          }
+          # Die .env liegt geschützt außerhalb des Webroots (Schritt "Prepare Secure Config And Key Paths"); im Webroot wird keine .env abgelegt.
 
           if ((Get-Service -Name W3SVC).Status -ne "Running") {
             Start-Service -Name W3SVC
@@ -897,6 +1023,59 @@ jobs:
           if ($response.StatusCode -lt 200 -or $response.StatusCode -ge 300) {
             throw "Health-Check fehlgeschlagen: $($response.StatusCode)"
           }
+
+      - name: Verify Secure Configuration
+        if: ${{ env.IIS_BINDING_URL != '' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $configRoot = if ([string]::IsNullOrWhiteSpace($env:IIS_CONFIG_ROOT)) { Join-Path $env:ProgramData ("LearnCards\" + $env:IIS_SITE_NAME) } else { $env:IIS_CONFIG_ROOT }
+          $keysDir = Join-Path ([IO.Path]::GetFullPath($configRoot)) "keys"
+          $keyFile = Join-Path $keysDir "badge-signing-key.pem"
+          $marker = $keyFile + ".initialized"
+          $baseUri = [Uri]$env:IIS_BINDING_URL
+          $port = if ([string]::IsNullOrWhiteSpace($env:IIS_PORT)) { $baseUri.Port } else { [int]$env:IIS_PORT }
+          $b = [System.UriBuilder]::new($baseUri); $b.Port = $port; $b.Query = ""
+          $root = $b.Uri.AbsoluteUri.TrimEnd('/')
+          $failures = New-Object System.Collections.Generic.List[string]
+
+          # Schlüssel und Marker müssen nach dem ersten Start existieren
+          if (-not (Test-Path -LiteralPath $keyFile)) { $failures.Add("Badge-Schlüssel fehlt nach dem Start: $keyFile") }
+          if (-not (Test-Path -LiteralPath $marker)) { $failures.Add("Marker der Schlüsselinitialisierung fehlt: $marker") }
+
+          # Zugriff auf sensible Pfade darf nie Inhalt liefern (403/404 ok). Inhalte werden nie ausgegeben.
+          $paths = @("/.env", "/data/badge-signing-key.pem", "/badge-signing-key.pem", "/keys/badge-signing-key.pem", "/data/keys/badge-signing-key.pem",
+            "/badge-signing-key.pem.initialized", "/appsettings.json", "/web.config", "/LearnCards.Web.dll", "/data/learncards.db", "/logs/stdout.log", "/mcpsettings.json", "/web.env")
+          $sensitive = 'BEGIN (EC |)PRIVATE KEY|POSTGRES_PASSWORD|OIDC_CLIENT_SECRET|MCP_API_KEY|OPENAI_API_KEY|SQLite format 3|ConnectionStrings|aspNetCore'
+          foreach ($p in $paths) {
+            try { $r = Invoke-WebRequest -Uri ($root + $p) -UseBasicParsing -TimeoutSec 20 -SkipHttpErrorCheck -MaximumRedirection 0 }
+            catch { continue }   # Verbindungs-/Umleitungsfehler liefern keinen Inhalt
+            $code = [int]$r.StatusCode
+            if ($code -ge 200 -and $code -lt 300) {
+              $ct = [string]$r.Headers["Content-Type"]
+              $body = if ($r.Content -is [byte[]]) { [Text.Encoding]::Latin1.GetString($r.Content) } else { [string]$r.Content }
+              if ($body -match $sensitive -or $ct -notmatch 'text/html') { $failures.Add("Sensibler Pfad liefert HTTP ${code}: $p") }
+              else { Write-Warning "Pfad $p liefert HTTP $code (HTML ohne sensible Marker)." }
+            }
+            Write-Host ("{0} -> HTTP {1}" -f $p, $code)
+          }
+
+          # Badge-Schlüssel: veröffentlichte Schlüssel-ID muss zur Initialisierung gehören (gleicher Schlüssel wie beim ersten Deployment)
+          try {
+            $jwks = Invoke-RestMethod -Uri ($root + "/.well-known/jwks.json") -TimeoutSec 20
+            $kid = $jwks.keys[0].kid
+            $recorded = (Get-Content -LiteralPath $marker -Raw | ConvertFrom-Json).key_id
+            if ([string]::IsNullOrWhiteSpace($kid) -or $kid -ne $recorded) { $failures.Add("Schlüssel-ID im Betrieb ('$kid') stimmt nicht mit der Initialisierung ('$recorded') überein.") }
+            else { Write-Host "Badge-Schlüssel-ID: $kid (unverändert zur Initialisierung)"; Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- Badge-Schlüssel-ID: ``$kid``" }
+            $issuer = Invoke-WebRequest -Uri ($root + "/badges/issuer") -UseBasicParsing -TimeoutSec 20
+            if ($issuer.StatusCode -ne 200) { $failures.Add("/badges/issuer nicht erreichbar.") }
+          } catch { $failures.Add("Badge-Signierung nicht prüfbar: $($_.Exception.GetType().Name)") }
+
+          if ($failures.Count -gt 0) {
+            $failures | ForEach-Object { Write-Error $_ -ErrorAction Continue }
+            throw "Sicherheitsprüfung nach dem Deployment fehlgeschlagen ($($failures.Count) Befunde)."
+          }
+          Write-Host "Sicherheitsprüfung bestanden."
 
       - name: Verify MCP HTTP Service
         if: ${{ env.MCP_PHYSICAL_PATH != '' && env.MCP_HTTP_HEALTH_URL != '' }}

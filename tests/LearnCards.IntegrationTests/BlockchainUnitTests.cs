@@ -539,9 +539,56 @@ public static class BlockchainUnitTests
             var auditor = await e.AddUserAsync("Auditor", Roles.Auditor);
             var g = await e.IssueAsync(scope: "global"); var p = await e.IssueAsync(scope: "private"); var s = await e.IssueAsync(scope: "shared");
             var seen = await e.Certs.ListForAuditorAsync(auditor, new CertificateService.AuditorFilter(null, null, null, null, null, null, null));
+            {
+                // B23 Schlüsselimport (IIS-Startfehler): PKCS#8 und SEC1 werden ohne CNG-Schlüsseldienst importiert; Signaturen bleiben kompatibel; Fehler verraten keinen Schlüssel.
+                using var orig = System.Security.Cryptography.ECDsa.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
+                var data = System.Text.Encoding.UTF8.GetBytes("x");
+                var h = System.Security.Cryptography.HashAlgorithmName.SHA256;
+                var pkcs8 = orig.ExportPkcs8PrivateKeyPem(); var sec1 = orig.ExportECPrivateKeyPem();
+                using var k1 = BadgeSigner.ImportKey(pkcs8); using var k2 = BadgeSigner.ImportKey(sec1);
+                check(orig.VerifyData(data, k1.SignData(data, h), h) && orig.VerifyData(data, k2.SignData(data, h), h) && k1.VerifyData(data, orig.SignData(data, h), h), "B23 Schlüsselimport: PKCS#8 und SEC1 liefern denselben Schlüssel (Signaturen gegenseitig gültig)");
+                var secret = Convert.ToBase64String(new byte[48]);
+                string? msg = null;
+                try { BadgeSigner.ImportKey("-----BEGIN PRIVATE KEY-----" + Environment.NewLine + secret + Environment.NewLine + "-----END PRIVATE KEY-----"); } catch (InvalidOperationException ex) { msg = ex.Message; }
+                check(msg is not null && !msg.Contains(secret) && msg.Contains("Benutzerprofil"), "B23 Schlüsselimport: ungültiger Schlüssel → verständliche Meldung mit IIS-Hinweis, ohne Schlüsselinhalt");
+                string? msg2 = null;
+                try { BadgeSigner.ImportKey("kein pem"); } catch (InvalidOperationException ex) { msg2 = ex.Message; }
+                check(msg2 is not null, "B23 Schlüsselimport: Nicht-PEM wird abgelehnt (keine stille Deaktivierung)");
+            }
+            {
+                // B24 Schlüsselverwaltung: einmalige Erzeugung, Wiederverwendung, Verlust = Fehler statt Rotation, parallele Starts, defekte PEM
+                var kd = Path.Combine(tmp, "keys-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(kd);
+                BadgeSigner Make(string f) => new(new AppConfig { Blockchain = new BlockchainSettings { BadgeKeyFile = f } });
+                var kf = Path.Combine(kd, "badge-signing-key.pem");
+                var first = Make(kf);
+                check(first.GeneratedKeyFile && File.Exists(kf) && File.Exists(BadgeSigner.MarkerPath(kf)) && Directory.GetFiles(kd, "*.tmp").Length == 0, "B24 Erstinstallation: Schlüssel und Marker werden erzeugt, keine temporären Dateien bleiben");
+                var again = Make(kf);
+                check(!again.GeneratedKeyFile && again.KeyId == first.KeyId && Directory.GetFiles(kd).Length == 2, "B24 Neustart/zweites Deployment: derselbe Schlüssel (gleiche Schlüssel-ID), keine zweite Schlüsseldatei");
+                var jws = first.Sign(new JsonObject { ["x"] = 1 }, "https://learny.test/badges/issuer#" + first.KeyId);
+                check(again.Verify(jws).SignatureValid, "B24 Signatur des ersten Starts ist nach dem Neustart weiterhin gültig");
+                var keep = File.ReadAllBytes(kf);
+                File.Delete(kf);
+                string? lost = null;
+                try { Make(kf); } catch (InvalidOperationException ex) { lost = ex.Message; }
+                check(lost is not null && lost.Contains("fehlt") && !File.Exists(kf), "B24 Schlüsselverlust nach Initialisierung: klarer Fehler, kein neuer Schlüssel");
+                File.WriteAllBytes(kf, keep);
+                var other = System.Security.Cryptography.ECDsa.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256).ExportPkcs8PrivateKeyPem();
+                File.WriteAllText(kf, other);
+                string? swapped = null;
+                try { Make(kf); } catch (InvalidOperationException ex) { swapped = ex.Message; }
+                check(swapped is not null && swapped.Contains("passt nicht"), "B24 fremder Schlüssel bei bestehender Initialisierung wird abgelehnt");
+                File.WriteAllBytes(kf, keep);
+                File.WriteAllText(kf, "-----BEGIN PRIVATE KEY-----" + Environment.NewLine + "AAAA" + Environment.NewLine + "-----END PRIVATE KEY-----");
+                string? broken = null;
+                try { Make(kf); } catch (InvalidOperationException ex) { broken = ex.Message; }
+                check(broken is not null && !broken.Contains("AAAA"), "B24 defekte PEM-Datei: Start bricht verständlich ab, ohne Inhalt");
+                var pd = Path.Combine(tmp, "par-" + Guid.NewGuid().ToString("N")); var pf = Path.Combine(pd, "k.pem");
+                var ids = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(() => Make(pf).KeyId)));
+                check(ids.Distinct().Count() == 1 && Directory.GetFiles(pd, "*.pem").Length == 1 && Directory.GetFiles(pd, "*.tmp").Length == 0, "B24 acht parallele Erststarts: genau ein Schlüssel, alle verwenden dieselbe Schlüssel-ID");
+            }
             check(GermanGrade.From(92) == 1 && GermanGrade.From(91.9) == 2 && GermanGrade.From(81) == 2 && GermanGrade.From(67) == 3 && GermanGrade.From(50) == 4 && GermanGrade.From(49.9) == 5 && GermanGrade.From(30) == 5 && GermanGrade.From(29) == 6, "B22 Noten: deutsche Skala 92/81/67/50/30");
             var html = e.Certs.RenderCertificateHtml(g);
-            check(html.Contains(g.Number) && html.Contains("Zertifikat") && !html.Contains("<script"), "B22 Zertifikat-HTML enthält Nummer, kein Skript");
+            check(html.Contains(g.Number) && html.Contains("Zertifikat") && !html.Contains("src=") && !html.Contains("http://") || html.Contains(g.Number) && html.Contains("JWT kopieren") && !html.Contains("<script src"), "B22 Zertifikat-HTML enthält Nummer, kein Skript");
             check(seen.Count == 1 && seen[0].Id == g.Id, "B21 Auditor: sieht nur Zertifikate global veröffentlichter Module — keine privaten oder nur freigegebenen");
             check(await e.Certs.GetForAuditorAsync(auditor, p.Id) is null && await e.Certs.GetForAuditorAsync(auditor, s.Id) is null && await e.Certs.GetForAuditorAsync(auditor, g.Id) is not null, "B21 Auditor: der Einzelabruf privater/freigegebener Zertifikate liefert nichts");
             bool denied = false; try { await e.Certs.ListForAuditorAsync(e.LearnerId, new CertificateService.AuditorFilter(null, null, null, null, null, null, null)); } catch (UnauthorizedAccessException) { denied = true; }
