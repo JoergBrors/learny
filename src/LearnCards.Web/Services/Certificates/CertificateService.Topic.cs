@@ -114,7 +114,7 @@ public sealed partial class CertificateService
             });
         return new JsonObject
         {
-            ["@context"] = new JsonArray(Vc2Context, Ob3Context), ["id"] = $"{BaseUrl}/verify/{c.Id}", ["type"] = new JsonArray("VerifiableCredential", "OpenBadgeCredential"),
+            ["@context"] = new JsonArray(Vc2Context, Ob3Context, RevocationListContext()), ["id"] = $"{BaseUrl}/verify/{c.Id}", ["type"] = new JsonArray("VerifiableCredential", "OpenBadgeCredential"),
             ["issuer"] = IssuerProfile(), ["validFrom"] = Iso(c.IssuedAt), ["name"] = $"{c.ModuleName} — Themenabschluss",
             ["credentialSubject"] = new JsonObject
             {
@@ -152,7 +152,7 @@ public sealed partial class CertificateService
         }
         return new JsonObject
         {
-            ["@context"] = new JsonArray(Vc2Context, ClrContext, Ob3Context), ["id"] = $"{BaseUrl}/verify/{c.Id}/clr", ["type"] = new JsonArray("VerifiableCredential", "ClrCredential"),
+            ["@context"] = new JsonArray(Vc2Context, ClrContext, Ob3Context, RevocationListContext()), ["id"] = $"{BaseUrl}/verify/{c.Id}/clr", ["type"] = new JsonArray("VerifiableCredential", "ClrCredential"),
             ["issuer"] = IssuerProfile(), ["validFrom"] = Iso(c.IssuedAt), ["name"] = $"{c.ModuleName} — Comprehensive Learner Record",
             ["credentialSubject"] = new JsonObject
             {
@@ -168,7 +168,7 @@ public sealed partial class CertificateService
     {
         if (string.IsNullOrEmpty(c.ClrJws)) return null;
         var credential = (JsonObject)JsonNode.Parse(BadgeSigner.PayloadText(c.ClrJws))!;
-        credential["proof"] = new JsonObject { ["type"] = "JwtProof2020", ["jwt"] = c.ClrJws };
+        credential["proof"] = ProofEnvelope(c.ClrJws, c.IssuedAt);
         return credential;
     }
 }

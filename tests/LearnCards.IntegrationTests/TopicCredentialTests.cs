@@ -27,8 +27,9 @@ public static class TopicCredentialTests
         foreach (var req in new[] { "@context", "type", "id", "credentialSubject", "issuer", "validFrom" }) if (vc[req] is null) errors.Add($"{kind}: {req} fehlt");
         var types = vc["type"]?.AsArray().Select(v => v!.GetValue<string>()).ToList() ?? new();
         if (!types.Contains("VerifiableCredential")) errors.Add($"{kind}: type ohne VerifiableCredential");
-        var ctx = vc["@context"]?.AsArray().Select(v => v!.GetValue<string>()).ToList() ?? new();
+        var ctx = vc["@context"]?.AsArray().Select(v => v is JsonValue ? v.GetValue<string>() : "{local}").ToList() ?? new();
         if (ctx.Count == 0 || ctx[0] != "https://www.w3.org/ns/credentials/v2") errors.Add($"{kind}: erster Kontext muss VC 2.0 sein");
+        if (vc["credentialStatus"]?["type"]?.ToString() == "1EdTechRevocationList" && !(vc["@context"]!.AsArray().Any(c => c is JsonObject o && o["1EdTechRevocationList"] is not null))) errors.Add($"{kind}: lokaler Kontext für 1EdTechRevocationList fehlt (sonst „Undefined JSON-LD term“ im 1EdTech-Verifier)");
         if (kind == "clr")
         {
             if (!types.Contains("ClrCredential")) errors.Add("clr: type ohne ClrCredential");

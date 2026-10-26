@@ -171,6 +171,12 @@ public static partial class ApiEndpoints
             http.Response.Headers.ContentDisposition = $"attachment; filename=\"clr-{c.Number}.json\"";
             return Results.Text(clr.ToJsonString(new() { WriteIndented = true }), "application/ld+json");
         });
+        mine.MapGet("/{id}/clr.jwt", async (string id, CertificateService certs, HttpContext http) =>
+        {
+            if (await certs.GetForUserAsync(Uid(http), id) is not { } c || string.IsNullOrEmpty(c.ClrJws)) return Results.Json(new { detail = "Kein CLR vorhanden." }, statusCode: 404);
+            http.Response.Headers.ContentDisposition = $"attachment; filename=\"clr-{c.Number}.jwt\"";
+            return Results.Text(c.ClrJws, "application/jwt");
+        });
         mine.MapGet("/{id}/badge.jwt", async (string id, CertificateService certs, HttpContext http) =>
         {
             if (await certs.GetForUserAsync(Uid(http), id) is not { } c) return Results.Json(new { detail = "Certificate not found" }, statusCode: 404);

@@ -226,7 +226,7 @@ public static class BlockchainUnitTests
             "B5 Badge-Ausstellung: signiertes Badge mit Nummer, Prüf-Hash, Merkle-Blatt; Verankerung ausstehend im Netzwerk Amoy (Chain-ID gespeichert)");
         var payload = JsonNode.Parse(BadgeSigner.PayloadText(c.BadgeJws))!;
         check(payload["type"]!.AsArray().Select(x => x!.GetValue<string>()).SequenceEqual(new[] { "VerifiableCredential", "OpenBadgeCredential" }) && payload["credentialSubject"]!["type"]![0]!.GetValue<string>() == "AchievementSubject"
-              && payload["issuer"]!["id"]!.GetValue<string>() == "https://learny.test/badges/issuer" && payload["@context"]!.AsArray().Count == 2 && payload["credentialStatus"]!["type"]!.GetValue<string>() == "1EdTechRevocationList",
+              && payload["issuer"]!["id"]!.GetValue<string>() == "https://learny.test/badges/issuer" && payload["@context"]!.AsArray().Count == 3 && payload["credentialStatus"]!["type"]!.GetValue<string>() == "1EdTechRevocationList",
             "B5 Open Badge 3.0: Kontexte, Typen (OpenBadgeCredential, AchievementSubject), Aussteller und Widerrufsliste");
         check(JsonNode.Parse(await Task.FromResult(BadgeSigner.PayloadText(c.BadgeJws)))!["credentialSubject"]!["achievement"]!["name"]!.GetValue<string>() == "Testmodul" && c.BadgeHash == BadgeSigner.HashHex(c.BadgeJws), "B5 Badge-Hash: SHA-256 der JWS, reproduzierbar");
         var signed = e.Certs.SignedBadgeJson(c).ToJsonString();

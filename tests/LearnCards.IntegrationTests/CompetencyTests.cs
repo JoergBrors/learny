@@ -92,7 +92,7 @@ public static class CompetencyTests
 
         // ─── Open Badge 3.0: Struktur (aus den offiziellen JSON-Schemas abgeleitete Pflichtfelder und Enums) ───
         var ach = badge!["credentialSubject"]!["achievement"]!;
-        var ctx = badge["@context"]!.AsArray().Select(v => v!.GetValue<string>()).ToList();
+        var ctx = badge["@context"]!.AsArray().Select(v => v is JsonValue ? v.GetValue<string>() : "{local}").ToList();
         bool ObNormative()
         {
             if (ctx[0] != "https://www.w3.org/ns/credentials/v2" || !ctx.Contains("https://purl.imsglobal.org/spec/ob/v3p0/context-3.0.3.json")) return false;

@@ -55,6 +55,19 @@ public sealed partial class CertificateService
     public string BaseUrl => !string.IsNullOrEmpty(_cfg.Blockchain.PublicBaseUrl) ? _cfg.Blockchain.PublicBaseUrl : ObservedOrigin ?? "http://localhost";
     public string IssuerId => BaseUrl + "/badges/issuer";
     public string KeyId => IssuerId + "#" + _signer.KeyId;
+
+    /// <summary>
+    /// Lokale Kontextdefinition für <c>credentialStatus.type = 1EdTechRevocationList</c>: Der veröffentlichte OB-3.0.3-Kontext definiert den Begriff nicht, die JSON-LD-Prüfung der
+    /// 1EdTech-Verifier meldet ihn sonst als „Undefined JSON-LD term“. Das OB-3.0-Schema erlaubt lokale Kontext-Maps an dieser Stelle.
+    /// </summary>
+    public static JsonObject RevocationListContext() => new() { ["1EdTechRevocationList"] = "https://purl.imsglobal.org/spec/ob/v3p0/vocab.html#1EdTechRevocationList" };
+
+    /// <summary>Embedded-Proof-Hülle um das VC-JWT: Pflichtfelder eines Linked-Data-Proofs (<c>proofPurpose</c>, <c>verificationMethod</c>), damit Verifier die Hülle nicht als unvollständigen Data-Integrity-Proof lesen. Die Signatur selbst ist das unveränderte <c>jwt</c>.</summary>
+    private JsonObject ProofEnvelope(string jws, DateTime created) => new()
+    {
+        ["type"] = "JwtProof2020", ["proofPurpose"] = "assertionMethod", ["verificationMethod"] = KeyId,
+        ["created"] = created.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'"), ["jwt"] = jws,
+    };
     public BadgeSigner Signer => _signer;
 
     // ─── Ausstellung ────────────────────────────────────────────────────────
@@ -121,7 +134,7 @@ public sealed partial class CertificateService
             + string.Concat(demonstrated.Select(e => $" Kompetenz „{e.Name}“: mindestens {e.PassPercent} % der Punkte bei mindestens {e.MinQuestions} geprüften Fragen."));
         var credential = new JsonObject
         {
-            ["@context"] = new JsonArray("https://www.w3.org/ns/credentials/v2", "https://purl.imsglobal.org/spec/ob/v3p0/context-3.0.3.json"),
+            ["@context"] = new JsonArray("https://www.w3.org/ns/credentials/v2", "https://purl.imsglobal.org/spec/ob/v3p0/context-3.0.3.json", RevocationListContext()),
             ["id"] = $"{BaseUrl}/verify/{c.Id}",
             ["type"] = new JsonArray("VerifiableCredential", "OpenBadgeCredential"),
             ["issuer"] = new JsonObject
@@ -202,7 +215,7 @@ public sealed partial class CertificateService
     public JsonObject SignedBadgeJson(Certificate c)
     {
         var credential = (JsonObject)JsonNode.Parse(BadgeSigner.PayloadText(c.BadgeJws))!;
-        credential["proof"] = new JsonObject { ["type"] = "JwtProof2020", ["jwt"] = c.BadgeJws };
+        credential["proof"] = ProofEnvelope(c.BadgeJws!, c.IssuedAt);
         return credential;
     }
 
