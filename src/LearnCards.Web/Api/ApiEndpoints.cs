@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using LearnCards.Web.Domain;
 using LearnCards.Web.Infrastructure;
 using LearnCards.Web.Services;
@@ -203,13 +204,21 @@ public static partial class ApiEndpoints
         {
             if (await repo.GetReadableCardAsync(cardId, Uid(http)) is not { } card)
                 return Results.Json(new { detail = "Card not found" }, statusCode: 404);
-            if (!include_image_data) return Results.Ok(CardDto(card));
+            // Zusätzlich zur Karte: Modulname (für import_cards/update_card), Lernkontext und ob der Benutzer sie ändern darf — nur für lesbare Karten (Zugriffsentscheid wie oben)
+            var access = await repo.ResolveModuleAccessAsync(Uid(http), card.ModuleId);
+            JsonObject Dto(Dictionary<string, string>? b64)
+            {
+                var o = (JsonObject)System.Text.Json.JsonSerializer.SerializeToNode(CardDto(card, b64), AppJson.Options)!;
+                o["module"] = access?.Module.Name; o["module_context"] = access?.Context; o["can_edit"] = access?.CanEdit ?? false;
+                return o;
+            }
+            if (!include_image_data) return Results.Ok(Dto(null));
             try
             {
                 var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var img in card.Images)
                     data[img.ImageId] = Convert.ToBase64String((await images.GetContentAsync(img, http.RequestAborted)).Data);
-                return Results.Ok(CardDto(card, data));
+                return Results.Ok(Dto(data));
             }
             catch (ImageStorageException e) { return ImageError(e); }
         });
@@ -255,8 +264,10 @@ public static partial class ApiEndpoints
             catch (ImageStorageException e) { return ImageError(e); }
         });
 
+        // Ändern nur für Eigentümer privater Module (UpdateCardAsync filtert auf owner_user_id): freigegebene, globale und eingefrorene Themenkarten gehören nie dem Benutzer.
         secured.MapPut("/cards/{cardId}", async (string cardId, CardJson data, CardRepository repo, HttpContext http) =>
         {
+            if (string.IsNullOrWhiteSpace(data.Module)) data.Module = "(unverändert)";   // 'module' wird beim Aktualisieren ignoriert (die Karte bleibt in ihrem Modul)
             var (valid, validationError) = data.Validate();
             if (!valid) return Results.Json(new { detail = validationError }, statusCode: 400);
             try
@@ -264,8 +275,11 @@ public static partial class ApiEndpoints
                 // Optional: X-Card-Updated-At = updated_at beim Laden → Konflikt (409), wenn die Karte inzwischen geändert wurde (Editor, mehrere Fenster)
                 DateTime? expected = DateTime.TryParse(http.Request.Headers["X-Card-Updated-At"].ToString(), System.Globalization.CultureInfo.InvariantCulture,
                     System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var exp) ? exp : null;
-                return await repo.UpdateCardAsync(cardId, data, Uid(http), expected) is { } card
-                    ? Results.Ok(CardDto(card))
+                if (await repo.UpdateCardAsync(cardId, data, Uid(http), expected) is { } card) return Results.Ok(CardDto(card));
+                // Vertrag bleibt 404 (nicht änderbar = für den Schreibzugriff „nicht vorhanden“); bei lesbaren Karten (freigegeben/global/Thema) erklärt code=card_read_only den Grund.
+                // Fremde, nicht lesbare Karten verraten nichts.
+                return await repo.GetReadableCardAsync(cardId, Uid(http)) is not null
+                    ? Results.Json(new { detail = "Card not found or read-only: only cards of your own private modules can be changed.", code = "card_read_only" }, statusCode: 404)
                     : Results.Json(new { detail = "Card not found" }, statusCode: 404);
             }
             catch (CardRepository.CardConflictException e) { return Results.Json(new { detail = e.Message, code = "card_conflict" }, statusCode: 409); }

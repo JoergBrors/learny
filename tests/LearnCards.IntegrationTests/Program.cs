@@ -257,6 +257,12 @@ try
     Console.WriteLine($"MCP-Server läuft auf {mcpUrl}\n");
 
     var admin = await LoginAsync(null);          // local-dev-user = Bootstrap-Administrator im Dev-Modus
+    if (Environment.GetEnvironmentVariable("TEST_ONLY") == "cardtools")   // Entwicklungsabkürzung: nur MCP-Kartenwerkzeuge (get_card/update_card/export_cards)
+    {
+        await CardToolsTests.RunAsync(LoginAsync, () => NewClient(false), admin, mcpUrl, McpKey, PngLike, Check);
+        Console.WriteLine($"{checks - failures}/{checks} Prüfungen bestanden" + (failures == 0 ? "" : $", {failures} FEHLGESCHLAGEN"));
+        return failures == 0 ? 0 : 1;
+    }
     var alice = await LoginAsync("alice");
     var bob = await LoginAsync("bob");
     var anon = NewClient();
@@ -2024,6 +2030,7 @@ try
     // zuletzt: veröffentlicht ein globales Modul, das die früheren Prüfungen (genau ein globales Modul) nicht stören darf
     await TopicTransferTests.RunAsync(LoginAsync, () => NewClient(false), admin, mcpUrl, Check);   // Themenmodule, JSON, Klonen, MCP (ADR 0028)
     await TransferHardeningTests.RunAsync(LoginAsync, () => NewClient(false), mcpUrl, McpKey, PngLike, Check);   // Referenzen parallel, große Dateien, MCP-Matrix (ADR 0028)
+    await CardToolsTests.RunAsync(LoginAsync, () => NewClient(false), admin, mcpUrl, McpKey, PngLike, Check);   // get_card, update_card, export_cards
     await TopicGovernanceTests.RunAsync(LoginAsync, () => NewClient(false), admin, mcpUrl, Check);   // Themenfreigaben, Pflicht, Themen-Admin, Lernstatus (ADR 0029)
 
     // Migration modules.reference_id: Altbestand ohne Spalte wird beim Start ergänzt (idempotent), Daten bleiben erhalten, Referenzen sind danach stabil

@@ -15,7 +15,7 @@ Referenz dafür, *wie das System funktioniert und warum* — für Menschen und f
 | [0004](0004-datenbank-abstraktion.md) | `IDatabase`: SQLite lokal, PostgreSQL produktiv | Akzeptiert |
 | [0005](0005-authentifizierung.md) | Authentifizierung: OIDC, Dev-Login, `X-MCP-Key` | Akzeptiert |
 | [0006](0006-kanonisches-karten-json.md) | Kanonisches Karten-JSON (snake_case) und Live-Schema | Akzeptiert |
-| [0007](0007-mcp-server.md) | Eigenständiger MCP-Server als API-Client | Akzeptiert |
+| [0007](0007-mcp-server.md) | Eigenständiger MCP-Server als API-Client (Nachtrag 2026-10-26: `get_card`, `update_card`, `export_cards`) | Akzeptiert |
 | [0008](0008-ki-integration-und-fallback.md) | KI-Integration mit Offline-Fallback und Token-Budget | Akzeptiert |
 | [0009](0009-deployment-wege.md) | Deployment: IIS per Tag, Docker, Azure | Akzeptiert |
 | [0010](0010-folienmodus-und-karten-quiz.md) | Folienmodus und statische Karten-Quizze | Akzeptiert (Quizlogik teilweise ersetzt durch 0019) |

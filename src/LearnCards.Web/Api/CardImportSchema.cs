@@ -28,6 +28,12 @@ public static class CardImportSchema
             "free_text: no options and no correct_index/correct_indexes; explanation is the model answer used for grading.",
             "Every entry needs question and explanation. No other fields are accepted or required.",
             "AI-generated questions and questions created in the editor are stored by the server in the module question pool; they are not part of this import format."),
+        ["update_and_export_rules"] = new JsonArray(
+            "Read-modify-write: get_card returns a card in this canonical format (plus read-only helper fields module_context, can_edit, created_at, updated_at, image metadata); change it and send the COMPLETE card to update_card. Omitted text fields are reset to empty defaults; archived and sort_order are part of the card.",
+            "update_card only changes cards of your own private modules. Cards of shared, global or topic modules are read-only; the card never moves to another module ('module' is ignored when updating).",
+            "images on update: field omitted = existing images are kept; images=[] = all images are removed (only when explicitly wanted); images=[…] replaces them. An entry with only image_id keeps that existing image of the card; new images need mime_type + data_base64.",
+            "expected_updated_at (updated_at from get_card) enables conflict detection: if the card changed in the meantime the update fails with 409 and nothing is overwritten.",
+            "export_cards returns {\"cards\":[…]} in this format, in batches (default 50, max 200 cards, about 4 MiB of Base64 images per call). Repeat with offset=next_offset until has_more is false. The cards array can be passed unchanged to import_cards; ids are included for your own modules (overwrite_existing=true updates them, otherwise existing ids are skipped)."),
         ["batch_schema"] = BatchSchema(),
         ["card_schema"] = CardSchema(),
         ["example"] = ExampleBatch(),

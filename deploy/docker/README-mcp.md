@@ -120,6 +120,7 @@ Zusätzlich zu den Karten-Werkzeugen (`get_import_schema`, `import_cards`, `list
 
 - Lesen: `list_topics`, `get_topic`, `get_topic_exam_structure`.
 - Themenentwürfe per JSON: `get_topic_import_schema`, `create_topic`, `import_topic`, `update_topic` (ersetzt nur den Entwurf), `export_topic`.
+- Karten: `get_card` (vollständig, inkl. Quiz und Bilder), `update_card` (nur eigene private Karten; `images` fehlend = behalten, `[]` = entfernen; optional `expected_updated_at`), `export_cards` (kanonisches Karten-JSON in Stapeln mit `offset`/`limit`, `has_more`/`next_offset`; wieder einlesbar mit `import_cards`).
 - Module per JSON: `get_module_import_schema`, `export_module`, `import_module`, `clone_global_module` (globales Modul in ein eigenes klonen).
 
 Module werden in Themen über die stabile Referenz (`module_ref` = `reference_id`) und nur aus **eigenen** Modulen zugeordnet. Veröffentlichen, globale Freigaben, Freigaben/Zuweisungen an andere Benutzer und Administration sind über MCP nicht möglich; der Dienstschlüssel `MCP_API_KEY` gewährt keinen Datenzugriff. Dokumentation: [ADR 0028](https://github.com/JoergBrors/learny/blob/main/docs/adr/0028-themenmodule-json-und-mcp-verwaltung.md).

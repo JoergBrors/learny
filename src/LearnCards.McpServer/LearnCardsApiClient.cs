@@ -45,7 +45,7 @@ public sealed class LearnCardsApiClient : IDisposable
 
     public Task<JsonNode?> PostAsync(string path, JsonNode body, CancellationToken ct) => SendAsync(HttpMethod.Post, path, body, ct);
 
-    public Task<JsonNode?> PutAsync(string path, JsonNode body, CancellationToken ct) => SendAsync(HttpMethod.Put, path, body, ct);
+    public Task<JsonNode?> PutAsync(string path, JsonNode body, CancellationToken ct, IReadOnlyDictionary<string, string>? headers = null) => SendAsync(HttpMethod.Put, path, body, ct, null, headers);
 
     public Task<JsonNode?> PatchAsync(string path, CancellationToken ct) => SendAsync(HttpMethod.Patch, path, null, ct);
 
@@ -109,9 +109,10 @@ public sealed class LearnCardsApiClient : IDisposable
         }
     }
 
-    private async Task<JsonNode?> SendAsync(HttpMethod method, string path, JsonNode? body, CancellationToken ct, string? explicitToken = null)
+    private async Task<JsonNode?> SendAsync(HttpMethod method, string path, JsonNode? body, CancellationToken ct, string? explicitToken = null, IReadOnlyDictionary<string, string>? headers = null)
     {
         using var req = new HttpRequestMessage(method, path);
+        if (headers is not null) foreach (var (k, v) in headers) req.Headers.TryAddWithoutValidation(k, v);
         if (body is not null)
             req.Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");
 

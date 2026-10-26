@@ -393,6 +393,98 @@ static void RegisterCoreTools(McpServerEngine engine, LearnCardsApiClient api, M
             catch (McpApiException ex) { return new ToolCallResult($"API error {ex.StatusCode}: {ex.Message}", true); }
         });
 
+    // ─── Karten vollständig lesen, ändern und exportieren (ADR 0007 Ergänzung): nur über die bestehenden API-Endpunkte ───
+    engine.RegisterTool(
+        new ToolDefinition("get_card",
+            "Read ONE learning card completely (module name, category, term, question, definition, how_it_works, context, key_fact, reference_answer, chat_prompt, official_sources, slide_number, target_time_sec, quiz[], images[], archived, sort_order, updated_at, plus module_context = private|shared|global|topic and can_edit). Works for cards of your own modules, modules shared with you, global modules and topic modules you may learn; other users' private cards are 'not found'. By default images[] include real Base64 data (data_base64) so the card can be edited and written back with update_card; set include_image_data=false for metadata only. Internal storage keys and storage URLs are never returned. Archived cards are only visible for your own modules.",
+            """
+            {
+              "type": "object",
+              "required": ["card_id"],
+              "properties": {
+                "card_id": {"type": "string", "description": "Card id (from list_cards or export_cards)."},
+                "include_image_data": {"type": "boolean", "default": true, "description": "true (default): images[] contain data_base64. false: metadata only (image_id, mime_type, size_bytes, alt_text, caption, sort_order)."}
+              }
+            }
+            """),
+        async (args, ct) =>
+        {
+            try
+            {
+                var id = args["card_id"]?.GetValue<string>() ?? "";
+                var data = args["include_image_data"]?.GetValue<bool>() == false ? "false" : "true";
+                var card = await api.GetAsync($"cards/{Uri.EscapeDataString(id)}?include_image_data={data}", ct);
+                return new ToolCallResult(card?.ToJsonString(new() { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }) ?? "{}");
+            }
+            catch (McpApiException ex) { return new ToolCallResult($"API error {ex.StatusCode}: {ex.Message}", true); }
+        });
+
+    engine.RegisterTool(
+        new ToolDefinition("update_card",
+            "Update ONE existing card in one of YOUR OWN private modules (cards of shared, global or topic modules and other users' cards cannot be changed — you get a 404 error, code card_read_only for readable cards). Call get_import_schema first and never invent fields. Workflow: get_card → edit → update_card. card_definition is the COMPLETE new card in the canonical card JSON (category, term, question, definition, how_it_works, context, key_fact, reference_answer, chat_prompt, official_sources, slide_number, target_time_sec, quiz, images, archived, sort_order); fields you leave out are reset to their empty defaults, so always send the whole card as returned by get_card (the fields id, module, context, can_edit, created_at, updated_at in it are ignored; the card stays in its module). Text fields accept the safe formatting syntax of the schema (never HTML). quiz[] replaces the fixed quiz questions of the card (omit or [] = none). IMAGES: omit the images field = existing images are KEPT; images=[] = ALL images are REMOVED (only when explicitly wanted); images=[...] replaces the images — entries need mime_type + data_base64 (real PNG/JPEG/WebP, max 5 per card, max 2 MiB each) or only an image_id of an existing image of this card to keep it. archived and sort_order are part of the card: send archived=false/true deliberately. For concurrent edits pass expected_updated_at (updated_at from get_card): if the card changed meanwhile you get a conflict error — re-read the card and merge instead of overwriting.",
+            """
+            {
+              "type": "object",
+              "required": ["card_id", "card_definition"],
+              "properties": {
+                "card_id": {"type": "string"},
+                "card_definition": {"type": "object", "description": "Complete canonical card JSON exactly as described by get_import_schema (card_schema). 'module' is optional here.", "required": ["category", "term", "question", "definition"]},
+                "expected_updated_at": {"type": "string", "description": "Optional: updated_at value from get_card. Enables conflict detection (409)."}
+              }
+            }
+            """),
+        async (args, ct) =>
+        {
+            try
+            {
+                var id = args["card_id"]?.GetValue<string>() ?? "";
+                if (args["card_definition"] is not JsonObject def) return new ToolCallResult("'card_definition' (object) is required. Call get_import_schema and get_card first.", true);
+                var headers = args["expected_updated_at"]?.GetValue<string>() is { Length: > 0 } exp ? new Dictionary<string, string> { ["X-Card-Updated-At"] = exp } : null;
+                var card = await api.PutAsync($"cards/{Uri.EscapeDataString(id)}", def.DeepClone(), ct, headers);
+                return new ToolCallResult($"Card updated: {card?["term"]?.GetValue<string>()} (id: {card?["id"]?.GetValue<string>()}, images: {card?["images"]?.AsArray().Count ?? 0}, quiz questions: {card?["quiz"]?.AsArray().Count ?? 0}, updated_at: {card?["updated_at"]?.ToJsonString().Trim('"')}). Use get_card to verify.");
+            }
+            catch (McpApiException ex) { return new ToolCallResult($"API error {ex.StatusCode}: {ex.Message}", true); }
+        });
+
+    engine.RegisterTool(
+        new ToolDefinition("export_cards",
+            "Export the cards of a module (your own, or an active global module) as canonical card JSON {\"cards\":[…]} that can be fed back into import_cards (pass the cards array unchanged). Every card contains all schema fields incl. official_sources, rich-text, quiz[], images[] with real Base64 data, sort_order and archived. Card ids are included for your own modules (import_cards with overwrite_existing=true then updates the same cards; without it existing ids are skipped), global modules export without ids. No owner information is exported. Large modules are exported in BATCHES: each call returns at most `limit` cards (default 50, max 200) and stops earlier when the images of the batch exceed about 4 MiB of Base64 (at least one card is always returned). The result's \"batch\" object reports total, offset, count, has_more and next_offset — repeat the call with offset=next_offset until has_more is false. Order is stable (sort_order, category, term). Archived cards are only included with include_archived=true for your own modules. Modules shared with you by other users cannot be exported. Call get_import_schema for the exact format.",
+            """
+            {
+              "type": "object",
+              "required": ["module_id"],
+              "properties": {
+                "module_id": {"type": "string"},
+                "include_archived": {"type": "boolean", "default": false, "description": "Also export archived cards (own modules only). Archived cards keep archived=true."},
+                "offset": {"type": "integer", "minimum": 0, "default": 0, "description": "Start position; use next_offset of the previous batch."},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50, "description": "Maximum cards per batch."}
+              }
+            }
+            """),
+        async (args, ct) =>
+        {
+            try
+            {
+                var id = args["module_id"]?.GetValue<string>() ?? "";
+                var query = $"modules/{Uri.EscapeDataString(id)}/export/cards?include_archived={(args["include_archived"]?.GetValue<bool>() == true ? "true" : "false")}";
+                if (args["offset"]?.GetValue<int>() is int off && off > 0) query += $"&offset={off}";
+                if (args["limit"]?.GetValue<int>() is int lim && lim > 0) query += $"&limit={lim}";
+                if (await api.GetAsync(query, ct) is not JsonObject r) return new ToolCallResult("Module not found.", true);
+                var result = new JsonObject
+                {
+                    ["cards"] = r["cards"]?.DeepClone() ?? new JsonArray(),
+                    ["batch"] = new JsonObject
+                    {
+                        ["module"] = r["module"]?.DeepClone(), ["total"] = r["total"]?.DeepClone(), ["offset"] = r["offset"]?.DeepClone(), ["count"] = r["count"]?.DeepClone(),
+                        ["has_more"] = r["has_more"]?.DeepClone(), ["next_offset"] = r["next_offset"]?.DeepClone(),
+                        ["note"] = "Pass the 'cards' array to import_cards. Repeat export_cards with offset=next_offset while has_more is true.",
+                    },
+                };
+                return new ToolCallResult(result.ToJsonString(new() { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+            }
+            catch (McpApiException ex) { return new ToolCallResult($"API error {ex.StatusCode}: {ex.Message}", true); }
+        });
+
     engine.RegisterTool(
         new ToolDefinition("list_cards",
             "List cards in a module you may read (your own, shared with you, or global), optionally filtered by category. Includes official source count so clients can prefer source-backed cards. Archived cards are only listed for your own modules.",

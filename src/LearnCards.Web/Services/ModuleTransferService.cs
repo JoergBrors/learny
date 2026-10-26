@@ -44,6 +44,55 @@ public class ModuleTransferService
         return await BuildDefinitionAsync(access.Module, includeArchived: access.Context == CardRepository.ContextPrivate, ct);
     }
 
+    /// <summary>Standard-/Höchstzahl Karten je Export-Stapel und Größenbudget (Base64-Zeichen der Bilder) je Stapel.</summary>
+    public const int DefaultCardBatch = 50;
+    public const int MaxCardBatch = 200;
+    public const long CardBatchImageBudgetChars = 4L * 1024 * 1024;
+
+    /// <summary>Ein Stapel exportierter Karten im kanonischen Karten-JSON (importierbar über <c>import_cards</c>).</summary>
+    public sealed record CardExportBatch(string ModuleName, string Context, int Total, int Offset, int Count, int? NextOffset, List<CardJson> Cards);
+
+    /// <summary>
+    /// Exportiert Karten eines eigenen oder aktiven globalen Moduls als kanonisches Karten-JSON inklusive Bildern (Base64), <c>quiz[]</c>, Quellen, Reihenfolge und Archivstatus —
+    /// in stabil sortierten, begrenzten Stapeln (Anzahl und Bildvolumen), damit große Module zuverlässig und speicherschonend vollständig ausgelesen werden können.
+    /// Karten-IDs nur bei eigenen Modulen (Überschreiben per <c>overwrite_existing</c>); keine Eigentümerangaben. Archivierte Karten nur für den Eigentümer.
+    /// Lesen und Schreiben bleiben getrennt: freigegebene Module fremder Eigentümer sind (wie im Modulexport, ADR 0028) nicht exportierbar.
+    /// </summary>
+    public async Task<CardExportBatch> ExportCardsAsync(string userId, string moduleId, bool includeArchived, int offset, int limit, CancellationToken ct = default)
+    {
+        var access = UserService.IsGuid(moduleId) ? await _repo.ResolveModuleAccessAsync(userId, moduleId) : null;
+        if (access is null || access.Context is not (CardRepository.ContextPrivate or CardRepository.ContextGlobal)) throw new KeyNotFoundException("Modul nicht gefunden.");
+        var own = access.Context == CardRepository.ContextPrivate;
+        offset = Math.Max(0, offset);
+        limit = limit <= 0 ? DefaultCardBatch : Math.Min(limit, MaxCardBatch);
+
+        var all = (await _repo.ListAllCardsOfModuleRawAsync(access.Module.Id)).Where(c => (own && includeArchived) || !c.Archived)
+            .OrderBy(c => c.SortOrder).ThenBy(c => c.Category, StringComparer.Ordinal).ThenBy(c => c.Term, StringComparer.Ordinal).ThenBy(c => c.Id, StringComparer.Ordinal).ToList();
+
+        var cards = new List<CardJson>();
+        long budget = 0;
+        var next = offset;
+        while (next < all.Count && cards.Count < limit)
+        {
+            var c = all[next];
+            var chars = c.Images.Sum(i => (long)(i.SizeBytes + 2) / 3 * 4);
+            if (cards.Count > 0 && budget + chars > CardBatchImageBudgetChars) break;   // mindestens eine Karte je Stapel, auch wenn sie das Budget allein überschreitet
+            var json = CardRepository.ToCardJson(c, access.Module.Name);
+            if (!own) json.Id = null;
+            json.Images = new List<CardImage>();
+            foreach (var img in c.Images.OrderBy(i => i.SortOrder))
+                json.Images.Add(new CardImage
+                {
+                    MimeType = img.MimeType, AltText = img.AltText, Caption = img.Caption, SortOrder = img.SortOrder,
+                    DataBase64 = Convert.ToBase64String((await _images.GetContentAsync(img, ct)).Data),
+                });
+            cards.Add(json);
+            budget += chars;
+            next++;
+        }
+        return new CardExportBatch(access.Module.Name, access.Context, all.Count, offset, cards.Count, next < all.Count ? next : null, cards);
+    }
+
     private async Task<ModuleDefinition> BuildDefinitionAsync(ModuleInfo module, bool includeArchived, CancellationToken ct)
     {
         var cards = (await _repo.ListAllCardsOfModuleRawAsync(module.Id)).Where(c => includeArchived || !c.Archived)

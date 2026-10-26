@@ -74,7 +74,14 @@ public static partial class ApiEndpoints
         }
         secured.MapGet("/modules/{moduleId}/export", (string moduleId, HttpContext http, ModuleTransferService modules) =>
             Run(async () => JsonDownload(TransferJson.ToJson(await modules.ExportAsync(Uid(http), moduleId, http.RequestAborted)), "modul.json")));
-        secured.MapPost("/modules/import", (HttpContext http, ModuleTransferService modules) =>
+        // Karten eines Moduls als kanonisches Karten-JSON in begrenzten Stapeln (für MCP export_cards); gleiche Zugriffsregeln wie der Modulexport
+        secured.MapGet("/modules/{moduleId}/export/cards", (string moduleId, HttpContext http, ModuleTransferService modules, bool include_archived = false, int offset = 0, int limit = 0) =>
+            Run(async () =>
+            {
+                var b = await modules.ExportCardsAsync(Uid(http), moduleId, include_archived, offset, limit, http.RequestAborted);
+                return Results.Ok(new { module = b.ModuleName, context = b.Context, total = b.Total, offset = b.Offset, count = b.Count, next_offset = b.NextOffset, has_more = b.NextOffset is not null, cards = b.Cards });
+            }));
+        secured.MapPost("/modules/import",(HttpContext http, ModuleTransferService modules) =>
             Run(async () => Results.Json(ModuleSummaryDto(await modules.ImportJsonAsync(Uid(http), await ReadBodyAsync(http), http.RequestAborted)), statusCode: 201)));
         secured.MapPost("/modules/{moduleId}/clone", (string moduleId, HttpContext http, ModuleTransferService modules) =>
             Run(async () => Results.Json(ModuleSummaryDto(await modules.CloneGlobalAsync(Uid(http), moduleId, http.RequestAborted)), statusCode: 201)));

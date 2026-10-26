@@ -115,6 +115,8 @@ Das kanonische Karten-JSON-Format (`module`, `category`, `term`, `question`, `de
 Format zusätzlich live unter `/api/schema/import/cards` bereit; der MCP-Server reicht es per Tool
 `get_import_schema` und per HTTP-Endpunkt `/schema/import/cards` weiter.
 
+**MCP-Kartenzyklus** ([ADR 0007](adr/0007-mcp-server.md), Nachtrag): `get_card` → bearbeiten → `update_card` (`PUT /api/cards/{id}` → `CardRepository.UpdateCardAsync`, einziger Schreibpfad, nur eigene private Karten; Konflikterkennung über `X-Card-Updated-At`). `export_cards` (`GET /api/modules/{id}/export/cards`, `ModuleTransferService.ExportCardsAsync`) liefert die Karten eines Moduls in begrenzten Stapeln (`offset`/`limit`, Bild-Budget ≈ 4 MiB) als kanonisches Karten-JSON für `import_cards`; Bilder stammen als Base64 über `CardImageService` aus dem konfigurierten Bildspeicher, nie als Speicherschlüssel oder signierte URL.
+
 ## Bilder in Karten
 
 Karten können optional bis zu 5 Bilder (PNG/JPEG/WebP, je höchstens 2 MiB dekodiert) als Base64 im Karten-JSON tragen (`images[]`, [ADR 0016](adr/0016-bilder-in-lernkarten.md)). Sie werden serverseitig validiert (Base64, Größe, Dateisignatur)
