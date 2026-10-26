@@ -60,7 +60,9 @@ public sealed class PdfSigningProvider
     private string? _error;
     private bool _loaded;
 
-    public PdfSigningProvider(AppConfig config) { _cfg = config.PdfSigning; }
+    private readonly LearnCards.Web.Services.Pki.PkiService _pki;
+
+    public PdfSigningProvider(AppConfig config, LearnCards.Web.Services.Pki.PkiService pki) { _cfg = config.PdfSigning; _pki = pki; }
 
     public bool Configured => _cfg.Configured || _cfg.DevCert;
     public bool IsDevCertificate { get; private set; }
@@ -81,6 +83,20 @@ public sealed class PdfSigningProvider
         Load();
         if (_cert is null) throw new PdfSigningUnavailableException(_error ?? "Das PDF-Signaturzertifikat ist nicht konfiguriert (PDF_SIGNING_CERT_FILE bzw. PDF_SIGNING_CERT_PFX_BASE64; siehe docs/pdf-signature.md).");
         return new PdfSignOptions { Certificate = _cert, Chain = _chain, Name = _cfg.Name, Reason = _cfg.Reason, Location = _cfg.Location, ContactInfo = _cfg.Contact, SigningTime = signingTime ?? DateTime.UtcNow };
+    }
+
+    /// <summary>
+    /// Signaturoptionen mit Rangfolge: (1) ausdrücklich konfiguriertes <c>PDF_SIGNING_CERT_*</c> (bestehende Installationen bleiben unverändert), (2) betriebsbereites Signaturzertifikat der Learny-PKI
+    /// (Kette Issuing CA + Root CA wird eingebettet), (3) nur in Development das selbstsignierte Entwicklungszertifikat. Sonst <see cref="PdfSigningUnavailableException"/> (fail-closed).
+    /// </summary>
+    public async Task<PdfSignOptions> GetOptionsAsync(DateTime? signingTime = null)
+    {
+        if (_cfg.Configured) return GetOptions(signingTime);
+        var (material, reason) = await _pki.GetSigningMaterialAsync();
+        if (material is not null)
+            return new PdfSignOptions { Certificate = material.Certificate, Chain = material.Chain.ToList(), Name = _cfg.Name, Reason = _cfg.Reason, Location = _cfg.Location, ContactInfo = _cfg.Contact, SigningTime = signingTime ?? DateTime.UtcNow };
+        if (_cfg.DevCert) return GetOptions(signingTime);
+        throw new PdfSigningUnavailableException("Kein PDF-Signaturzertifikat verfügbar: weder PDF_SIGNING_CERT_* konfiguriert noch ist die Learny-PKI betriebsbereit" + (reason is null ? "." : " (" + reason + ")."));
     }
 
     private void Load()

@@ -263,6 +263,8 @@ siehe `src/LearnCards.Web/wwwroot/app.css`.
 
 ## Themen und Lernpfade
 
+**Eigene PKI:** Optional richtet Learny beim ersten Start eine eigene X.509-PKI ein (Root CA, Issuing CA, PDF-Signaturzertifikat, Zertifikats-/Widerrufsregister, CRL); Verwaltung unter Administration → PKI, Betrieb in [docs/pki.md](docs/pki.md), Entscheidung in [ADR 0035](docs/adr/0035-learny-pki-und-zertifikatsverwaltung.md). Sie begründet keine automatische öffentliche Anerkennung (Adobe, Betriebssysteme, Vertrauenslisten).
+
 **Meine Abschlüsse:** Unter `/achievements` findest du alle eigenen Modul- und Themenabschlüsse mit PDF-, CLR- und Badge-Download, Prüf-Link und „Auf LinkedIn hinzufügen“ (nur Eintragshilfe, keine automatische Veröffentlichung; [ADR 0034](docs/adr/0034-nachweisuebersicht-pruefsiegel-und-linkedin.md)). Das Prüfsiegel „Learny Verified“ steht in Seitenkopf, PDFs und Prüfseite und ist keine Zertifizierung durch 1EdTech oder LinkedIn.
 
 **Signierte PDFs:** Zu jedem Modul- und Themenabschluss gibt es ein digital signiertes PDF (`GET /api/certificates/{id}/certificate.pdf`) mit Learny-Prüfsiegel, Kompetenznachweisen, QR-Code und den eingebetteten signierten Credentials (CLR, Master-Badge, Modulnachweise, `verification.json`). Voraussetzung ist ein eigenes Signaturzertifikat in der `.env` (`PDF_SIGNING_*`, [docs/pdf-signature.md](docs/pdf-signature.md), [ADR 0033](docs/adr/0033-signierte-zertifikats-pdfs.md)). Unter `/verify` lässt sich ein PDF hochladen und vollständig prüfen (Signatur, Unversehrtheit, Credentials, Hashes, Versionen, Widerruf).

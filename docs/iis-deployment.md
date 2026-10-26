@@ -275,6 +275,10 @@ auch als eigenständiger HTTP-Endpoint für MCP-fähige LLM-Clients betrieben we
 Wenn `transports.http.enabled=false` ist, entfernt die Pipeline einen eventuell vorhandenen
 Windows-Dienst wieder und belässt den MCP-Teil im reinen `stdio`-/Client-Start-Modus.
 
+## Learny-PKI (ADR 0035)
+
+Die Anwendung richtet ihre PKI beim ersten Start automatisch ein, sobald `PUBLIC_BASE_URL` (oder `PKI_PUBLIC_URL`) gesetzt ist; die Schlüssel liegen verschlüsselt in `<IIS_PHYSICAL_PATH>\data\pki` (außerhalb des Webroots, ACL nur Anwendungspool-Identität/SYSTEM/Administratoren). `PKI_KEY_PASSWORD` und `PKI_ROOT_PASSPHRASE` (je ≥ 16 Zeichen) gehören in die `.env` bzw. Secret-Verwaltung — fehlt das Passwort, wird eines erzeugt und als `data\pki\pki-key.pass` abgelegt (nach Übernahme in die Secret-Verwaltung entfernen). Das Deployment löscht `data\` nicht; sichern Sie `data\pki` zusammen mit der Datenbank. Danach den Root-Schlüssel offline sichern und in Administration → PKI vom Server entfernen. Details: [docs/pki.md](pki.md).
+
 ## Geheimnisse und Badge-Schlüssel (ADR 0023)
 
 **Speicherorte** (außerhalb des Webroots, vom Spiegeln des Webroots unberührt; Basis `IIS_CONFIG_ROOT`, Standard `%ProgramData%\LearnCards\<IIS_SITE_NAME>`):

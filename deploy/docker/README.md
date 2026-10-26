@@ -213,6 +213,12 @@ Pflicht: **PostgreSQL-Betrieb** → `POSTGRES_PASSWORD`; **OIDC-Betrieb** → `O
 | `OPENAI_MODEL` | web | nein | `gpt-4o-mini` | Modell. |
 | `OPENAI_BASE_URL` | web | nein | `https://api.openai.com/v1` | Basis-URL einer OpenAI-kompatiblen API. |
 | `BADGE_SIGNING_KEY_PEM` | web | nein | leer | Signaturschlüssel der Badges (ECDSA P-256, PKCS#8-PEM). Leer = Schlüssel wird beim ersten Start im Volume erzeugt. |
+| `PKI_PUBLIC_URL` | web | nein | leer (→ `PUBLIC_BASE_URL`) | Öffentliche Basis-URL für die Learny-PKI (ADR 0035); steht unveränderlich in den CRL-Verteilungspunkten. Ohne diese und `PUBLIC_BASE_URL` wird die PKI nicht automatisch eingerichtet. |
+| `PKI_AUTO_INIT` | web | nein | `true` | Einmalige automatische Einrichtung der PKI beim allerersten Start (nie bei späteren Starts). `false` = nur ausdrücklich unter Administration → PKI. |
+| `PKI_ORGANIZATION` | web | nein | `Learny` | Organisationsname (O=) in den PKI-Zertifikaten. |
+| `PKI_KEY_PASSWORD` | web | nein | leer | Passwort der verschlüsselten Schlüsseldateien in `/app/data/pki` (mind. 16 Zeichen). Leer = beim Erststart erzeugt und im Volume abgelegt. Streng geheim. |
+| `PKI_ROOT_PASSPHRASE` | web | nein | leer | Passphrase der Root-Schlüsseldatei (mind. 16 Zeichen). Leer = zufällig, einmalig neben der Datei notiert. Streng geheim. |
+| `PKI_TRUSTED_ROOT_SHA256` | web | nein | leer | Optionaler Vertrauensanker-Pin (SHA-256 der Root CA, kommagetrennt) für die Prüfung. |
 | `PDF_SIGNING_CERT_FILE` | web | nein | leer | PKCS#12-Datei (im Container eingebunden) mit dem eigenen PDF-Signaturzertifikat für signierte Zertifikats-PDFs (ADR 0033). Leer (und ohne Base64-Variante) = keine PDFs (503). Siehe `docs/pdf-signature.md`. |
 | `PDF_SIGNING_CERT_PASSWORD` | web | nein | leer | Passwort der PKCS#12-Datei bzw. -Base64-Variante. Streng geheim. |
 | `PDF_SIGNING_CERT_PFX_BASE64` | web | nein | leer | PKCS#12 als Base64-Text (Secret-Verwaltung); hat Vorrang vor `PDF_SIGNING_CERT_FILE`. |

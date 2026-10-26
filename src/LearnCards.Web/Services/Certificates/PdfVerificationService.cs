@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using LearnCards.Web.Data;
 using LearnCards.Web.Infrastructure;
 using LearnCards.Web.Services.Pdf;
+using LearnCards.Web.Services.Pki;
 
 namespace LearnCards.Web.Services.Certificates;
 
@@ -19,8 +20,9 @@ public sealed class PdfVerificationService
     private readonly CertificateService _certs;
     private readonly PdfSigningProvider _signing;
     private readonly IDatabase _db;
+    private readonly PkiVerifier _pki;
 
-    public PdfVerificationService(CertificateService certs, PdfSigningProvider signing, IDatabase db) { _certs = certs; _signing = signing; _db = db; }
+    public PdfVerificationService(CertificateService certs, PdfSigningProvider signing, IDatabase db, PkiVerifier pki) { _certs = certs; _signing = signing; _db = db; _pki = pki; }
 
     private static string Sha(byte[] b) => Convert.ToHexString(SHA256.HashData(b)).ToLowerInvariant();
     private static string S(JsonNode? n, string path)
@@ -47,6 +49,7 @@ public sealed class PdfVerificationService
             ["signature_error"] = insp.Cms?.Error, ["signature_algorithm"] = insp.Cms?.SignatureAlgorithm, ["signing_time"] = insp.Cms?.SigningTime ?? insp.ClaimedSigningTime,
         };
         var signerTrust = "none";
+        PkiVerification? pkiV = null;
         if (insp.Cms?.Signer is { } signer)
         {
             var known = (await _db.QueryAsync("SELECT 1 FROM certificate_pdfs WHERE signer_thumbprint = @t LIMIT 1", new[] { ("t", (object?)signer.Thumbprint) })).Count > 0 || signer.Thumbprint == _signing.Thumbprint;
@@ -63,7 +66,8 @@ public sealed class PdfVerificationService
                 chainStatus = string.Join(", ", chain.ChainStatus.Select(s => s.Status.ToString()));
             }
             catch (CryptographicException) { chainStatus = "Kette nicht prüfbar"; }
-            signerTrust = known ? "installation" : chainTrusted ? "trusted_ca" : "untrusted";
+            try { pkiV = await _pki.VerifyAsync(signer, insp.Cms.Certificates, insp.Cms.SigningTime); } catch (CryptographicException) { pkiV = null; }
+            signerTrust = pkiV is { IssuerConfirmed: true } ? "learny_pki" : known ? "installation" : chainTrusted ? "trusted_ca" : "untrusted";
             pdfNode["signer"] = new JsonObject
             {
                 ["subject"] = signer.Subject, ["issuer"] = signer.Issuer, ["thumbprint"] = signer.Thumbprint, ["serial"] = signer.SerialNumber, ["not_before"] = signer.NotBefore.ToUniversalTime(), ["not_after"] = signer.NotAfter.ToUniversalTime(),
@@ -72,7 +76,14 @@ public sealed class PdfVerificationService
                 ["signed_by_this_installation"] = known, ["chain_trusted"] = chainTrusted, ["chain_status"] = chainStatus,
             };
         }
-        pdfNode["signer_trust"] = signerTrust;   // installation | trusted_ca | untrusted | none
+        pdfNode["signer_trust"] = signerTrust;   // learny_pki | installation | trusted_ca | untrusted | none
+        if (pkiV is not null)
+            pdfNode["pki"] = new JsonObject
+            {
+                ["cryptographically_valid"] = insp.Cms is { Parsed: true, SignatureValid: true }, ["chain_valid"] = pkiV.ChainValid, ["profile_ok"] = pkiV.ProfileOk, ["issuer_confirmed"] = pkiV.IssuerConfirmed,
+                ["revocation"] = pkiV.Revocation, ["crl_fresh"] = pkiV.CrlFresh, ["revoked_at"] = pkiV.RevokedAt, ["revocation_reason"] = pkiV.RevocationReason,
+                ["publicly_trusted"] = false, ["problems"] = new JsonArray(pkiV.Problems.Select(x => (JsonNode?)x).ToArray()),
+            };
         report["pdf"] = pdfNode;
 
         // ─── Anhänge ───
@@ -194,15 +205,18 @@ public sealed class PdfVerificationService
         report["revocation"] = new JsonObject { ["checked_online"] = true, ["any_revoked"] = anyRevoked };
 
         var pdfOk = S(pdfNode, "signature_valid") == "true" && S(pdfNode, "document_unchanged") == "true";
-        var valid = pdfOk && filesOk && credsValid && refsOk && !anyRevoked && (S(report["versions"], "match") == "true");
+        var signerRevoked = pkiV is { IssuerConfirmed: true, Revocation: "revoked" };
+        var valid = pdfOk && filesOk && credsValid && refsOk && !anyRevoked && !signerRevoked && (S(report["versions"], "match") == "true");
         report["problems"] = problems;
         report["overall"] = new JsonObject
         {
             ["valid"] = valid,
-            ["pdf_signature_ok"] = pdfOk, ["attachments_ok"] = filesOk, ["credentials_ok"] = credsValid, ["references_ok"] = refsOk, ["revoked"] = anyRevoked, ["versions_ok"] = S(report["versions"], "match") == "true",
+            ["pdf_signature_ok"] = pdfOk, ["attachments_ok"] = filesOk, ["credentials_ok"] = credsValid, ["references_ok"] = refsOk, ["revoked"] = anyRevoked, ["signer_revoked"] = signerRevoked, ["versions_ok"] = S(report["versions"], "match") == "true",
             ["signer_trust"] = signerTrust,
-            ["summary"] = valid ? (signerTrust == "installation" ? "Gültig: PDF-Signatur, Dateiinhalt, Credentials, Hashes und Versionen stimmen überein; das PDF wurde von dieser Installation signiert."
+            ["summary"] = valid ? (signerTrust == "learny_pki" ? "Gültig: PDF-Signatur, Dateiinhalt, Credentials, Hashes und Versionen stimmen überein; das PDF wurde mit einem Zertifikat der Learny-PKI signiert (keine öffentliche Anerkennung durch Adobe oder Betriebssysteme)."
+                    : signerTrust == "installation" ? "Gültig: PDF-Signatur, Dateiinhalt, Credentials, Hashes und Versionen stimmen überein; das PDF wurde von dieser Installation signiert."
                     : "Technisch gültig: Signaturen, Hashes und Versionen stimmen überein, der PDF-Unterzeichner ist jedoch nicht als diese Installation bekannt – Vertrauen hängt vom Zertifikat des Unterzeichners ab.")
+                : signerRevoked ? "Nicht gültig: Das Signaturzertifikat der Learny-PKI ist widerrufen."
                 : anyRevoked ? "Nicht gültig: Ein Nachweis ist widerrufen."
                 : !pdfOk ? "Nicht gültig: PDF-Signatur fehlt/ungültig oder die Datei wurde nach der Signierung verändert."
                 : !filesOk ? "Nicht gültig: Ein eingebetteter Anhang stimmt nicht mit der Prüfsumme überein oder fehlt."

@@ -82,6 +82,12 @@ services:
       # (/app/data/badge-signing-key.pem); BADGE_SIGNING_KEY_PEM (Secret-Verwaltung) hat Vorrang.
       BADGE_SIGNING_KEY_PEM: ${BADGE_SIGNING_KEY_PEM:-}
       # PDF-Signatur der Zertifikate (ADR 0033): eigenes X.509-Zertifikat; ohne Konfiguration keine PDFs (503). Secrets nur über Umgebung/.env
+      PKI_PUBLIC_URL: ${PKI_PUBLIC_URL:-}
+      PKI_AUTO_INIT: ${PKI_AUTO_INIT:-true}
+      PKI_ORGANIZATION: ${PKI_ORGANIZATION:-Learny}
+      PKI_KEY_PASSWORD: ${PKI_KEY_PASSWORD:-}
+      PKI_ROOT_PASSPHRASE: ${PKI_ROOT_PASSPHRASE:-}
+      PKI_TRUSTED_ROOT_SHA256: ${PKI_TRUSTED_ROOT_SHA256:-}
       PDF_SIGNING_CERT_FILE: ${PDF_SIGNING_CERT_FILE:-}
       PDF_SIGNING_CERT_PASSWORD: ${PDF_SIGNING_CERT_PASSWORD:-}
       PDF_SIGNING_CERT_PFX_BASE64: ${PDF_SIGNING_CERT_PFX_BASE64:-}

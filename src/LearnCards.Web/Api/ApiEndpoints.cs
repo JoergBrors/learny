@@ -154,6 +154,7 @@ public static partial class ApiEndpoints
         MapTopicEndpoints(secured);   // Themen (ADR 0027)
         MapGlobalReviewEndpoints(secured);
         MapCertificateEndpoints(app, secured);
+        MapPkiEndpoints(app, secured);   // Learny-PKI (ADR 0035)
 
         // ─── Module ─────────────────────────────────────────────────────────
         // scope: private (Standard, kompatibel) | shared (mir freigegeben) | global (veröffentlicht) | all — ADR 0015

@@ -42,6 +42,7 @@ Referenz dafür, *wie das System funktioniert und warum* — für Menschen und f
 | [0032](0032-themenabschluss-clr-und-master-badge.md) | Themenabschluss mit CLR 2.0 und Master-Open-Badge | Akzeptiert |
 | [0033](0033-signierte-zertifikats-pdfs.md) | Signierte Zertifikats-PDFs mit eingebetteten Credentials und Upload-Prüfung | Akzeptiert |
 | [0034](0034-nachweisuebersicht-pruefsiegel-und-linkedin.md) | Nachweisübersicht, Prüfsiegel „Learny Verified“ und LinkedIn-Angaben | Akzeptiert |
+| [0035](0035-learny-pki-und-zertifikatsverwaltung.md) | Learny-PKI und Zertifikatsverwaltung (Root/Issuing CA, Register, Widerruf, CRL) | Akzeptiert |
 | [0025](0025-sichere-speicherung-von-mcp-tokens.md) | Sichere Speicherung von MCP-Tokens, Codes und OAuth-Clients (Schutz bei Datenbankzugriff) | Akzeptiert und umgesetzt |
 
 Prüfberichte, die Anlass für ADRs sind, liegen unter [docs/reviews/](../reviews/) (aktuell: [Mehrbenutzer-Prüfbericht](../reviews/2026-10-24-mehrbenutzer-pruefbericht.md)).

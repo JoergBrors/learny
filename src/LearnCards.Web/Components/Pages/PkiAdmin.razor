@@ -1,0 +1,291 @@
+@page "/admin/pki"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@using LearnCards.Web.Services.Pki
+@inject PkiService Pki
+@inject PkiVerifier Verifier
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+
+<PageTitle>PKI — LearnCards</PageTitle>
+
+<div class="container">
+    <div class="page-head">
+        <div>
+            <h1>Learny-PKI</h1>
+            <p class="muted">
+                Eigene, standardkonforme X.509-Infrastruktur (Root CA → Issuing CA → Signaturzertifikat, Sperrlisten nach RFC 5280). Sie begründet <strong>keine automatische öffentliche Anerkennung</strong>
+                durch Adobe, Betriebssysteme oder Vertrauenslisten. Private Schlüssel liegen nie in der Datenbank.
+            </p>
+        </div>
+        <div class="page-head-actions"><a class="btn btn-ghost" href="/admin">← Administration</a></div>
+    </div>
+
+    @if (!_canRead)
+    {
+        <div class="alert alert-error" role="status">Für diese Seite fehlen die Rechte (Administrator oder Auditor).</div>
+    }
+    else if (_status is null)
+    {
+        <p class="muted">Lade …</p>
+    }
+    else
+    {
+        @if (_message is not null)
+        {
+            <div class="alert @(_error ? "alert-error" : "alert-ok")" role="status">@_message</div>
+        }
+        <div class="card panel">
+            <h2 class="panel-title">Status <span class="@StateClass(_status.State)">@StateLabel(_status.State)</span></h2>
+            <p>@_status.Message</p>
+            @foreach (var w in _status.Warnings) { <div class="alert alert-error" role="status">⚠ @w</div> }
+            <p class="muted">Schlüsselverfahren: @_status.KeyAlgorithm.ToUpperInvariant() · Basis-URL: <code>@_status.PublicUrl</code>@(_status.InitializedAt is { } ia ? $" · eingerichtet am {ia:yyyy-MM-dd HH:mm} UTC" : "")</p>
+            <div class="form-row">
+                @if (_status.Root is not null) { <a class="btn btn-ghost btn-sm" href="/pki/chain.pem" download="learny-chain.pem">Kette herunterladen (PEM)</a> }
+                @if (_status.Root is not null) { <a class="btn btn-ghost btn-sm" href="/pki/certificates/root" download>Root-Zertifikat (.cer)</a> }
+                @if (_status.Issuing is not null) { <a class="btn btn-ghost btn-sm" href="/pki/certificates/issuing" download>Issuing-Zertifikat (.cer)</a> }
+                <button class="btn btn-ghost btn-sm" @onclick="SelfTestAsync" disabled="@_busy">Selbsttest</button>
+                @if (_canWrite && _status.Issuing is not null && _status.State != PkiStates.Locked)
+                {
+                    <button class="btn btn-primary btn-sm" @onclick="RenewAsync" disabled="@_busy">Signaturzertifikat erneuern</button>
+                    <button class="btn btn-ghost btn-sm" @onclick="IssueCrlAsync" disabled="@_busy">CRL jetzt ausstellen</button>
+                }
+            </div>
+        </div>
+
+        @if (_status.CanInitialize && _canWrite)
+        {
+            <div class="card panel">
+                <h2 class="panel-title">PKI initialisieren</h2>
+                <p class="muted">
+                    Erzeugt einmalig die Root CA, die Issuing CA und das erste Signaturzertifikat. Die Basis-URL steht <strong>unveränderlich</strong> in den CRL-Verteilungspunkten aller Zertifikate.
+                    Danach muss der Root-Schlüssel offline gesichert und vom Server entfernt werden.
+                </p>
+                <div class="form-row">
+                    <input class="input" @bind="_initUrl" aria-label="Öffentliche Basis-URL" placeholder="https://learny.example.org" />
+                    <label class="chip-check"><input type="checkbox" @bind="_initConfirm" /> Ich habe die Basis-URL geprüft; die PKI wird jetzt neu eingerichtet.</label>
+                    <button class="btn btn-primary" @onclick="InitializeAsync" disabled="@(_busy || !_initConfirm)">PKI initialisieren</button>
+                </div>
+            </div>
+        }
+        else if (_status.State == PkiStates.MaintenanceRequired && _canWrite && _status.Root is null)
+        {
+            <div class="card panel">
+                <h2 class="panel-title">Unvollständige Initialisierung zurücksetzen</h2>
+                <p class="muted">Nur für eine abgebrochene Einrichtung (nie für eine eingerichtete PKI). Zur Bestätigung <code>RESET</code> eingeben.</p>
+                <div class="form-row"><input class="input" @bind="_resetText" aria-label="Bestätigung RESET" /><button class="btn btn-ghost" @onclick="ResetAsync" disabled="@_busy">Zurücksetzen</button></div>
+            </div>
+        }
+
+        @if (_status.RootKeyOnServer && _canWrite)
+        {
+            <div class="card panel">
+                <h2 class="panel-title">Root-Schlüssel vom Server entfernen</h2>
+                <p class="muted">
+                    Der verschlüsselte Root-Schlüssel liegt noch im Schlüsselverzeichnis (<code>root-offline/</code>). Sichern Sie <code>root-ca.p12</code> samt Passphrase auf einem Offline-Medium und entfernen Sie ihn dann.
+                    Root-Aktionen (Widerruf der Issuing CA, Root-CRL) erfordern danach den Upload der Datei. Zur Bestätigung <code>ROOT-SCHLUESSEL ENTFERNEN</code> eingeben.
+                </p>
+                <div class="form-row"><input class="input" @bind="_rootRemoveText" aria-label="Bestätigung" /><button class="btn btn-ghost" @onclick="RemoveRootAsync" disabled="@_busy">Vom Server entfernen</button></div>
+            </div>
+        }
+
+        @if (_checks is not null)
+        {
+            <div class="card panel">
+                <h2 class="panel-title">Selbsttest</h2>
+                <ul>@foreach (var c in _checks) { <li>@(c.Ok ? "✔" : "✖") @c.Name@(string.IsNullOrWhiteSpace(c.Detail) ? "" : " – " + c.Detail)</li> }</ul>
+            </div>
+        }
+
+        <div class="card panel">
+            <h2 class="panel-title">Zertifikatsregister</h2>
+            <div style="overflow-x:auto">
+                <table class="table" aria-label="Zertifikate">
+                    <thead><tr><th scope="col">Typ</th><th scope="col">Betreff</th><th scope="col">Seriennummer</th><th scope="col">Gültig bis</th><th scope="col">Status</th><th scope="col">Aktion</th></tr></thead>
+                    <tbody>
+                    @foreach (var c in _certs)
+                    {
+                        <tr>
+                            <td>@TypeLabel(c.CertificateType)</td>
+                            <td>@c.Subject</td>
+                            <td><code title="@c.SerialNumber">@Short(c.SerialNumber)</code></td>
+                            <td>@c.NotAfter.ToString("yyyy-MM-dd")@(c.Status == "active" && c.NotAfter < DateTime.UtcNow.AddDays(Pki.Settings.ExpiryWarningDays) ? " ⚠ läuft bald ab" : "")</td>
+                            <td>@StatusLabel(c)</td>
+                            <td>
+                                <a class="btn btn-ghost btn-sm" href="/pki/certificates/@(c.Id).cer" download>.cer</a>
+                                @if (_canWrite && c.CertificateType != PkiCertificateTypes.RootCa && c.Status == PkiCertificateStatuses.Active)
+                                {
+                                    <button class="btn btn-ghost btn-sm" @onclick="() => StartRevoke(c)" disabled="@_busy">Widerrufen …</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        @if (_revoking is not null)
+        {
+            <div class="card panel" role="dialog" aria-label="Zertifikat widerrufen">
+                <h2 class="panel-title">Zertifikat widerrufen</h2>
+                <p><strong>@_revoking.Subject</strong> · Seriennummer <code>@_revoking.SerialNumber</code></p>
+                <p class="muted">Ein Widerruf kann (außer <em>certificateHold</em>) nicht rückgängig gemacht werden und wird sofort in eine neue CRL übernommen. Zur Bestätigung die vollständige Seriennummer eingeben.</p>
+                <div class="form-row">
+                    <select class="input" @bind="_reasonCode" aria-label="Widerrufsgrund (RFC 5280)">
+                        @foreach (var reason in PkiReasons.Names) { <option value="@reason.Key">@reason.Value (@reason.Key)</option> }
+                    </select>
+                    <input class="input" @bind="_confirmSerial" placeholder="Seriennummer zur Bestätigung" aria-label="Seriennummer zur Bestätigung" />
+                </div>
+                @if (_revoking.CertificateType == PkiCertificateTypes.IssuingCa)
+                {
+                    <p class="muted">Die Issuing CA wird von der Root CA widerrufen. @(_status.RootKeyOnServer ? "Der Root-Schlüssel liegt auf dem Server und wird verwendet." : "Laden Sie den offline gesicherten Root-Schlüssel (PKCS#12) hoch und geben Sie die Passphrase an.")</p>
+                    @if (!_status.RootKeyOnServer)
+                    {
+                        <div class="form-row">
+                            <InputFile OnChange="OnRootFile" accept=".p12,.pfx" aria-label="Root-Schlüssel (PKCS#12)" />
+                            <input class="input" type="password" autocomplete="off" @bind="_rootPass" placeholder="Root-Passphrase" aria-label="Root-Passphrase" />
+                        </div>
+                    }
+                }
+                <div class="form-row">
+                    <button class="btn btn-primary" @onclick="RevokeAsync" disabled="@(_busy || string.IsNullOrWhiteSpace(_confirmSerial))">Endgültig widerrufen</button>
+                    <button class="btn btn-ghost" @onclick="() => _revoking = null">Abbrechen</button>
+                </div>
+            </div>
+        }
+
+        <div class="card panel">
+            <h2 class="panel-title">Widerrufsregister</h2>
+            @if (_revocations.Count == 0) { <p class="muted">Keine Widerrufe.</p> }
+            else
+            {
+                <div style="overflow-x:auto">
+                    <table class="table" aria-label="Widerrufe">
+                        <thead><tr><th scope="col">Seriennummer</th><th scope="col">Zeitpunkt</th><th scope="col">Grund</th><th scope="col">Status</th><th scope="col">Aktion</th></tr></thead>
+                        <tbody>
+                        @foreach (var r in _revocations)
+                        {
+                            <tr>
+                                <td><code title="@r.SerialNumber">@Short(r.SerialNumber)</code></td>
+                                <td>@r.RevocationTime.ToString("yyyy-MM-dd HH:mm") UTC</td>
+                                <td>@PkiReasons.Name(r.ReasonCode)</td>
+                                <td>@(r.ReleasedAt is { } rl ? $"aufgehoben {rl:yyyy-MM-dd HH:mm}" : "in der CRL")</td>
+                                <td>@if (_canWrite && r.ReleasedAt is null && r.ReasonCode == 6) { <button class="btn btn-ghost btn-sm" @onclick="() => ReleaseAsync(r.CertificateId)" disabled="@_busy">Sperre aufheben</button> }</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+
+        <div class="card panel">
+            <h2 class="panel-title">Sperrlisten (CRL)</h2>
+            <p class="muted">Eine CRL gilt nur bis <em>nextUpdate</em> als aktuell; die Issuing-CRL wird automatisch vor Ablauf und nach jedem Widerruf neu ausgestellt.</p>
+            <div style="overflow-x:auto">
+                <table class="table" aria-label="Sperrlisten">
+                    <thead><tr><th scope="col">Aussteller</th><th scope="col">Nummer</th><th scope="col">thisUpdate</th><th scope="col">nextUpdate</th><th scope="col">Einträge</th><th scope="col">Aktuell</th><th scope="col"></th></tr></thead>
+                    <tbody>
+                    @foreach (var l in _crls)
+                    {
+                        <tr>
+                            <td>@(l.IssuerCaId == _status.Root?.Id ? "Root CA" : "Issuing CA")</td>
+                            <td>@l.CrlNumber</td>
+                            <td>@l.ThisUpdate.ToString("yyyy-MM-dd HH:mm")</td>
+                            <td>@l.NextUpdate.ToString("yyyy-MM-dd HH:mm")</td>
+                            <td>@l.EntryCount</td>
+                            <td>@(l.IsFresh(DateTime.UtcNow) ? "✔" : "✖ abgelaufen")</td>
+                            <td><a class="btn btn-ghost btn-sm" href="/pki/crl/@(l.IssuerCaId).crl" download>.crl</a></td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private string _userId = "";
+    private bool _canRead, _canWrite, _busy, _error, _initConfirm;
+    private string? _message;
+    private PkiStatus? _status;
+    private List<PkiCertificate> _certs = new();
+    private List<PkiRevocation> _revocations = new();
+    private List<PkiCrl> _crls = new();
+    private List<PkiCheck>? _checks;
+    private string _initUrl = "", _resetText = "", _rootRemoveText = "", _confirmSerial = "", _rootPass = "";
+    private PkiCertificate? _revoking;
+    private int _reasonCode;
+    private byte[]? _rootPfx;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _userId = auth.User.GetUserId() ?? throw new UnauthorizedAccessException();
+        // nur zur Anzeige; jede Aktion prüft der Dienst gegen die Rollen in der Datenbank
+        _canWrite = auth.User.IsInRole(Roles.Admin);
+        _canRead = _canWrite || auth.User.IsInRole(Roles.Auditor);
+        _initUrl = Pki.Settings.PublicUrl.Length > 0 ? Pki.Settings.PublicUrl : Nav.BaseUri.TrimEnd('/');
+        if (_canRead) await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _status = await Pki.GetStatusAsync();
+        _certs = await Pki.ListCertificatesAsync();
+        _revocations = await Pki.ListRevocationsAsync();
+        _crls = await Pki.ListCrlsAsync(12);
+    }
+
+    private async Task Run(Func<Task> action, string ok)
+    {
+        _busy = true; _message = null;
+        try { await action(); _message = ok; _error = false; }
+        catch (Exception ex) when (ex is PkiException or UnauthorizedAccessException or ArgumentException) { _message = ex.Message; _error = true; }
+        await ReloadAsync();
+        _busy = false;
+    }
+
+    private Task InitializeAsync() => Run(async () => { await Pki.InitializeAsync(_userId, _initUrl); _initConfirm = false; }, "Die PKI wurde eingerichtet. Sichern Sie jetzt den Root-Schlüssel offline und entfernen Sie ihn vom Server.");
+    private Task ResetAsync() => Run(() => Pki.ResetIncompleteAsync(_userId, _resetText), "Der unvollständige Zustand wurde zurückgesetzt.");
+    private Task RenewAsync() => Run(async () => { await Pki.RenewSigningCertificateAsync(_userId); }, "Neues Signaturzertifikat ausgestellt; das bisherige gilt als ersetzt.");
+    private Task IssueCrlAsync() => Run(async () => { await Pki.IssueCrlAsync(_userId); }, "Neue CRL ausgestellt.");
+    private Task RemoveRootAsync() => Run(() => Pki.RemoveRootKeyFromServerAsync(_userId, _rootRemoveText), "Der Root-Schlüssel wurde vom Server entfernt.");
+    private Task ReleaseAsync(string id) => Run(() => Pki.ReleaseHoldAsync(_userId, id), "Die Sperre wurde aufgehoben und eine neue CRL ausgestellt.");
+
+    private Task SelfTestAsync() => Run(async () => { _checks = await Verifier.SelfTestAsync(); }, "Selbsttest abgeschlossen.");
+
+    private void StartRevoke(PkiCertificate c) { _revoking = c; _confirmSerial = ""; _reasonCode = 0; _rootPass = ""; _rootPfx = null; _message = null; }
+
+    private async Task OnRootFile(InputFileChangeEventArgs e)
+    {
+        try { using var ms = new MemoryStream(); await using var s = e.File.OpenReadStream(64 * 1024); await s.CopyToAsync(ms); _rootPfx = ms.ToArray(); }
+        catch (IOException) { _rootPfx = null; _message = "Die Datei ist zu groß oder nicht lesbar."; _error = true; }
+    }
+
+    private async Task RevokeAsync()
+    {
+        if (_revoking is null) return;
+        var target = _revoking;
+        await Run(async () => { await Pki.RevokeAsync(_userId, target.Id, _reasonCode, _confirmSerial, _rootPfx, _rootPass); _revoking = null; _rootPass = ""; }, "Das Zertifikat wurde widerrufen und eine neue CRL ausgestellt.");
+    }
+
+    private static string Short(string serial) => serial.Length <= 16 ? serial : serial[..8] + "…" + serial[^6..];
+    private static string TypeLabel(string t) => t switch { PkiCertificateTypes.RootCa => "Root CA", PkiCertificateTypes.IssuingCa => "Issuing CA", _ => "Dokumentsignatur" };
+    private static string StatusLabel(PkiCertificate c) => c.Status switch
+    {
+        PkiCertificateStatuses.Active => c.NotAfter < DateTime.UtcNow ? "abgelaufen" : "aktiv",
+        PkiCertificateStatuses.Revoked => "widerrufen (" + c.RevocationReason + ")",
+        PkiCertificateStatuses.Superseded => "ersetzt",
+        PkiCertificateStatuses.Expired => "abgelaufen",
+        _ => c.Status,
+    };
+    private static string StateClass(string s) => s == PkiStates.Operational ? "badge badge-pass" : "badge";
+    private static string StateLabel(string s) => s switch
+    {
+        PkiStates.NotConfigured => "nicht konfiguriert", PkiStates.InitializationRequired => "Initialisierung erforderlich", PkiStates.Initializing => "wird initialisiert", PkiStates.Initialized => "eingerichtet",
+        PkiStates.Operational => "betriebsbereit", PkiStates.KeyUnavailable => "Schlüssel nicht verfügbar", PkiStates.MaintenanceRequired => "Wartung erforderlich", PkiStates.Locked => "gesperrt", _ => s,
+    };
+}

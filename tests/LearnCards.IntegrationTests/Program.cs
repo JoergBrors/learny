@@ -48,6 +48,10 @@ using (var pdfCert = PdfTests.NewRsaCert("CN=Learny Test PDF Signer, O=LearnCard
     Env("PDF_SIGNING_CERT_PASSWORD", "pdf-test");
 }
 Env("DATA_PROTECTION_DIR", Path.Combine(tmp, "keys"));
+const string PkiKeyPassword = "it-pki-key-password-0123", PkiRootPassphrase = "it-pki-root-passphrase-0123";
+var pkiKeyDir = Path.Combine(tmp, "pki");
+Env("PKI_PUBLIC_URL", baseUrl);   // Learny-PKI (ADR 0035): wird beim ersten Start automatisch eingerichtet
+Env("PKI_KEY_DIR", pkiKeyDir); Env("PKI_KEY_PASSWORD", PkiKeyPassword); Env("PKI_ROOT_PASSPHRASE", PkiRootPassphrase);
 var provider = Environment.GetEnvironmentVariable("TEST_DB_PROVIDER") ?? "sqlite";
 Env("DB_PROVIDER", provider);
 if (provider == "sqlite") Env("SQLITE_PATH", Path.Combine(tmp, "it.db"));
@@ -122,7 +126,7 @@ async Task<(string Url, Process Proc)> StartWebAsync(string label, Dictionary<st
     info.Environment["DB_PROVIDER"] = "sqlite";
     info.Environment["SQLITE_PATH"] = Path.Combine(dir, "e2e.db");
     info.Environment["DATA_PROTECTION_DIR"] = Path.Combine(dir, "keys");
-    foreach (var (k, v) in extraEnv) info.Environment[k] = v;
+    foreach (var (k, v) in extraEnv) info.Environment[k] = v.Replace("{URL}", url);
     var proc = Process.Start(info)!;
     var output = new System.Text.StringBuilder();
     proc.OutputDataReceived += (_, e) => { if (e.Data is not null) { lock (output) output.AppendLine(e.Data); lock (log) log.AppendLine($"[{label}] {e.Data}"); } };
@@ -274,6 +278,12 @@ try
         await CompetencyTests.RunAsync(LoginAsync, () => NewClient(false), Check);
         await TopicCredentialTests.RunAsync(LoginAsync, () => NewClient(false), admin, Check);
         await TopicGovernanceTests.RunAsync(LoginAsync, () => NewClient(false), admin, mcpUrl, Check);
+        Console.WriteLine($"{checks - failures}/{checks} Prüfungen bestanden" + (failures == 0 ? "" : $", {failures} FEHLGESCHLAGEN"));
+        return failures == 0 ? 0 : 1;
+    }
+    if (Environment.GetEnvironmentVariable("TEST_ONLY") == "pki")   // Entwicklungsabkürzung: nur Learny-PKI
+    {
+    await PkiTests.RunAsync(LoginAsync, () => NewClient(false), admin, baseUrl, pkiKeyDir, PkiKeyPassword, PkiRootPassphrase, StartWebAsync, StopProcess, () => { lock (log) return log.ToString(); }, Check);   // Learny-PKI (ADR 0035)
         Console.WriteLine($"{checks - failures}/{checks} Prüfungen bestanden" + (failures == 0 ? "" : $", {failures} FEHLGESCHLAGEN"));
         return failures == 0 ? 0 : 1;
     }
@@ -2074,6 +2084,7 @@ try
     await ModuleVersionTests.RunAsync(LoginAsync, Check);   // Modulversionen, feste Modulversionen im Thema (ADR 0030)
     await CardToolsTests.RunAsync(LoginAsync, () => NewClient(false), admin, mcpUrl, McpKey, PngLike, Check);   // get_card, update_card, export_cards
     await TopicGovernanceTests.RunAsync(LoginAsync, () => NewClient(false), admin, mcpUrl, Check);   // Themenfreigaben, Pflicht, Themen-Admin, Lernstatus (ADR 0029)
+    await PkiTests.RunAsync(LoginAsync, () => NewClient(false), admin, baseUrl, pkiKeyDir, PkiKeyPassword, PkiRootPassphrase, StartWebAsync, StopProcess, () => { lock (log) return log.ToString(); }, Check);   // Learny-PKI (ADR 0035)
 
     // Migration modules.reference_id: Altbestand ohne Spalte wird beim Start ergänzt (idempotent), Daten bleiben erhalten, Referenzen sind danach stabil
     Console.WriteLine("\nMigration modules.reference_id (ADR 0028)");

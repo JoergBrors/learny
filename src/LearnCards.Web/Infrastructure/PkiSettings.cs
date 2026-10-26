@@ -26,6 +26,15 @@ public class PkiSettings
     public int RootCrlValidityDays { get; set; } = 365;
     public int CrlRenewBeforeHours { get; set; } = 48;
     public int ExpiryWarningDays { get; set; } = 60;
+    /// <summary>Öffentliche Basis-URL der Anwendung (z. B. https://learny.example.org). Sie steht unveränderlich in den CRL-Verteilungspunkten der ausgestellten Zertifikate.</summary>
+    public string PublicUrl { get; set; } = "";
+    /// <summary>Erststart: Ist die PKI noch nie eingerichtet worden und die Konfiguration vollständig, wird sie einmalig automatisch initialisiert (nie bei späteren Starts, nie über vorhandene Zertifikate).</summary>
+    public bool AutoInit { get; set; } = true;
+    /// <summary>Passphrase des beim Erststart abgelegten Root-Schlüssels; leer = zufällig erzeugt und einmalig neben der Root-Datei abgelegt.</summary>
+    public string RootPassphrase { get; set; } = "";
+
+    /// <summary>Optionaler Vertrauensanker-Pin (SHA-256-Fingerabdrücke der Root CA, kommagetrennt). Gesetzt, gelten nur Roots aus dem Register, die dazu passen — unabhängig von der Datenbank.</summary>
+    public List<string> TrustedRootSha256 { get; set; } = new();
 
     public bool PasswordConfigured => KeyPassword.Length >= MinPasswordLength;
 
@@ -46,6 +55,10 @@ public class PkiSettings
             RootCrlValidityDays = I("PKI_ROOT_CRL_VALIDITY_DAYS", 365, 30, 1825),
             CrlRenewBeforeHours = I("PKI_CRL_RENEW_BEFORE_HOURS", 48, 1, 24 * 14),
             ExpiryWarningDays = I("PKI_EXPIRY_WARNING_DAYS", 60, 1, 365),
+            PublicUrl = E("PKI_PUBLIC_URL").TrimEnd('/'),
+            AutoInit = !string.Equals(E("PKI_AUTO_INIT", "true"), "false", StringComparison.OrdinalIgnoreCase),
+            TrustedRootSha256 = E("PKI_TRUSTED_ROOT_SHA256").Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries).Select(x => x.Replace(":", "").ToLowerInvariant()).ToList(),
+            RootPassphrase = Environment.GetEnvironmentVariable("PKI_ROOT_PASSPHRASE") ?? "",
         };
     }
 
@@ -57,6 +70,8 @@ public class PkiSettings
         if (KeyPassword.Length > 0 && KeyPassword.Length < MinPasswordLength) errors.Add($"PKI_KEY_PASSWORD ist zu kurz (mindestens {MinPasswordLength} Zeichen).");
         if (IssuingValidityYears >= RootValidityYears) errors.Add("PKI_ISSUING_VALIDITY_YEARS muss kleiner als PKI_ROOT_VALIDITY_YEARS sein.");
         if (SigningValidityDays > IssuingValidityYears * 365 - 30) errors.Add("PKI_SIGNING_VALIDITY_DAYS muss deutlich kürzer als die Gültigkeit der Issuing CA sein.");
+        if (PublicUrl.Length > 0 && !(Uri.TryCreate(PublicUrl, UriKind.Absolute, out var u) && (u.Scheme is "http" or "https") && u.Query.Length == 0 && u.UserInfo.Length == 0)) errors.Add("PKI_PUBLIC_URL muss eine absolute http(s)-URL ohne Zugangsdaten sein.");
+        if (RootPassphrase.Length > 0 && RootPassphrase.Length < MinPasswordLength) errors.Add($"PKI_ROOT_PASSPHRASE ist zu kurz (mindestens {MinPasswordLength} Zeichen).");
         if (string.IsNullOrWhiteSpace(Organization) || Organization.Any(char.IsControl)) errors.Add("PKI_ORGANIZATION ist ungültig.");
         return errors;
     }

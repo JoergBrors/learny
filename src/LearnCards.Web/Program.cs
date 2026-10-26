@@ -7,6 +7,7 @@ using LearnCards.Web.Infrastructure;
 using LearnCards.Web.Services;
 using LearnCards.Web.Services.Certificates;
 using LearnCards.Web.Services.ImageStorage;
+using LearnCards.Web.Services.Pki;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
@@ -44,6 +45,10 @@ builder.Services.AddSingleton<SharingService>();
 builder.Services.AddSingleton<PdfVerificationService>();   // Upload-Prüfung signierter Zertifikats-PDFs (ADR 0033)
 builder.Services.AddSingleton<CertificatePdfService>();   // signierte Zertifikats-PDFs (ADR 0033)
 builder.Services.AddSingleton<PdfSigningProvider>();   // PDF-Signaturzertifikat (ADR 0033)
+builder.Services.AddSingleton<PkiKeyStore>();   // Learny-PKI (ADR 0035)
+builder.Services.AddSingleton<PkiService>();
+builder.Services.AddSingleton<PkiVerifier>();
+builder.Services.AddHostedService<PkiMaintenanceService>();
 builder.Services.AddSingleton<TopicCredentialService>();   // Themenabschluss: Master-Badge + CLR (ADR 0032)
 builder.Services.AddSingleton<CompetencyService>();   // Kompetenzmodell und Prüfungssnapshots (ADR 0031)
 builder.Services.AddSingleton<ModuleVersionService>();   // Modulversionen (ADR 0030)
@@ -175,6 +180,30 @@ if (badgeSigner.GeneratedKeyFile && (await db.QueryAsync("SELECT id FROM certifi
     try { File.Delete(cfg.Blockchain.BadgeKeyFile); File.Delete(BadgeSigner.MarkerPath(cfg.Blockchain.BadgeKeyFile)); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     throw new InvalidOperationException("Es existieren bereits Zertifikate, der Badge-Signaturschlüssel fehlt aber. Es wird kein neuer Schlüssel verwendet, damit ausgestellte Badges gültig bleiben. Schlüssel aus der Sicherung wiederherstellen (docs/iis-deployment.md).");
 }
+// Learny-PKI (ADR 0035): beim allerersten Start einmalig einrichten (nie bei späteren Starts); --pki-init richtet sie ausdrücklich ein und beendet das Programm
+var pki = app.Services.GetRequiredService<PkiService>();
+var pkiFallbackUrl = app.Environment.IsDevelopment()
+    ? (Environment.GetEnvironmentVariable("ASPNETCORE_URLS") ?? "http://localhost:5000").Split(';')[0].Replace("0.0.0.0", "localhost").Replace("+", "localhost").Replace("*", "localhost")
+    : null;
+if (args.Contains("--pki-init"))
+{
+    var pkiResult = await pki.InitializeAsync(null, cfg.Pki.PublicUrl.Length > 0 ? cfg.Pki.PublicUrl : pkiFallbackUrl, system: true);
+    var rootOutIdx = Array.IndexOf(args, "--root-out");
+    if (rootOutIdx >= 0 && rootOutIdx + 1 < args.Length)
+    {
+        var target = Path.GetFullPath(args[rootOutIdx + 1]);
+        var keyStore = app.Services.GetRequiredService<PkiKeyStore>();
+        File.Copy(keyStore.RootPath, target, overwrite: false);
+        if (keyStore.ReadRootPassphrase() is { } rp && cfg.Pki.RootPassphrase.Length == 0) File.WriteAllText(target + ".passphrase", rp);
+        keyStore.RemoveRoot();
+        Console.WriteLine($"PKI eingerichtet. Root-Schlüssel (verschlüsselt) nach {target} geschrieben und vom Server entfernt.");
+    }
+    else Console.WriteLine("PKI eingerichtet. Der Root-Schlüssel liegt noch unter " + Path.Combine(cfg.Pki.KeyDir, PkiKeyStore.RootDir) + " — offline sichern und in Administration → PKI entfernen.");
+    Console.WriteLine($"Status: {pkiResult.State}");
+    return;
+}
+var pkiAuto = await pki.TryAutoInitializeAsync(pkiFallbackUrl);
+if (pkiAuto.Length > 0) app.Logger.LogInformation("PKI: {Message}", pkiAuto);
 var pdfSigning = app.Services.GetRequiredService<PdfSigningProvider>();   // konfiguriertes PDF-Signaturzertifikat beim Start prüfen (ADR 0033); unbrauchbar = Startabbruch
 pdfSigning.EnsureValidAtStartup();
 if (pdfSigning.Configured) app.Logger.LogInformation("PDF-Signatur: Zertifikat {Thumbprint}{Dev}.", pdfSigning.Thumbprint, pdfSigning.IsDevCertificate ? " (selbstsigniertes Entwicklungszertifikat, nicht vertrauenswürdig)" : "");

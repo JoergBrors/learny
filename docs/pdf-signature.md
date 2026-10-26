@@ -2,6 +2,10 @@
 
 Zertifikats-PDFs (Modul- und Themenabschluss, [ADR 0033](adr/0033-signierte-zertifikats-pdfs.md)) werden digital signiert. Dafür braucht die Installation ein **eigenes X.509-Signaturzertifikat** in der `.env` — es ist **unabhängig** vom Badge-Schlüssel (ES256, ADR 0021), mit dem die Open Badges, das CLR und das Master-Badge signiert werden.
 
+## Eigene Learny-PKI (ADR 0035)
+
+Ohne `PDF_SIGNING_CERT_*` kann Learny das Signaturzertifikat aus der **eigenen PKI** beziehen ([docs/pki.md](pki.md)): Root CA → Issuing CA → Signaturzertifikat (EKU `id-kp-documentSigning`), die Kette ist im PDF eingebettet, Widerruf läuft über CRLs. Reihenfolge: ausdrücklich konfiguriertes `PDF_SIGNING_CERT_*` → betriebsbereite PKI → nur Development das Entwicklungszertifikat → sonst 503. Die PKI-Signatur ist **nur für Empfänger vertrauenswürdig, die die Learny-Root importieren**; Adobe & Co. erkennen sie nicht automatisch.
+
 ## Konfiguration
 
 | Variable | Bedeutung |

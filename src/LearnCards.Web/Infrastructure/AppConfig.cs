@@ -134,6 +134,7 @@ public class AppConfig
         // ── PDF-Signatur (ADR 0033): eigenes Signaturzertifikat aus der .env; Entwicklungszertifikat nur in Development ──
         var envName = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ?? "Production";
         cfg.Pki = PkiSettings.Load(Path.GetFullPath("data"));
+        if (cfg.Pki.PublicUrl.Length == 0) cfg.Pki.PublicUrl = cfg.Blockchain.PublicBaseUrl;   // PKI_PUBLIC_URL fehlt: die bestehende PUBLIC_BASE_URL gilt
         if (cfg.Pki.Validate() is { Count: > 0 } pkiErrors) throw new InvalidOperationException("Ungültige PKI-Konfiguration: " + string.Join(" ", pkiErrors));
         cfg.PdfSigning = PdfSigningSettings.Load(Path.GetFullPath("data"), envName.Equals("Development", StringComparison.OrdinalIgnoreCase));
 

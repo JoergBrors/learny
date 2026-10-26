@@ -40,7 +40,7 @@ public sealed class CertificatePdfService
         var rows = await _db.QueryAsync("SELECT pdf_base64, pdf_sha256 FROM certificate_pdfs WHERE certificate_id = @id", new[] { ("id", (object?)cert.Id) });
         if (rows.Count > 0) return new(Convert.FromBase64String(rows[0]["pdf_base64"] ?? ""), rows[0]["pdf_sha256"] ?? "", name, false);
 
-        var options = _signing.GetOptions();   // wirft PdfSigningUnavailableException, wenn kein Signaturzertifikat konfiguriert ist (fail-closed)
+        var options = await _signing.GetOptionsAsync();   // wirft PdfSigningUnavailableException, wenn kein Signaturzertifikat konfiguriert ist (fail-closed)
         var pdf = await BuildAsync(cert, options, ct);
         var sha = Convert.ToHexString(SHA256.HashData(pdf)).ToLowerInvariant();
         try

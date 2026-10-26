@@ -84,7 +84,7 @@ public static class PdfTests
             $"PDF5 lange Inhalte: {d.Pages.Count} Seiten, alle 120 Tabellenzeilen vorhanden, Kopfzeile auf jeder Seite wiederholt, 500-Zeichen-Wort vollständig (nichts abgeschnitten)");
 
         // Signaturzertifikat nicht konfiguriert: fail-closed
-        var provider = new PdfSigningProvider(new AppConfig());
+        var provider = new PdfSigningProvider(new AppConfig(), null!);
         var threw = false; try { provider.GetOptions(); } catch (PdfSigningUnavailableException) { threw = true; }
         check(threw, "PDF6 ohne konfiguriertes Signaturzertifikat gibt es keine signierten PDFs (fail-closed, 503 im API)");
         var expired = NewRsaCert(); // gültig

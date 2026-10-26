@@ -99,6 +99,19 @@
                 <tr><td>9. Versionen stimmen überein</td><td>@Mark(Flag(r, "versions.match"))</td></tr>
             </tbody>
         </table>
+        @if (r["pdf"]?["pki"] is { } pk)
+        {
+            <table class="table" aria-label="Learny-PKI">
+                <thead><tr><th scope="col">Learny-PKI</th><th scope="col">Ergebnis</th></tr></thead>
+                <tbody>
+                    <tr><td>Kryptografisch gültig</td><td>@Mark(Flag(pk, "cryptographically_valid"))</td></tr>
+                    <tr><td>Kette bis zum Learny-Vertrauensanker, Zertifikatsprofil</td><td>@Mark(Flag(pk, "chain_valid") && Flag(pk, "profile_ok"))</td></tr>
+                    <tr><td>Aussteller durch die Learny-PKI bestätigt</td><td>@Mark(Flag(pk, "issuer_confirmed"))</td></tr>
+                    <tr><td>Widerrufsprüfung (Register + CRL)</td><td>@(Txt(pk, "revocation") switch { "good" => "✔ nicht widerrufen, CRL aktuell", "revoked" => "✖ widerrufen (" + Txt(pk, "revocation_reason") + ")", _ => "⚠ unbekannt (CRL nicht aktuell oder nicht verfügbar)" })</td></tr>
+                    <tr><td>Öffentlich vertrauenswürdige CA</td><td>✖ nein – die Learny-PKI wird nicht automatisch von Adobe, Betriebssystemen oder Vertrauenslisten anerkannt</td></tr>
+                </tbody>
+            </table>
+        }
         @if (r["pdf"]?["signer"] is { } sg)
         {
             <p class="muted">Unterzeichner: @Txt(sg, "subject") · gültig @Txt(sg, "not_before")[..10] bis @Txt(sg, "not_after")[..10] · Fingerabdruck <code>@Txt(sg, "thumbprint")</code>@(Txt(r, "pdf.signing_time") is { Length: > 0 } st ? " · signiert " + st : "")</p>
@@ -135,7 +148,7 @@
     private static JsonNode? At(JsonNode? n, string path) { foreach (var p in path.Split('.')) n = n is JsonArray a ? (int.TryParse(p, out var i) && i < a.Count ? a[i] : null) : (n as JsonObject)?[p]; return n; }
     private static bool Flag(JsonNode? n, string path) => At(n, path)?.ToString() == "true" || At(n, path)?.ToString() == "True";
     private static string Txt(JsonNode? n, string path) => (At(n, path)?.ToString() ?? "").Trim('"');
-    private static string TrustText(string t) => t switch { "installation" => "✔ Unterzeichner ist diese Installation", "trusted_ca" => "✔ Zertifikat einer anerkannten Zertifizierungsstelle", "untrusted" => "⚠ Unterzeichner nicht vertrauenswürdig bestätigt (selbstsigniert/unbekannt)", _ => "✖ kein Unterzeichner" };
+    private static string TrustText(string t) => t switch { "learny_pki" => "✔ Zertifikat der Learny-PKI (Vertrauensanker aus dem Register dieser Installation)", "installation" => "✔ Unterzeichner ist diese Installation", "trusted_ca" => "✔ Zertifikat einer anerkannten Zertifizierungsstelle", "untrusted" => "⚠ Unterzeichner nicht vertrauenswürdig bestätigt (selbstsigniert/unbekannt)", _ => "✖ kein Unterzeichner" };
     private static string Mark(bool ok) => ok ? "✔ ja" : "✖ nein";
     private static bool ModulesOk(JsonNode r) => r["credentials"]?["modules"] is JsonArray m ? m.Count > 0 && m.All(x => Flag(x, "valid")) : Flag(r, "credentials.module_credential.valid");
     private static string ModulesText(JsonNode r) => r["credentials"]?["modules"] is JsonArray m ? $" ({m.Count(x => Flag(x, "valid"))} von {m.Count})" : "";
