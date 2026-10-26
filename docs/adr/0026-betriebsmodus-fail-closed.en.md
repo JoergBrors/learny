@@ -3,7 +3,7 @@
 - **Status:** Accepted (partially implements item 1 of [0014](0014-sitzungs-und-betriebsmodus-haertung.en.md))
 - **Date:** 2026-10-26
 - **Motivation:** Production incident: after moving `.env` out of the web root (ADR 0023), the application could no longer read its configuration. With `AUTH_MODE=auto`, it silently fell back to **development login with administrator privileges** (public login page displayed “Local login (Dev mode)”, and SQLite was used instead of PostgreSQL).
-- **Related:** [0005](0005-authentifizierung.en.md), [0009](0009-deployment-wege.en.md), [0023](0023-secrets-und-badge-schluessel-unter-iis.md), review finding F1.
+- **Related:** [0005](0005-authentifizierung.en.md), [0009](0009-deployment-wege.en.md), [0023](0023-secrets-und-badge-schluessel-unter-iis.en.md), review finding F1.
 
 ## Decision
 
