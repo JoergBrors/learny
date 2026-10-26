@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-24
-- **Supplemented by:** [0016](0016-bilder-in-lernkarten.md) (optional `images[]` field with Base64 images), [0011](0011-mehrbenutzerarchitektur.md) (cards have an owner; JSON deliberately has **no** ownership field), [0015](0015-freigaben-globale-lernmodule.md) (card JSON is unchanged; global copies retain all card fields including quizzes)
+- **Supplemented by:** [0016](0016-bilder-in-lernkarten.en.md) (optional `images[]` field with Base64 images), [0011](0011-mehrbenutzerarchitektur.en.md) (cards have an owner; JSON deliberately has **no** ownership field), [0015](0015-freigaben-globale-lernmodule.en.md) (card JSON is unchanged; global copies retain all card fields including quizzes)
 
 ## Context
 
@@ -41,4 +41,4 @@ Cards are created through UI imports, the REST API, MCP tools, and AI-generated 
 
 ## Addendum 2026-10-26 (ADR 0020)
 
-The text fields `definition`, `how_it_works`, `context`, `key_fact`, and `reference_answer` remain strings and additionally support a small formatting syntax (Markdown subset, no HTML) with a length limit of 20,000 characters. See [0020](0020-sichere-visuelle-bearbeitung-formatierter-lerninhalte.md) and `rich_text_rules` in the live schema. **No fields** were added, renamed, or removed; therefore, the “new field” checklist does not apply.
+The text fields `definition`, `how_it_works`, `context`, `key_fact`, and `reference_answer` remain strings and additionally support a small formatting syntax (Markdown subset, no HTML) with a length limit of 20,000 characters. See [0020](0020-sichere-visuelle-bearbeitung-formatierter-lerninhalte.en.md) and `rich_text_rules` in the live schema. **No fields** were added, renamed, or removed; therefore, the “new field” checklist does not apply.
