@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-25
 - **Supplements:** [0017](0017-konfigurierbare-bildspeicher.en.md) (providers, cache, migration), [0016](0016-bilder-in-lernkarten.en.md) (unchanged image format)
-- **Related:** [0011](0011-mehrbenutzerarchitektur.en.md), [0015](0015-freigaben-globale-lernmodule.md) (authorization), [0014](0014-sitzungs-und-betriebsmodus-haertung.en.md) (hardening)
+- **Related:** [0011](0011-mehrbenutzerarchitektur.en.md), [0015](0015-freigaben-globale-lernmodule.en.md) (authorization), [0014](0014-sitzungs-und-betriebsmodus-haertung.en.md) (hardening)
 
 ## Context
 
