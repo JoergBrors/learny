@@ -1,8 +1,8 @@
 # 0010 — Slide Mode and Static Card Quizzes
 
-- **Status:** Accepted — quiz logic partially superseded by [0019](0019-einheitliches-quizsystem.md) (slide mode and `quiz[]` fields remain valid)
+- **Status:** Accepted — quiz logic partially superseded by [0019](0019-einheitliches-quizsystem.en.md) (slide mode and `quiz[]` fields remain valid)
 - **Date:** 2026-10-24
-- **Supplemented by:** [0016](0016-bilder-in-lernkarten.md) (images also appear in slide mode), [0011](0011-mehrbenutzerarchitektur.md) (cards and their static quizzes belong to the card owner), [0015](0015-freigaben-globale-lernmodule.md) (slide mode and card quizzes also work in shared and global modules)
+- **Supplemented by:** [0016](0016-bilder-in-lernkarten.en.md) (images also appear in slide mode), [0011](0011-mehrbenutzerarchitektur.en.md) (cards and their static quizzes belong to the card owner), [0015](0015-freigaben-globale-lernmodule.en.md) (slide mode and card quizzes also work in shared and global modules)
 
 ## Context
 
@@ -31,6 +31,6 @@ In addition to conventional flashcard learning, the system should support slide 
 
 ## Addendum 2026-10-25
 
-The separation described in this ADR between card quizzes (static, client-side evaluation) and module quizzes (AI, free text) has been superseded by the **unified quiz engine** ([ADR 0019](0019-einheitliches-quizsystem.md)): shared sessions, grading, configuration, and result storage.
+The separation described in this ADR between card quizzes (static, client-side evaluation) and module quizzes (AI, free text) has been superseded by the **unified quiz engine** ([ADR 0019](0019-einheitliches-quizsystem.en.md)): shared sessions, grading, configuration, and result storage.
 
 `CardQuizPanel` remains an entry-point component. `quiz[]` remains the canonical import/export contract (now also supporting optional `multiple_response` and `free_text`); questions are additionally managed in the question pool.
