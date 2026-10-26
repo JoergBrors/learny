@@ -1,9 +1,9 @@
 # 0014 — Session and Operating-Mode Hardening
 
-- **Status:** Proposed (item 1 partly implemented by [0026](0026-betriebsmodus-fail-closed.md); remaining items not implemented and require approval)
+- **Status:** Proposed (item 1 partly implemented by [0026](0026-betriebsmodus-fail-closed.en.md); remaining items not implemented and require approval)
 - **Date:** 2026-10-24
-- **Motivation:** [Multi-user review report](../reviews/2026-10-24-mehrbenutzer-pruefbericht.md), findings F1–F6
-- **Would supplement:** [0005](0005-authentifizierung.en.md), [0011](0011-mehrbenutzerarchitektur.md)
+- **Motivation:** [Multi-user review report](../reviews/2026-10-24-mehrbenutzer-pruefbericht.en.md), findings F1–F6
+- **Would supplement:** [0005](0005-authentifizierung.en.md), [0011](0011-mehrbenutzerarchitektur.en.md)
 
 ## Context
 
