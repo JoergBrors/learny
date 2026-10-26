@@ -1,9 +1,9 @@
 # 0013 — MCP: User-bound OAuth Login and Personal Tokens
 
 - **Status:** Accepted
-- **Clarification (2026-10-26):** The MCP server's `oauth.issuer` must be the publicly reachable HTTPS URL. `MCP_PUBLIC_URL` (Learny Web) and `webPublicUrl` must match it (deployment check; see the Claude.ai section in [iis-deployment.md](../iis-deployment.md)).
+- **Clarification (2026-10-26):** The MCP server's `oauth.issuer` must be the publicly reachable HTTPS URL. `MCP_PUBLIC_URL` (Learny Web) and `webPublicUrl` must match it (deployment check; see the Claude.ai section in [iis-deployment.md](../iis-deployment.en.md)).
 - **Date:** 2026-10-24
-- **Supplemented by:** [0025](0025-sichere-speicherung-von-mcp-tokens.md) (storage: HMAC with a key from `.env`, row MAC, encrypted OAuth clients; supersedes “SHA-256 hash only” and “clients in memory only”), [0015](0015-freigaben-globale-lernmodule.md) (`list_modules` with `scope`, read access to shared/global modules; sharing/publication remain prohibited for tokens)
+- **Supplemented by:** [0025](0025-sichere-speicherung-von-mcp-tokens.en.md) (storage: HMAC with a key from `.env`, row MAC, encrypted OAuth clients; supersedes “SHA-256 hash only” and “clients in memory only”), [0015](0015-freigaben-globale-lernmodule.en.md) (`list_modules` with `scope`, read access to shared/global modules; sharing/publication remain prohibited for tokens)
 - **Partially supersedes:** [0011](0011-mehrbenutzerarchitektur.en.md) (“API and MCP Key”: `MCP_LINKED_USER_ID` removed), [0007](0007-mcp-server.en.md) (MCP server authentication)
 
 ## Context
