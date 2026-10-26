@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-24
-- **Supplemented by:** [0016](0016-bilder-in-lernkarten.md) (`add_card`/`import_cards` with `images[]`, no image logic in the MCP server), [0013](0013-mcp-benutzergebundene-anmeldung.md) (authentication with user-bound tokens instead of a shared key; OAuth login via Learny), [0015](0015-freigaben-globale-lernmodule.md) (`list_modules` with `scope`)
+- **Supplemented by:** [0016](0016-bilder-in-lernkarten.en.md) (`add_card`/`import_cards` with `images[]`, no image logic in the MCP server), [0013](0013-mcp-benutzergebundene-anmeldung.en.md) (authentication with user-bound tokens instead of a shared key; OAuth login via Learny), [0015](0015-freigaben-globale-lernmodule.en.md) (`list_modules` with `scope`)
 
 ## Context
 
@@ -12,10 +12,10 @@ AI clients (e.g., Claude Desktop) should be able to read, create, and import car
 
 - `LearnCards.McpServer` is a separate project with no database access. It calls only the Web API (`LEARNCARDS_API_URL`, authentication via `X-MCP-Key`) through `LearnCardsApiClient`.
 - Transports: `stdio` and/or HTTP (`/mcp`), configured through `mcpsettings.json` (`McpSettings.cs`).
-- *(Superseded by [0013](0013-mcp-benutzergebundene-anmeldung.md): no more `client_credentials`; login through Learny.)* OAuth for HTTP clients in `ProprietaryOAuthService`, including `/.well-known/oauth-authorization-server` and `/oauth/token`.
+- *(Superseded by [0013](0013-mcp-benutzergebundene-anmeldung.en.md): no more `client_credentials`; login through Learny.)* OAuth for HTTP clients in `ProprietaryOAuthService`, including `/.well-known/oauth-authorization-server` and `/oauth/token`.
 - Registered tools (`McpProtocol.RegisterTool`): `get_import_schema`, `whoami` (since ADR 0013), `add_card`, `import_cards`, `list_modules` (with `scope` since ADR 0015), `list_cards`, `archive_card`, `restore_card`.
 
-> **As of 2026-10-24:** Shared-key authentication via `X-MCP-Key` has been superseded by [ADR 0013](0013-mcp-benutzergebundene-anmeldung.md): data requests use the user's token. The `whoami` tool was also added.
+> **As of 2026-10-24:** Shared-key authentication via `X-MCP-Key` has been superseded by [ADR 0013](0013-mcp-benutzergebundene-anmeldung.en.md): data requests use the user's token. The `whoami` tool was also added.
 
 - Clients are instructed to fetch the schema before importing and not invent fields.
 - Under IIS, the MCP client launches the server itself (`learncards-mcp.cmd`); no Windows service is required.
