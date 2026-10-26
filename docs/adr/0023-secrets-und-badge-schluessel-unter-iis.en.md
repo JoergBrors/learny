@@ -2,7 +2,7 @@
 
 - **Status:** Accepted (practical IIS test pending)
 - **Date:** 2026-10-26
-- **Supplements:** [0009](0009-deployment-wege.en.md), [0021](0021-zertifikate-und-open-badges.md), [0014 (proposal)](../reviews/2026-10-24-mehrbenutzer-pruefbericht.md)
+- **Supplements:** [0009](0009-deployment-wege.en.md), [0021](0021-zertifikate-und-open-badges.en.md), [0014 (proposal)](../reviews/2026-10-24-mehrbenutzer-pruefbericht.en.md)
 - **Related:** [0002](0002-keine-nuget-pakete.en.md), [0005](0005-authentifizierung.en.md)
 
 ## Context
