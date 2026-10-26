@@ -1,11 +1,11 @@
 # 0015 — User Sharing, Global Learning Modules, and Result Attribution
 
-- **Status:** Accepted (supplemented by [0029](0029-themenzugriff-pflichtzuweisungen-und-themenadministration.md): topic-specific module permissions and mandatory assignments)
+- **Status:** Accepted (supplemented by [0029](0029-themenzugriff-pflichtzuweisungen-und-themenadministration.en.md): topic-specific module permissions and mandatory assignments)
 - **Date:** 2026-10-24
 - **Builds on:** [0011](0011-mehrbenutzerarchitektur.en.md) (ownership), [0012](0012-rollen-aus-entra-app-roles.en.md) (roles), [0013](0013-mcp-benutzergebundene-anmeldung.en.md) (MCP)
 - **Clarifies:** “There is no shared card collection.” Private collections remain isolated, but explicitly managed **shared** and **global** areas are also available.
 - **Supplemented by:** [0016](0016-bilder-in-lernkarten.en.md) (images are copied into shared/global copies)
-- **Originally open:** Session/operating-mode hardening ([0014](0014-sitzungs-und-betriebsmodus-haertung.en.md), proposed); findings F1–F4 of the [review report](../reviews/2026-10-24-mehrbenutzer-pruefbericht.md) were still open when this ADR was written. Consult later ADR 0026 for partial mitigation.
+- **Originally open:** Session/operating-mode hardening ([0014](0014-sitzungs-und-betriebsmodus-haertung.en.md), proposed); findings F1–F4 of the [review report](../reviews/2026-10-24-mehrbenutzer-pruefbericht.en.md) were still open when this ADR was written. Consult later ADR 0026 for partial mitigation.
 
 ## Context
 
