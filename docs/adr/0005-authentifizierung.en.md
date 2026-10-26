@@ -2,8 +2,8 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-24
-- **Supplemented by:** [0011](0011-mehrbenutzerarchitektur.md) (internal user ID, roles, ownership), [0012](0012-rollen-aus-entra-app-roles.md) (roles from Entra app roles), [0013](0013-mcp-benutzergebundene-anmeldung.md) (MCP tokens; `X-MCP-Key` is now only a service key without data access)
-- **Hardening proposal:** [0014](0014-sitzungs-und-betriebsmodus-haertung.md) (not implemented)
+- **Supplemented by:** [0011](0011-mehrbenutzerarchitektur.en.md) (internal user ID, roles, ownership), [0012](0012-rollen-aus-entra-app-roles.en.md) (roles from Entra app roles), [0013](0013-mcp-benutzergebundene-anmeldung.en.md) (MCP tokens; `X-MCP-Key` is now only a service key without data access)
+- **Hardening proposal:** [0014](0014-sitzungs-und-betriebsmodus-haertung.en.md) (not implemented)
 
 ## Context
 
