@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-24
-- **Supplemented by:** [0011](0011-mehrbenutzerarchitektur.md) (user context in components and API), [review report](../reviews/2026-10-24-mehrbenutzer-pruefbericht.md), [0015](0015-freigaben-globale-lernmodule.md) (sharing/publication logic in `SharingService`; UI and API are access layers only)
+- **Supplemented by:** [0011](0011-mehrbenutzerarchitektur.en.md) (user context in components and API), [review report](../reviews/2026-10-24-mehrbenutzer-pruefbericht.en.md), [0015](0015-freigaben-globale-lernmodule.en.md) (sharing/publication logic in `SharingService`; UI and API are access layers only)
 
 ## Context
 
@@ -23,7 +23,7 @@ The original solution consisted of a FastAPI backend, React frontend, and revers
 - Business logic belongs in `Services/` or `CardRepository`, **not** in `.razor` files or endpoint lambdas.
 - New feature → service method, then an endpoint in `Api/ApiEndpoints.cs` if external access is required, with the UI built on top.
 - Register new services as singletons in `Program.cs`; **never store per-user state in singletons, caches, or static fields** (currently satisfied according to the review report). Always pass user identity as parameters (`ownerId`/`userSub`), not fields.
-- API routes and JSON fields constitute a contract (see [0006](0006-kanonisches-karten-json.md)); do not rename them without good reason.
+- API routes and JSON fields constitute a contract (see [0006](0006-kanonisches-karten-json.en.md)); do not rename them without good reason.
 
 ## Affected Code
 
