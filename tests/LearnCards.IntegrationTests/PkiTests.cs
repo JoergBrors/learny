@@ -251,7 +251,7 @@ public static class PkiTests
             check(S(v1, "overall.valid") == "true" && S(v1, "overall.signer_trust") == "learny_pki" && S(v1, "pdf.pki.cryptographically_valid") == "true" && S(v1, "pdf.pki.chain_valid") == "true" && S(v1, "pdf.pki.issuer_confirmed") == "true"
                   && S(v1, "pdf.pki.revocation") == "good" && S(v1, "pdf.pki.crl_fresh") == "true" && S(v1, "pdf.pki.publicly_trusted") == "false" && S(v1, "overall.summary").Contains("keine öffentliche Anerkennung"),
                 "F2 Prüfung: kryptografisch gültig, Aussteller durch die Learny-PKI bestätigt, Widerrufsprüfung ok — öffentlich vertrauenswürdig: nein");
-            var f3 = (byte[])pdf.Clone(); f3[pdf.Length / 3] ^= 0x55;
+            var f3 = (byte[])pdf.Clone(); f3[200] ^= 0xFF;   // fester Offset im signierten Bereich (Kopf), nicht im Contents-Platzhalter
             check(S(await Upload(f3), "overall.valid") == "false", "F3 manipuliertes PDF bleibt ungültig");
 
             // eingebettetes Root-Zertifikat ist kein Vertrauensanker: Kette mit fremder Root, gleicher Name
