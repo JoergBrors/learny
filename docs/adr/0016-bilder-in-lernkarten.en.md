@@ -1,6 +1,6 @@
 # 0016 — Images as Part of Flashcards
 
-- **Status:** Accepted — storage partly superseded by [0017](0017-konfigurierbare-bildspeicher.en.md)/[0018](0018-zentraler-image-proxy-und-storage-zugriff.md); format and limits still apply.
+- **Status:** Accepted — storage partly superseded by [0017](0017-konfigurierbare-bildspeicher.en.md)/[0018](0018-zentraler-image-proxy-und-storage-zugriff.en.md); format and limits still apply.
 - **Date:** 2026-10-24
 - **Numbering note:** The change request referred to “ADR 0011,” but that number was already assigned to multi-user architecture (0011–0015), so this decision is ADR 0016.
 - **Supplements:** [0006](0006-kanonisches-karten-json.en.md) (card JSON), [0004](0004-datenbank-abstraktion.en.md) (schema), [0007](0007-mcp-server.en.md) (MCP tools).
