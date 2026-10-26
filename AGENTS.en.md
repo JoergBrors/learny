@@ -70,6 +70,6 @@ Every change to card fields, question formats, configuration, or import/export b
 
 ## Further Reading
 
-- [Architecture](docs/architecture.en.md), [Database Schema](docs/database-schema.md), [AI Development](docs/ai-development.en.md)
-- [Tests](docs/testing.en.md), [Multi-user Review (findings F1–F11)](docs/reviews/2026-10-24-mehrbenutzer-pruefbericht.md)
+- [Architecture](docs/architecture.en.md), [Database Schema](docs/database-schema.en.md), [AI Development](docs/ai-development.en.md)
+- [Tests](docs/testing.en.md), [Multi-user Review (findings F1–F11)](docs/reviews/2026-10-24-mehrbenutzer-pruefbericht.en.md)
 - [All ADRs](docs/adr/README.en.md)
