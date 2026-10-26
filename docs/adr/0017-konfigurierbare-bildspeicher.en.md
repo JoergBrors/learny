@@ -2,9 +2,9 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-25
-- **Partially supersedes:** [0016](0016-bilder-in-lernkarten.md), storage only (inline Base64 in `cards.images_json`). The `images[]` import/API format, limits (5 images, 2 MiB, 300-character text), and validation from ADR 0016 remain unchanged.
-- **Supplemented by:** [0018](0018-zentraler-image-proxy-und-storage-zugriff.md) (delivery, SAS/presigned URLs, SSRF protection)
-- **Supplements:** [0004](0004-datenbank-abstraktion.en.md) (schema), [0011](0011-mehrbenutzerarchitektur.en.md)/[0015](0015-freigaben-globale-lernmodule.md) (permissions)
+- **Partially supersedes:** [0016](0016-bilder-in-lernkarten.en.md), storage only (inline Base64 in `cards.images_json`). The `images[]` import/API format, limits (5 images, 2 MiB, 300-character text), and validation from ADR 0016 remain unchanged.
+- **Supplemented by:** [0018](0018-zentraler-image-proxy-und-storage-zugriff.en.md) (delivery, SAS/presigned URLs, SSRF protection)
+- **Supplements:** [0004](0004-datenbank-abstraktion.en.md) (schema), [0011](0011-mehrbenutzerarchitektur.en.md)/[0015](0015-freigaben-globale-lernmodule.en.md) (permissions)
 
 ## Context
 
