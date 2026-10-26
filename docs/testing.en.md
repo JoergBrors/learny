@@ -65,7 +65,7 @@ On Windows, the application loads system `winsqlite3.dll` ahead of `sqlite3.dll`
 
 - Blazor pages `/`, `/profile`, `/admin`, `/module/{id}` were originally checked only by HTTP rendering (page loads, content, non-admin redirected from admin). Interactive actions such as saving display name, role buttons, assignments should be tested manually: `dotnet run` from `src/LearnCards.Web`, login, inspect `/profile` and `/admin`.
 - Actual Entra ID OIDC login (development login only tested).
-- Load testing and simultaneous interactive browser sessions. See the [review report](reviews/2026-10-24-mehrbenutzer-pruefbericht.md); its personal-data, concurrency, logout/account-switching, and key-matrix checks are covered in the “review report” integration-test section.
+- Load testing and simultaneous interactive browser sessions. See the [review report](reviews/2026-10-24-mehrbenutzer-pruefbericht.en.md); its personal-data, concurrency, logout/account-switching, and key-matrix checks are covered in the “review report” integration-test section.
 - Known historical PostgreSQL failure: concurrent first save of learning status could return HTTP 500 (finding F4); expected until corrected.
 
 ## Docker Configuration (ADR 0024)
