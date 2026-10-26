@@ -12,7 +12,7 @@
 cp .env.example .env
 ```
 
-A supplied local `.env`, when present, may include working Entra ID settings and an OpenAI key placeholder. Basic UI/API tests can run without further changes: development login is used when `AUTH_MODE=auto` and OIDC settings are incomplete. The default `local-dev-user` is an **administrator**. Additional users can log in via `http://localhost:5000/auth/login?devUser=anna`. **Never use development login in production**; set `AUTH_MODE=oidc` and see [review F1](reviews/2026-10-24-mehrbenutzer-pruefbericht.md).
+A supplied local `.env`, when present, may include working Entra ID settings and an OpenAI key placeholder. Basic UI/API tests can run without further changes: development login is used when `AUTH_MODE=auto` and OIDC settings are incomplete. The default `local-dev-user` is an **administrator**. Additional users can log in via `http://localhost:5000/auth/login?devUser=anna`. **Never use development login in production**; set `AUTH_MODE=oidc` and see [review F1](reviews/2026-10-24-mehrbenutzer-pruefbericht.en.md).
 
 ## 2. Start
 
@@ -40,7 +40,7 @@ Useful VS Code tasks (Command Palette → “Tasks: Run Task”):
 
 - `dev: postgres up` / `dev: postgres down` / `dev: postgres reset (delete data)`
 - `dev: postgres psql` — interactive container SQL shell
-- `test: integration (SQLite)` / `test: integration (PostgreSQL Docker)` — integration tests ([testing.md](testing.md)). PostgreSQL tests recreate disposable database `learncards_test`; they do not affect development data.
+- `test: integration (SQLite)` / `test: integration (PostgreSQL Docker)` — integration tests ([testing.md](testing.en.md)). PostgreSQL tests recreate disposable database `learncards_test`; they do not affect development data.
 
 **MCP note:** Shared `MCP_API_KEY` (launch default `change-me-mcp-key`) is only a technical service key and grants no data access. Users must authenticate individually (section 5, [ADR 0013](adr/0013-mcp-benutzergebundene-anmeldung.en.md)).
 
@@ -148,7 +148,7 @@ curl http://localhost:5000/health
 curl -b cookies.txt http://localhost:5000/api/modules/
 ```
 
-Without login, `/api/*` returns 401. Log in through `/auth/login` in a browser, or send a personal MCP Bearer token (data routes only). `X-MCP-Key` **does not grant data access**. See [testing.md](testing.md) for automated tests.
+Without login, `/api/*` returns 401. Log in through `/auth/login` in a browser, or send a personal MCP Bearer token (data routes only). `X-MCP-Key` **does not grant data access**. See [testing.md](testing.en.md) for automated tests.
 
 ## 7a. Try Sharing and Global Modules
 
