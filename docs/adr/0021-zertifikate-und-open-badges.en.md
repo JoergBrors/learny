@@ -2,7 +2,7 @@
 
 - **Status:** Accepted (foundation implemented; parts of the UI still pending; see “Open Questions”)
 - **Date:** 2026-10-26
-- **Supplements:** [0019](0019-einheitliches-quizsystem.md) (verified results), [0011](0011-mehrbenutzerarchitektur.en.md), [0015](0015-freigaben-globale-lernmodule.md) (permissions), [0022](0022-polygon-verankerung-und-kostenschranke.md)
+- **Supplements:** [0019](0019-einheitliches-quizsystem.en.md) (verified results), [0011](0011-mehrbenutzerarchitektur.en.md), [0015](0015-freigaben-globale-lernmodule.en.md) (permissions), [0022](0022-polygon-verankerung-und-kostenschranke.en.md)
 - **Related:** [0002](0002-keine-nuget-pakete.en.md)
 
 ## Context
