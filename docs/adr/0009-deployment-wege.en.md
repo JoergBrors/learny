@@ -1,9 +1,9 @@
 # 0009 — Deployment: IIS by Tag, Docker, Azure
 
 - **Status:** Accepted
-- **Supplemented by:** [0024](0024-docker-hub-veroeffentlichung.md) (Docker Hub images and Compose installation package as another distribution channel), [0023](0023-secrets-und-badge-schluessel-unter-iis.md) (IIS: secrets outside the web root)
+- **Supplemented by:** [0024](0024-docker-hub-veroeffentlichung.en.md) (Docker Hub images and Compose installation package as another distribution channel), [0023](0023-secrets-und-badge-schluessel-unter-iis.en.md) (IIS: secrets outside the web root)
 - **Date:** 2026-10-24
-- **Supplemented by:** [0011](0011-mehrbenutzerarchitektur.md), [0012](0012-rollen-aus-entra-app-roles.md), [0013](0013-mcp-benutzergebundene-anmeldung.md) (new configuration values, see below); [0015](0015-freigaben-globale-lernmodule.md) requires no new settings.
+- **Supplemented by:** [0011](0011-mehrbenutzerarchitektur.en.md), [0012](0012-rollen-aus-entra-app-roles.en.md), [0013](0013-mcp-benutzergebundene-anmeldung.en.md) (new configuration values, see below); [0015](0015-freigaben-globale-lernmodule.en.md) requires no new settings.
 
 ## Context
 
@@ -15,7 +15,7 @@ The application runs in three environments: Windows/IIS (self-hosted runner), Do
 - **Docker:** `docker-compose.yml` (Postgres + Web; profiles `mcp`, `production` with nginx).
 - **Azure:** App Service with an external PostgreSQL database (`docs/azure-deployment.md`).
 - All environments use environment variables for configuration; `.env` is local only (do not commit it).
-- **Local development:** `docker-compose.dev.yml` (PostgreSQL only, port 55432) and launch configurations in `.vscode/launch.json`/`tasks.json`; see [local-development.md](../local-development.md).
+- **Local development:** `docker-compose.dev.yml` (PostgreSQL only, port 55432) and launch configurations in `.vscode/launch.json`/`tasks.json`; see [local-development.md](../local-development.en.md).
 - **New values since ADRs 0011–0013:** `ADMIN_SUBJECTS`, `OIDC_ROLE_MAP`, `MCP_PUBLIC_URL`, `MCP_TOKEN_DAYS` (Web), and `LEARNCARDS_WEB_PUBLIC_URL`, `LEARNCARDS_MCP_TOKEN` (MCP server). The IIS workflow **does not render these yet** (`deploy/iis/web.env` is overwritten on every deployment): set them as IIS environment variables or extend the workflow. The workflow also still requires the unused `MCP_OAUTH_SIGNING_KEY` secret (a placeholder is sufficient).
 
 ## Consequences
