@@ -9,7 +9,7 @@ LearnCards is increasingly developed with AI assistants. Without explicitly reco
 
 ## Decision
 
-We record each architecture-shaping decision as an ADR under `docs/adr/`. Each ADR includes a **Guardrails for Changes** section that serves as direct guidance when making changes. [AGENTS.md](../../AGENTS.md) points AI assistants to these ADRs.
+We record each architecture-shaping decision as an ADR under `docs/adr/`. Each ADR includes a **Guardrails for Changes** section that serves as direct guidance when making changes. [AGENTS.md](../../AGENTS.en.md) points AI assistants to these ADRs.
 
 ## Consequences
 
