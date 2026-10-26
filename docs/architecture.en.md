@@ -1,10 +1,10 @@
 # Architecture
 
-> The rationale behind key decisions is documented in [ADRs](adr/README.en.md); the rules for changes are in [AGENTS.md](../AGENTS.md).
+> The rationale behind key decisions is documented in [ADRs](adr/README.en.md); the rules for changes are in [AGENTS.md](../AGENTS.en.md).
 
 ## Overview
 
-LearnCards is multi-user: modules and cards are **private** to their owners, and learning data belongs to individual users ([ADR 0011](adr/0011-mehrbenutzerarchitektur.en.md)). There are also two explicitly managed areas ([ADR 0015](adr/0015-freigaben-globale-lernmodule.en.md)): **shared** modules (owners grant specific users learning access) and **global** modules (an admin publishes an immutable, versioned snapshot for everyone). Private collections remain isolated; there is no unrestricted common card collection. See the [multi-user review report](reviews/2026-10-24-mehrbenutzer-pruefbericht.md).
+LearnCards is multi-user: modules and cards are **private** to their owners, and learning data belongs to individual users ([ADR 0011](adr/0011-mehrbenutzerarchitektur.en.md)). There are also two explicitly managed areas ([ADR 0015](adr/0015-freigaben-globale-lernmodule.en.md)): **shared** modules (owners grant specific users learning access) and **global** modules (an admin publishes an immutable, versioned snapshot for everyone). Private collections remain isolated; there is no unrestricted common card collection. See the [multi-user review report](reviews/2026-10-24-mehrbenutzer-pruefbericht.en.md).
 
 ```text
                         ┌─────────────────────────────┐
@@ -71,7 +71,7 @@ The REST API under `/api` historically accepted `X-MCP-Key` alongside cookies. T
 
 ## Data Model
 
-For full PostgreSQL schema, ER diagram, and migrations see [database-schema.md](database-schema.md).
+For full PostgreSQL schema, ER diagram, and migrations see [database-schema.md](database-schema.en.md).
 
 **Sharing/global area (ADR 0015):** `CardRepository.ResolveModuleAccessAsync` classifies a module for the current user as editable `private`, or read-only-for-learning `shared`/`global`. `module_shares` are revocable. Global snapshots occupy distinct `modules` rows (`scope='global'`, `publication_id`, `global_version`, `global_status`), created from admin-reviewed `module_submissions`. `quiz_results.context` identifies private/shared/global, but results always belong to the learner. Admins/auditors have minimized read-only access to global results. UI tabs: My Modules / Shared with Me / Global Modules, module sharing panel, and publication/global result administration.
 
