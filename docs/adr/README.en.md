@@ -1,6 +1,6 @@
 # Architecture Decision Records (ADRs)
 
-Every ADR documents **one** architecture-shaping decision for LearnCards: context, decision, consequences, and **guardrails for changes**. These records are the authoritative explanation of *how and why* the system works, for developers and AI assistants alike (see [AGENTS.md](../../AGENTS.md)).
+Every ADR documents **one** architecture-shaping decision for LearnCards: context, decision, consequences, and **guardrails for changes**. These records are the authoritative explanation of *how and why* the system works, for developers and AI assistants alike (see [AGENTS.md](../../AGENTS.en.md)).
 
 ## Index
 
@@ -36,7 +36,7 @@ Every ADR documents **one** architecture-shaping decision for LearnCards: contex
 | [0028](0028-themenmodule-json-und-mcp-verwaltung.en.md) | Owned Topic Modules, Portable JSON, and MCP Management | Accepted |
 | [0029](0029-themenzugriff-pflichtzuweisungen-und-themenadministration.en.md) | Topic Access, Mandatory Assignments, Delegated Topic Admins | Accepted |
 
-Review reports motivating ADRs are under [docs/reviews/](../reviews/), currently including the [multi-user review](../reviews/2026-10-24-mehrbenutzer-pruefbericht.md).
+Review reports motivating ADRs are under [docs/reviews/](../reviews/), currently including the [multi-user review](../reviews/2026-10-24-mehrbenutzer-pruefbericht.en.md).
 
 ## Creating an ADR
 
