@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-24
-- **Supplemented by:** [0016](0016-bilder-in-lernkarten.md) (card images are never included in prompts; images work without an LLM/API key), [0011](0011-mehrbenutzerarchitektur.md) (chat history and quiz results belong to the user), [0015](0015-freigaben-globale-lernmodule.md) (quiz/chat support owned, shared, and global cards; offline fallback is unchanged; results retain the private/shared/global context)
+- **Supplemented by:** [0016](0016-bilder-in-lernkarten.en.md) (card images are never included in prompts; images work without an LLM/API key), [0011](0011-mehrbenutzerarchitektur.en.md) (chat history and quiz results belong to the user), [0015](0015-freigaben-globale-lernmodule.en.md) (quiz/chat support owned, shared, and global cards; offline fallback is unchanged; results retain the private/shared/global context)
 
 ## Context
 
