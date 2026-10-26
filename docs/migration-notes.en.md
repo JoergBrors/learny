@@ -25,11 +25,11 @@ This .NET 10 implementation fully reimplements the same application functionalit
 
 ## Further Development Since the Python Version
 
-The port introduced **multi-user support**: modules/cards belong to individual users rather than being global, with roles, profiles, and user-bound MCP access ([ADR 0011](adr/0011-mehrbenutzerarchitektur.en.md), [0012](adr/0012-rollen-aus-entra-app-roles.en.md), [0013](adr/0013-mcp-benutzergebundene-anmeldung.en.md)). Migrating the old Python database thus produces **unassigned legacy content**, which an administrator assigns in `/admin`. The schema is no longer identical (see [database-schema.md](database-schema.md)).
+The port introduced **multi-user support**: modules/cards belong to individual users rather than being global, with roles, profiles, and user-bound MCP access ([ADR 0011](adr/0011-mehrbenutzerarchitektur.en.md), [0012](adr/0012-rollen-aus-entra-app-roles.en.md), [0013](adr/0013-mcp-benutzergebundene-anmeldung.en.md)). Migrating the old Python database thus produces **unassigned legacy content**, which an administrator assigns in `/admin`. The schema is no longer identical (see [database-schema.md](database-schema.en.md)).
 
 ## Why No NuGet Packages?
 
-See [architecture.md](architecture.md#warum-ohne-nuget-pakete). In brief: reliable builds and deployments in restricted-network environments. The code architecture, especially `IDatabase`, permits a future switch to EF Core, Npgsql, or the official OpenAI SDK without changing API or UI.
+See [architecture.md](architecture.en.md#warum-ohne-nuget-pakete). In brief: reliable builds and deployments in restricted-network environments. The code architecture, especially `IDatabase`, permits a future switch to EF Core, Npgsql, or the official OpenAI SDK without changing API or UI.
 
 ## Migrating PostgreSQL Data (Python Version)
 
