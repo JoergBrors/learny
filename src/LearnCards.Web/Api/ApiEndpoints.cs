@@ -786,7 +786,7 @@ public static partial class ApiEndpoints
         question = c.Question, definition = c.Definition, how_it_works = c.HowItWorks,
         context = c.Context, key_fact = c.KeyFact, reference_answer = c.ReferenceAnswer,
         chat_prompt = c.ChatPrompt, official_sources = c.OfficialSources,
-        slide_number = c.SlideNumber, target_time_sec = c.TargetTimeSec, quiz = c.Quiz,
+        slide_number = c.SlideNumber, target_time_sec = c.TargetTimeSec, quiz = c.Quiz, competencies = c.Competencies,
         images = c.Images.Select(i => base64ByImageId is not null && base64ByImageId.TryGetValue(i.ImageId, out var b64)
             ? (object)new { image_id = i.ImageId, url = "/api/images/" + i.ImageId, mime_type = i.MimeType, size_bytes = i.SizeBytes, checksum = i.Checksum, alt_text = i.AltText, caption = i.Caption, sort_order = i.SortOrder, data_base64 = b64 }
             : new { image_id = i.ImageId, url = "/api/images/" + i.ImageId, mime_type = i.MimeType, size_bytes = i.SizeBytes, checksum = i.Checksum, alt_text = i.AltText, caption = i.Caption, sort_order = i.SortOrder }),

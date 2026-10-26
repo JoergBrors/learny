@@ -45,3 +45,7 @@
 - MCP-Pfade für Tokens nur in `TokenMayReadTopics` erweitern und im Test (`TopicTransferTests`, T130) absichern.
 - Änderungen am Format erhöhen `schema_version` oder bleiben abwärtskompatibel; Schema (`TransferSchema`), Vorlagen, MCP-Beschreibungen, `Help.razor` und Docs im selben Auftrag aktualisieren.
 - Tests: `TopicTransferTests` (T81–T132), Vorlagen-/Schema-Prüfung im Block „Beispiele, Templates, Schema, MCP, Hilfe“, `tests/browser/topics-browser-check.js`.
+
+## Nachtrag 2026-10-26 — Modulversionen
+
+Beim Import/Aktualisieren einer Themen-JSON wird jedem neu zugeordneten Modul der *dann aktuelle* Stand als Modulversion festgelegt ([ADR 0030](0030-einheitliche-modul-und-themenversionierung.md)); bereits festgelegte Versionen bleiben erhalten (keine stillschweigende Übernahme neuerer Stände). Die Modulversionen werden erst nach allen übrigen Schritten angelegt (alles oder nichts). Karten-JSON und Modul-JSON kennen ab ADR 0031 optional `competencies` (Karte) bzw. `learning_objectives`/`competencies` (Modul); `get_topic` nennt je Modul die festgelegte Version.

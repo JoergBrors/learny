@@ -52,8 +52,8 @@ public static class TransferIntegrityUnitTests
             var images = new CardImageService(e.Db, new ImageStorageRegistry(cfg, e.Db), new NullImageCache(), cfg, NullLogger<CardImageService>.Instance);
             e.Pool = new QuizPoolService(e.Db);
             e.Repo = new CardRepository(e.Db, images, e.Pool);
-            e.Modules = new ModuleTransferService(e.Repo, images, e.Pool, users);
-            e.Topics = new TopicService(e.Db, e.Repo, users, e.Pool, null!, e.Modules);   // Prüfungsstart (QuizService) wird hier nicht benötigt
+            e.Modules = new ModuleTransferService(e.Repo, images, e.Pool, users, new CompetencyService(e.Db, e.Repo, users));
+            e.Topics = new TopicService(e.Db, e.Repo, users, e.Pool, null!, e.Modules, new ModuleVersionService(e.Db, e.Repo, users));   // Prüfungsstart (QuizService) wird hier nicht benötigt
             return e;
         }
         public async Task<string> AddUserAsync(string name)

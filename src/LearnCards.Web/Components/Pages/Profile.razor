@@ -151,6 +151,8 @@
                                 <td>@ChainStatus.Label(c.ChainStatus, c.IsRevoked)</td>
                                 <td class="actions">
                                     <a class="btn btn-ghost btn-sm" href="/api/certificates/@c.Id/certificate.html" download>🎓 Zertifikat</a>
+                                    <a class="btn btn-ghost btn-sm" href="/api/certificates/@c.Id/certificate.pdf" download title="Signiertes PDF mit eingebetteten Credentials">PDF (signiert)</a>
+                                    @if (c.IsTopic) { <a class="btn btn-ghost btn-sm" href="/api/certificates/@c.Id/clr" download title="Comprehensive Learner Record (CLR 2.0)">CLR (JSON-LD)</a> }
                                     <a class="btn btn-ghost btn-sm" href="/api/certificates/@c.Id/badge" download>Badge (JSON)</a>
                                 </td>
                             </tr>

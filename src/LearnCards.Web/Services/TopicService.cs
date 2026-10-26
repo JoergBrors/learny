@@ -19,10 +19,12 @@ public partial class TopicService
     private readonly QuizPoolService _pool;
     private readonly QuizService _quiz;
     private readonly ModuleTransferService _modules;
+    private readonly ModuleVersionService _moduleVersions;
 
-    public TopicService(IDatabase db, CardRepository repo, UserService users, QuizPoolService pool, QuizService quiz, ModuleTransferService modules)
+    public TopicService(IDatabase db, CardRepository repo, UserService users, QuizPoolService pool, QuizService quiz, ModuleTransferService modules, ModuleVersionService moduleVersions)
     {
         _modules = modules;
+        _moduleVersions = moduleVersions;
         _db = db;
         _repo = repo;
         _users = users;
@@ -147,8 +149,8 @@ public partial class TopicService
         foreach (var m in await ListDraftModuleRowsAsync(source.Id))
         {
             if (await CanUseModuleInTopicAsync(ownerId, m.ModuleId) is not null) continue;
-            await _db.ExecuteAsync("INSERT INTO topic_modules (topic_id, module_id, sort_order, added_at) VALUES (@t, @m, @s, @n)",
-                new (string, object?)[] { ("t", copy.Id), ("m", m.ModuleId), ("s", kept.Count), ("n", DateTime.UtcNow) });
+            await _db.ExecuteAsync("INSERT INTO topic_modules (topic_id, module_id, sort_order, added_at, module_version) VALUES (@t, @m, @s, @n, @v)",
+                new (string, object?)[] { ("t", copy.Id), ("m", m.ModuleId), ("s", kept.Count), ("n", DateTime.UtcNow), ("v", m.Version) });
             kept.Add(m.ModuleId);
         }
         var cfg = await LoadExamConfigAsync(source.Id);
@@ -166,11 +168,60 @@ public partial class TopicService
 
     // ─── Module im Entwurf ──────────────────────────────────────────────────
 
-    private sealed record DraftModuleRow(string ModuleId, int SortOrder);
+    /// <summary><paramref name="Version"/> = festgelegte Modulversion (ADR 0030).</summary>
+    private sealed record DraftModuleRow(string ModuleId, int SortOrder, int? Version = null);
 
-    private async Task<List<DraftModuleRow>> ListDraftModuleRowsAsync(string topicId) =>
-        (await _db.QueryAsync("SELECT module_id, sort_order FROM topic_modules WHERE topic_id = @t ORDER BY sort_order, added_at", new[] { ("t", (object?)topicId) }))
-            .Select(r => new DraftModuleRow(r["module_id"] ?? "", DbValue.ToInt(r.GetValueOrDefault("sort_order")))).ToList();
+    /// <summary>
+    /// Module des Entwurfs mit festgelegter Modulversion. Altbestand ohne Festlegung (<c>module_version</c> NULL) wird beim ersten Zugriff auf den dann aktuellen Modulstand
+    /// festgeschrieben (eine Version wird bei Bedarf angelegt) — danach wirken Modulabänderungen nur noch über eine ausdrückliche Übernahme.
+    /// </summary>
+    private async Task<List<DraftModuleRow>> ListDraftModuleRowsAsync(string topicId)
+    {
+        var rows = (await _db.QueryAsync("SELECT module_id, sort_order, module_version FROM topic_modules WHERE topic_id = @t ORDER BY sort_order, added_at", new[] { ("t", (object?)topicId) }))
+            .Select(r => new DraftModuleRow(r["module_id"] ?? "", DbValue.ToInt(r.GetValueOrDefault("sort_order")), r.GetValueOrDefault("module_version") is { Length: > 0 } v ? DbValue.ToInt(v) : null)).ToList();
+        if (rows.All(r => r.Version is not null)) return rows;
+        var owner = (await GetTopicRawAsync(topicId))?.OwnerUserId;
+        if (owner is null) return rows;
+        for (var i = 0; i < rows.Count; i++)
+        {
+            if (rows[i].Version is not null) continue;
+            if (await CanUseModuleInTopicAsync(owner, rows[i].ModuleId) is not null) continue;   // nicht eigen/privat: bleibt ungebunden (Veröffentlichung verlangt eine eigene Kopie)
+            var v = await _moduleVersions.EnsureCurrentVersionAsync(owner, rows[i].ModuleId, "Automatisch beim Festlegen im Thema");
+            await _db.ExecuteAsync("UPDATE topic_modules SET module_version = @v WHERE topic_id = @t AND module_id = @m AND module_version IS NULL", new (string, object?)[] { ("v", v.VersionNumber), ("t", topicId), ("m", rows[i].ModuleId) });
+            rows[i] = rows[i] with { Version = v.VersionNumber };
+        }
+        return rows;
+    }
+
+    /// <summary>Legt die Modulversion eines zugeordneten Moduls fest (<c>null</c> = aktueller Stand: bei Bedarf wird eine neue Modulversion angelegt).</summary>
+    private async Task<int> PinModuleAsync(string ownerId, string topicId, string moduleId, int? version)
+    {
+        ModuleVersionInfo v;
+        if (version is int n)
+            v = await _moduleVersions.GetVersionRawAsync(moduleId, n) ?? throw new ArgumentException($"Version {n} des Moduls existiert nicht.");
+        else
+            v = await _moduleVersions.EnsureCurrentVersionAsync(ownerId, moduleId, "Automatisch beim Festlegen im Thema");
+        await _db.ExecuteAsync("UPDATE topic_modules SET module_version = @v WHERE topic_id = @t AND module_id = @m", new (string, object?)[] { ("v", v.VersionNumber), ("t", topicId), ("m", moduleId) });
+        return v.VersionNumber;
+    }
+
+    /// <summary>
+    /// Übernimmt ausdrücklich eine Modulversion in den Themenentwurf: ohne Angabe den aktuellen Stand des Moduls (eine neue Modulversion wird bei Bedarf angelegt),
+    /// sonst eine bestehende Version. Bereits veröffentlichte Themenversionen bleiben unverändert (ADR 0030).
+    /// </summary>
+    public async Task<int> AdoptModuleVersionAsync(string ownerId, string topicId, string moduleId, int? version = null)
+    {
+        var topic = await RequireOwnTopicAsync(ownerId, topicId);
+        var row = (await ListDraftModuleRowsAsync(topic.Id)).FirstOrDefault(r => string.Equals(r.ModuleId, moduleId, StringComparison.OrdinalIgnoreCase)) ?? throw new KeyNotFoundException("Das Modul ist dem Thema nicht zugeordnet.");
+        if (await CanUseModuleInTopicAsync(ownerId, row.ModuleId) is { } error) throw new ArgumentException(error);
+        var chosen = await PinModuleAsync(ownerId, topic.Id, row.ModuleId, version);
+        if (chosen != row.Version)
+        {
+            await TouchDraftAsync(topic.Id);
+            await _users.WriteAuditAsync(ownerId, "topic.module.adopt", topic.Id, $"module={row.ModuleId} version={chosen}");
+        }
+        return chosen;
+    }
 
     /// <summary>
     /// Darf der Benutzer das Modul in einem Thema verwenden? Zentrale Regel für UI, REST, MCP und JSON-Import (ADR 0028): <b>nur eigene, private Module</b> des Themeneigentümers.
@@ -200,6 +251,7 @@ public partial class TopicService
         var max = (await _db.QueryAsync("SELECT COALESCE(MAX(sort_order), -1) AS m FROM topic_modules WHERE topic_id = @t", new[] { ("t", (object?)topic.Id) })).FirstOrDefault();
         await _db.ExecuteAsync("INSERT INTO topic_modules (topic_id, module_id, sort_order, added_at) VALUES (@t, @m, @s, @n)",
             new (string, object?)[] { ("t", topic.Id), ("m", moduleId), ("s", DbValue.ToInt(max?.GetValueOrDefault("m")) + 1), ("n", DateTime.UtcNow) });
+        await PinModuleAsync(ownerId, topic.Id, moduleId, null);   // den tatsächlich ausgewählten Modulstand festhalten (ADR 0030)
         await TouchDraftAsync(topic.Id);
         await _users.WriteAuditAsync(ownerId, "topic.module.add", topic.Id, $"module={moduleId}");
     }

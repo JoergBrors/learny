@@ -269,6 +269,14 @@ public class TopicModuleView
     public bool Unavailable { get; set; }
     /// <summary>Nur im Entwurf: Das Modul ist kein eigenes privates Modul (Altbestand, z. B. ein globales Modul) und muss vor der Veröffentlichung durch eine eigene Kopie ersetzt werden (ADR 0028).</summary>
     public bool RequiresOwnCopy { get; set; }
+    /// <summary>Festgelegte Modulversion (ADR 0030); 0 = Altbestand ohne Version.</summary>
+    public int Version { get; set; }
+    /// <summary>Nur im Entwurf: neueste Version des Moduls.</summary>
+    public int LatestVersion { get; set; }
+    /// <summary>Nur im Entwurf: Es gibt eine neuere Modulversion oder unveröffentlichte Änderungen am Modul — sie werden nur ausdrücklich übernommen.</summary>
+    public bool NewerAvailable { get; set; }
+    /// <summary>Nur im Entwurf: Das Modul hat Änderungen, die noch in keiner Modulversion stehen.</summary>
+    public bool ModuleHasUnpublishedChanges { get; set; }
 }
 
 /// <summary>Detailansicht: entweder der Entwurf des Eigentümers oder eine veröffentlichte Version.</summary>
@@ -287,6 +295,8 @@ public class TopicDetail
     public List<string> Warnings { get; set; } = new();
     /// <summary>Nur Entwurf des Eigentümers: Der Entwurf (Themenstruktur, Prüfungen oder Modulinhalt) weicht von der letzten veröffentlichten Version ab.</summary>
     public bool UnpublishedChanges { get; set; }
+    /// <summary>Nur Eigentümer in der Seitenansicht: Es gibt einen Entwurf, der von der aktuellen Veröffentlichung abweicht (oder noch nie veröffentlicht wurde) — nur dann wird der Entwurf als eigener Stand angeboten.</summary>
+    public bool DraftDiffers { get; set; }
     public List<string> ChangedModuleNames { get; set; } = new();
     /// <summary>ID der Version (leer beim Entwurf).</summary>
     public string VersionId { get; set; } = "";

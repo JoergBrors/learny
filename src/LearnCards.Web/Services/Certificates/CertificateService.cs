@@ -36,7 +36,7 @@ public sealed class BadgeVerification
 /// Zertifikate und Open Badges 3.0 (ADR 0021): Ausstellung nach bestandenem Modulquiz, Signierung (VC-JWT, ES256), Abruf, Widerruf, öffentliche Prüfung.
 /// Die Quizbewertung bleibt im <c>QuizService</c>; dieser Dienst wird nur mit dem dort berechneten, serverseitig verifizierten Ergebnis aufgerufen.
 /// </summary>
-public sealed class CertificateService
+public sealed partial class CertificateService
 {
     private readonly IDatabase _db;
     private readonly BadgeSigner _signer;
@@ -63,7 +63,7 @@ public sealed class CertificateService
     /// Stellt nach einem bestandenen, sitzungsverifizierten Modulquiz ein Zertifikat aus (idempotent je Benutzer, Modul und Version).
     /// Fehler dürfen das Quizergebnis nie gefährden — der Aufrufer fängt Ausnahmen.
     /// </summary>
-    public async Task<Certificate?> TryIssueAsync(QuizResultRecord result, string moduleName, string moduleScope, int? moduleVersion)
+    public async Task<Certificate?> TryIssueAsync(QuizResultRecord result, string moduleName, string moduleScope, int? moduleVersion, ExamSnapshot? snapshot = null, IReadOnlyList<CompetencyEvidence>? evidence = null)
     {
         if (result.Passed != true || string.IsNullOrEmpty(result.SessionId) || !string.IsNullOrEmpty(result.CardId)) return null;
         var version = moduleVersion ?? 0;
@@ -77,8 +77,9 @@ public sealed class CertificateService
         {
             Number = NewNumber(), UserId = result.UserSub, ModuleId = result.ModuleId, ModuleName = moduleName, ModuleVersion = version, ModuleScope = moduleScope,
             ResultId = result.Id, LearnerName = learner, ScorePercent = percent, PassPercent = result.PassPercent ?? 0, IssuedAt = DateTime.UtcNow,
+            SnapshotId = snapshot?.Id, SnapshotHash = snapshot?.Hash ?? "", CompletedAt = snapshot is null ? null : result.CompletedAt,
         };
-        var credential = BuildCredential(cert);
+        var credential = BuildCredential(cert, snapshot, evidence);
         cert.BadgeJws = _signer.Sign(credential, KeyId);
         cert.BadgeHash = BadgeSigner.HashHex(cert.BadgeJws);
         cert.LeafHash = MerkleTree.Hex(MerkleTree.Leaf(MerkleTree.FromHex(cert.BadgeHash)));
@@ -96,6 +97,14 @@ public sealed class CertificateService
         return cert;
     }
 
+    /// <summary>
+    /// IdentityObject nach Open Badges 3.0: Pflichtfeld ist <c>identityHash</c> (bei <c>hashed = false</c> der Klartext). Ältere, bereits signierte Badges tragen noch das Feld
+    /// <c>identity</c> und bleiben unverändert; <paramref name="conformant"/> wählt die schemakonforme Form für neu ausgestellte Credentials.
+    /// </summary>
+    internal static JsonObject Identity(string name, bool conformant) => conformant
+        ? new JsonObject { ["type"] = "IdentityObject", ["hashed"] = false, ["identityType"] = "name", ["identityHash"] = name }
+        : new JsonObject { ["type"] = "IdentityObject", ["hashed"] = false, ["identityType"] = "name", ["identity"] = name };
+
     private static string NewNumber()
     {
         const string alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";   // Crockford-Base32 (ohne verwechselbare Zeichen)
@@ -104,10 +113,13 @@ public sealed class CertificateService
     }
 
     /// <summary>Open-Badge-3.0-Credential (W3C VC 2.0). Der Inhalt ist nach der Signierung unveränderlich; die Blockchain-Verankerung steht in einem separaten Nachweis-Paket.</summary>
-    public JsonObject BuildCredential(Certificate c)
+    public JsonObject BuildCredential(Certificate c, ExamSnapshot? snapshot = null, IReadOnlyList<CompetencyEvidence>? evidence = null)
     {
         var achievementId = $"{BaseUrl}/badges/achievements/{c.ModuleId}/{c.ModuleVersion}";
-        return new JsonObject
+        var demonstrated = (evidence ?? Array.Empty<CompetencyEvidence>()).Where(e => e.Status == CompetencyStatus.Demonstrated).ToList();
+        var criteriaNarrative = $"Das Modulquiz wurde mit mindestens {c.PassPercent} % bestanden."
+            + string.Concat(demonstrated.Select(e => $" Kompetenz „{e.Name}“: mindestens {e.PassPercent} % der Punkte bei mindestens {e.MinQuestions} geprüften Fragen."));
+        var credential = new JsonObject
         {
             ["@context"] = new JsonArray("https://www.w3.org/ns/credentials/v2", "https://purl.imsglobal.org/spec/ob/v3p0/context-3.0.3.json"),
             ["id"] = $"{BaseUrl}/verify/{c.Id}",
@@ -121,12 +133,12 @@ public sealed class CertificateService
             ["credentialSubject"] = new JsonObject
             {
                 ["type"] = new JsonArray("AchievementSubject"),
-                ["identifier"] = new JsonArray(new JsonObject { ["type"] = "IdentityObject", ["hashed"] = false, ["identityType"] = "name", ["identity"] = c.LearnerName }),
+                ["identifier"] = new JsonArray(Identity(c.LearnerName, snapshot is not null)),
                 ["achievement"] = new JsonObject
                 {
                     ["id"] = achievementId, ["type"] = new JsonArray("Achievement"), ["achievementType"] = "Course", ["name"] = c.ModuleName,
                     ["description"] = $"Das Lernmodul „{c.ModuleName}“ wurde erfolgreich abgeschlossen.",
-                    ["criteria"] = new JsonObject { ["narrative"] = $"Das Modulquiz wurde mit mindestens {c.PassPercent} % bestanden." },
+                    ["criteria"] = new JsonObject { ["id"] = achievementId + "/criteria", ["narrative"] = criteriaNarrative },
                 },
                 ["result"] = new JsonArray(new JsonObject
                 {
@@ -135,6 +147,55 @@ public sealed class CertificateService
             },
             ["credentialStatus"] = new JsonObject { ["id"] = BaseUrl + "/api/public/revocation-list", ["type"] = "1EdTechRevocationList" },
         };
+        if (snapshot is null) return credential;
+
+        // Kompetenznachweise (ADR 0031) mit den Standardstrukturen von Open Badges 3.0: Alignment (ceasn:Competency), ResultDescription/Result und Evidence.
+        // Es werden nur tatsächlich nachgewiesene Kompetenzen bescheinigt; nicht oder nicht ausreichend geprüfte stehen nur im Prüfungssnapshot.
+        var achievement = (JsonObject)credential["credentialSubject"]!["achievement"]!;
+        if (c.ModuleVersion > 0) achievement["version"] = c.ModuleVersion.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if (c.CompletedAt is { } done) credential["credentialSubject"]!["activityEndDate"] = done.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'");
+        var results = (JsonArray)credential["credentialSubject"]!["result"]!;
+        if (demonstrated.Count > 0)
+        {
+            var alignments = new JsonArray(); var descriptions = new JsonArray();
+            foreach (var e in demonstrated)
+            {
+                var url = $"{achievementId}/competencies/{Uri.EscapeDataString(e.Id)}";
+                alignments.Add(new JsonObject
+                {
+                    ["type"] = new JsonArray("Alignment"), ["targetName"] = e.Name, ["targetUrl"] = url, ["targetType"] = "ceasn:Competency", ["targetCode"] = e.Id,
+                    ["targetDescription"] = e.Description.Length > 0 ? e.Description : e.Name,
+                });
+                descriptions.Add(new JsonObject
+                {
+                    ["id"] = url + "#result", ["type"] = new JsonArray("ResultDescription"), ["name"] = e.Name, ["resultType"] = "Percent",
+                    ["requiredValue"] = e.PassPercent.ToString(System.Globalization.CultureInfo.InvariantCulture), ["valueMin"] = "0", ["valueMax"] = "100",
+                });
+                results.Add(new JsonObject
+                {
+                    ["type"] = new JsonArray("Result"), ["resultDescription"] = url + "#result", ["status"] = "Completed",
+                    ["value"] = e.Percent.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture),
+                });
+            }
+            achievement["alignment"] = alignments;
+            achievement["resultDescription"] = descriptions;
+        }
+        credential["evidence"] = new JsonArray(new JsonObject
+        {
+            ["id"] = $"{BaseUrl}/api/public/certificates/{c.Id}/evidence", ["type"] = new JsonArray("Evidence"), ["name"] = "Prüfungsnachweis",
+            ["description"] = $"Unveränderlicher Nachweissnapshot des verifizierten Prüfungsergebnisses (SHA-256 {snapshot.Hash}).",
+            ["narrative"] = $"Serverseitig bewertetes Modulquiz; {demonstrated.Count} von {evidence?.Count ?? 0} Kompetenzen nachgewiesen. Snapshot-Hash: {snapshot.Hash}.", ["genre"] = "Exam",
+        });
+        return credential;
+    }
+
+    /// <summary>Öffentlicher Prüfungsnachweis zu einem Zertifikat (der Link steht im Credential): der unveränderte Snapshot ohne Lernendendaten und Antworten; null ohne Snapshot.</summary>
+    public async Task<string?> GetPublicEvidenceJsonAsync(string certificateId)
+    {
+        var c = await GetRawAsync(certificateId);
+        if (c?.SnapshotId is null) return null;
+        var rows = await _db.QueryAsync("SELECT snapshot_json FROM exam_snapshots WHERE id = @id", new[] { ("id", (object?)c.SnapshotId) });
+        return rows.Count == 0 ? null : rows[0]["snapshot_json"];
     }
 
     /// <summary>Signiertes Open Badge als JSON: Credential plus eingebettete Signatur (<c>proof.jwt</c>, VC-JWT).</summary>
@@ -225,7 +286,7 @@ public sealed class CertificateService
         {
             id = c.Id, number = c.Number, status = c.IsRevoked ? "revoked" : "active", revoked_at = c.RevokedAt, revoked_reason = c.IsRevoked ? c.RevokedReason : null,
             module_name = c.ModuleScope == "global" ? c.ModuleName : null, module_version = c.ModuleVersion, issued_at = c.IssuedAt,
-            badge_hash = c.BadgeHash, issuer = IssuerId,
+            badge_hash = c.BadgeHash, snapshot_hash = c.SnapshotHash.Length > 0 ? c.SnapshotHash : null, kind = c.Kind, issuer = IssuerId,
             chain = new
             {
                 status = c.ChainStatus, label = Domain.ChainStatus.Label(c.ChainStatus, c.IsRevoked), network = c.ChainNetwork, network_label = ChainNetworks.Label(c.ChainNetwork), chain_id = c.ChainId,
@@ -288,10 +349,12 @@ public sealed class CertificateService
         v.BadgeHash = BadgeSigner.HashHex(jws);
         if (jv.Payload is not null)
         {
-            v.ModuleName = jv.Payload["credentialSubject"]?["achievement"]?["name"]?.GetValue<string>();
+            var subject = jv.Payload["credentialSubject"];
+            var firstAchievement = subject?["achievement"] is JsonArray achievements ? achievements.FirstOrDefault() : subject?["achievement"];   // Open Badge: ein Achievement; CLR: Liste (erstes = Thema)
+            v.ModuleName = firstAchievement?["name"]?.GetValue<string>();
             if (DateTime.TryParse(jv.Payload["validFrom"]?.GetValue<string>(), System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var from)) v.IssuedAt = from;
         }
-        var rows = await _db.QueryAsync("SELECT * FROM certificates WHERE badge_hash = @h", new[] { ("h", (object?)v.BadgeHash) });
+        var rows = await _db.QueryAsync("SELECT * FROM certificates WHERE badge_hash = @h OR clr_hash = @h", new[] { ("h", (object?)v.BadgeHash) });   // Badge oder CLR (Themenabschluss)
         if (rows.Count > 0 && jv.SignatureValid)
         {
             var c = Map(rows[0]);
@@ -306,12 +369,12 @@ public sealed class CertificateService
 
     public async Task<object> RevocationListAsync()
     {
-        var rows = await _db.QueryAsync("SELECT id, revoked_reason FROM certificates WHERE status = 'revoked'");
+        var rows = await _db.QueryAsync("SELECT id, revoked_reason, kind FROM certificates WHERE status = 'revoked'");
         return new
         {
             context = new[] { "https://www.w3.org/ns/credentials/v2", "https://purl.imsglobal.org/spec/ob/v3p0/context-3.0.3.json" },
             type = "1EdTechRevocationList", issuer = IssuerId,
-            revokedCredentials = rows.Select(r => new { id = $"{BaseUrl}/verify/{r["id"]}", revocationReason = r["revoked_reason"] ?? "" }).ToList(),
+            revokedCredentials = rows.SelectMany(r => (r["kind"] == "topic" ? new[] { "", "/clr" } : new[] { "" }).Select(sfx => new { id = $"{BaseUrl}/verify/{r["id"]}{sfx}", revocationReason = r["revoked_reason"] ?? "" })).ToList(),
         };
     }
 
@@ -393,14 +456,15 @@ public sealed class CertificateService
 
     private Task InsertAsync(Certificate c) => _db.ExecuteAsync("""
         INSERT INTO certificates (id, number, user_id, module_id, module_name, module_version, module_scope, result_id, learner_name, score_percent, pass_percent, issued_at,
-                                  badge_jws, badge_hash, leaf_hash, status, chain_status, chain_network, chain_id, chain_updated_at)
+                                  badge_jws, badge_hash, leaf_hash, status, chain_status, chain_network, chain_id, chain_updated_at, snapshot_id, snapshot_hash, kind, clr_jws, clr_hash, completed_at)
         VALUES (@id, @number, @user_id, @module_id, @module_name, @module_version, @module_scope, @result_id, @learner_name, @score_percent, @pass_percent, @issued_at,
-                @badge_jws, @badge_hash, @leaf_hash, 'active', @chain_status, @chain_network, @chain_id, @now)
+                @badge_jws, @badge_hash, @leaf_hash, 'active', @chain_status, @chain_network, @chain_id, @now, @snapshot_id, @snapshot_hash, @kind, @clr_jws, @clr_hash, @completed_at)
         """, new (string, object?)[]
     {
         ("id", c.Id), ("number", c.Number), ("user_id", c.UserId), ("module_id", c.ModuleId), ("module_name", c.ModuleName), ("module_version", c.ModuleVersion), ("module_scope", c.ModuleScope),
         ("result_id", c.ResultId), ("learner_name", c.LearnerName), ("score_percent", c.ScorePercent), ("pass_percent", c.PassPercent), ("issued_at", c.IssuedAt),
-        ("badge_jws", c.BadgeJws), ("badge_hash", c.BadgeHash), ("leaf_hash", c.LeafHash), ("chain_status", c.ChainStatus), ("chain_network", c.ChainNetwork), ("chain_id", c.ChainId), ("now", DateTime.UtcNow),
+        ("badge_jws", c.BadgeJws), ("badge_hash", c.BadgeHash), ("leaf_hash", c.LeafHash), ("chain_status", c.ChainStatus), ("chain_network", c.ChainNetwork), ("chain_id", c.ChainId), ("now", DateTime.UtcNow), ("snapshot_id", c.SnapshotId), ("snapshot_hash", c.SnapshotHash),
+        ("kind", c.Kind), ("clr_jws", c.ClrJws), ("clr_hash", c.ClrHash), ("completed_at", c.CompletedAt),
     });
 
     public static Certificate Map(Dictionary<string, string?> r) => new()
@@ -412,5 +476,8 @@ public sealed class CertificateService
         ChainStatus = r["chain_status"] ?? Domain.ChainStatus.None, ChainNetwork = r["chain_network"] ?? "", ChainId = DbValue.ToInt(r["chain_id"]), BatchId = r.GetValueOrDefault("batch_id") is { Length: > 0 } b ? b : null,
         MerkleProofJson = r.GetValueOrDefault("merkle_proof_json") is { Length: > 0 } mp ? mp : null, ChainError = r.GetValueOrDefault("chain_error") ?? "", ChainAttempts = DbValue.ToInt(r["chain_attempts"]),
         ChainUpdatedAt = r.GetValueOrDefault("chain_updated_at") is { Length: > 0 } cu ? DbValue.ToDateTime(cu) : null, AnchoredAt = r.GetValueOrDefault("anchored_at") is { Length: > 0 } aa ? DbValue.ToDateTime(aa) : null,
+        SnapshotId = r.GetValueOrDefault("snapshot_id") is { Length: > 0 } sid ? sid : null, SnapshotHash = r.GetValueOrDefault("snapshot_hash") ?? "",
+        Kind = r.GetValueOrDefault("kind") is { Length: > 0 } kd ? kd : "module", ClrJws = r.GetValueOrDefault("clr_jws") is { Length: > 0 } cj ? cj : null, ClrHash = r.GetValueOrDefault("clr_hash") ?? "",
+        CompletedAt = r.GetValueOrDefault("completed_at") is { Length: > 0 } ca ? DbValue.ToDateTime(ca) : null,
     };
 }

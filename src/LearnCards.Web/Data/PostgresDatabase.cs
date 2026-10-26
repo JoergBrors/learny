@@ -137,6 +137,7 @@ public sealed class PostgresDatabase : IDatabase
         await EnsureTableColumnAsync("topic_assignments", "topic_version", "INTEGER NULL", ct);   // ADR 0029
         await EnsureTableColumnAsync("topic_assignments", "mandatory", "INTEGER NOT NULL DEFAULT 1", ct);
         await EnsureTableColumnAsync("topic_assignments", "due_at", "TEXT NULL", ct);
+        await EnsureTableColumnAsync("topic_modules", "module_version", "INTEGER NULL", ct);   // ADR 0030: festgelegte Modulversion im Themenentwurf (NULL = Altbestand, wird beim ersten Zugriff festgeschrieben)
         await EnsureTableColumnAsync("modules", "reference_id", "TEXT NULL", ct);   // ADR 0028: stabile Modulreferenz für portable JSON-Definitionen
         await ExecCoreAsync("CREATE UNIQUE INDEX IF NOT EXISTS ux_modules_owner_reference ON modules(owner_user_id, reference_id)", null, ct);
         await EnsureTableColumnAsync("quiz_results", "context", "TEXT NOT NULL DEFAULT 'private'", ct);
@@ -149,6 +150,14 @@ public sealed class PostgresDatabase : IDatabase
         await EnsureCardColumnAsync("slide_number", "INTEGER NULL", ct);
         await EnsureCardColumnAsync("target_time_sec", "INTEGER NULL", ct);
         await EnsureCardColumnAsync("quiz_json", "TEXT NOT NULL DEFAULT '[]'", ct);
+        await EnsureCardColumnAsync("competencies_json", "TEXT NOT NULL DEFAULT '[]'", ct);   // ADR 0031: Kompetenz-IDs der Karte
+        await EnsureTableColumnAsync("certificates", "snapshot_id", "UUID NULL", ct);   // ADR 0031: Prüfungssnapshot des Abschlusses
+        await EnsureTableColumnAsync("certificates", "snapshot_hash", "TEXT NOT NULL DEFAULT ''", ct);
+        await EnsureTableColumnAsync("certificates", "kind", "TEXT NOT NULL DEFAULT 'module'", ct);   // ADR 0032: 'module' | 'topic' (Themenabschluss: Master-Badge + CLR)
+        await EnsureTableColumnAsync("certificates", "clr_jws", "TEXT NULL", ct);
+        await EnsureTableColumnAsync("certificates", "clr_hash", "TEXT NOT NULL DEFAULT ''", ct);
+        await EnsureTableColumnAsync("certificates", "completed_at", "TEXT NULL", ct);
+        await EnsureTableColumnAsync("exam_snapshots", "kind", "TEXT NOT NULL DEFAULT 'module'", ct);
         await EnsureCardColumnAsync("images_json", "TEXT NOT NULL DEFAULT '[]'", ct);   // ADR 0016 (seit ADR 0017 nur noch Altbestand)
         await EnsureCardColumnAsync("images_migrated", "INTEGER NOT NULL DEFAULT 0", ct);   // ADR 0017: 1 = Bilder liegen in card_images
         await EnsureCardColumnAsync("quiz_synced", "INTEGER NOT NULL DEFAULT 0", ct);   // ADR 0019: 1 = quiz[] ist in den Fragenpool übernommen

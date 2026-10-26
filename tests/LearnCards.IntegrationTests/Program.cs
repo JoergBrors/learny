@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Security.Cryptography.X509Certificates;
 
 // Integrationstests für Mehrbenutzer-Isolation und Rollen (ADR 0011).
 // Aufruf: dotnet run --project tests/LearnCards.IntegrationTests [-- <pfad-zur-LearnCards.Web.dll>]
@@ -41,6 +42,11 @@ Env("MCP_API_KEY", McpKey);
 Env("MCP_TOKEN_KEY", "aW50ZWdyYXRpb24tdGVzdC1rZXktMDEyMzQ1Njc4OSE=");   // Pflicht (ADR 0025); nur Testwert
 Env("MCP_PUBLIC_URL", mcpUrl);
 Env("OPENAI_API_KEY", "");
+using (var pdfCert = PdfTests.NewRsaCert("CN=Learny Test PDF Signer, O=LearnCards Tests"))   // eigenes PDF-Signaturzertifikat über die Umgebung (ADR 0033)
+{
+    Env("PDF_SIGNING_CERT_PFX_BASE64", Convert.ToBase64String(pdfCert.Export(X509ContentType.Pkcs12, "pdf-test")));
+    Env("PDF_SIGNING_CERT_PASSWORD", "pdf-test");
+}
 Env("DATA_PROTECTION_DIR", Path.Combine(tmp, "keys"));
 var provider = Environment.GetEnvironmentVariable("TEST_DB_PROVIDER") ?? "sqlite";
 Env("DB_PROVIDER", provider);
@@ -209,6 +215,7 @@ try
     await ImageStorageRemoteUnitTests.RunAsync(Check);
     RichTextUnitTests.Run(Check);
     await BlockchainUnitTests.RunAsync(Check, tmp);
+    PdfTests.Unit(Check);   // PDF, CMS-Signatur, Umbruch (ADR 0033)
     await TransferIntegrityUnitTests.RunAsync(Check, tmp);   // Fehlerinjektion, Referenzen, Altbestand (ADR 0028)
     WorkflowStructureTests.Run(Check, repoRoot);   // IIS-Workflow: MCP-Neustart (ADR 0029)
     await McpTokenUnitTests.RunAsync(Check, tmp);   // Schutz der MCP-Tokens bei Datenbankzugriff (ADR 0025)
@@ -257,9 +264,37 @@ try
     Console.WriteLine($"MCP-Server läuft auf {mcpUrl}\n");
 
     var admin = await LoginAsync(null);          // local-dev-user = Bootstrap-Administrator im Dev-Modus
+    if (Environment.GetEnvironmentVariable("TEST_ONLY") == "topics")   // Entwicklungsabkürzung: nur Themen-/Modulversions-Tests
+    {
+        await TopicE2ETests.RunAsync(LoginAsync, () => NewClient(false), admin, mcpUrl, Check);
+        await TopicTransferTests.RunAsync(LoginAsync, () => NewClient(false), admin, mcpUrl, Check);
+        await TransferHardeningTests.RunAsync(LoginAsync, () => NewClient(false), mcpUrl, McpKey, PngLike, Check);
+        await TopicViewTests.RunAsync(LoginAsync, Check);
+        await ModuleVersionTests.RunAsync(LoginAsync, Check);
+        await CompetencyTests.RunAsync(LoginAsync, () => NewClient(false), Check);
+        await TopicCredentialTests.RunAsync(LoginAsync, () => NewClient(false), admin, Check);
+        await TopicGovernanceTests.RunAsync(LoginAsync, () => NewClient(false), admin, mcpUrl, Check);
+        Console.WriteLine($"{checks - failures}/{checks} Prüfungen bestanden" + (failures == 0 ? "" : $", {failures} FEHLGESCHLAGEN"));
+        return failures == 0 ? 0 : 1;
+    }
+    if (Environment.GetEnvironmentVariable("TEST_ONLY") == "topiccreds")
+    {
+        await TopicCredentialTests.RunAsync(LoginAsync, () => NewClient(false), admin, Check);
+        Console.WriteLine($"{checks - failures}/{checks} Prüfungen bestanden" + (failures == 0 ? "" : $", {failures} FEHLGESCHLAGEN"));
+        return failures == 0 ? 0 : 1;
+    }
+    if (Environment.GetEnvironmentVariable("TEST_ONLY") == "competencies")
+    {
+        await CompetencyTests.RunAsync(LoginAsync, () => NewClient(false), Check);
+        Console.WriteLine($"{checks - failures}/{checks} Prüfungen bestanden" + (failures == 0 ? "" : $", {failures} FEHLGESCHLAGEN"));
+        return failures == 0 ? 0 : 1;
+    }
     if (Environment.GetEnvironmentVariable("TEST_ONLY") == "cardtools")   // Entwicklungsabkürzung: nur MCP-Kartenwerkzeuge (get_card/update_card/export_cards)
     {
         await CardToolsTests.RunAsync(LoginAsync, () => NewClient(false), admin, mcpUrl, McpKey, PngLike, Check);
+        await TopicViewTests.RunAsync(LoginAsync, Check);
+        await ModuleVersionTests.RunAsync(LoginAsync, Check);
+        await CompetencyTests.RunAsync(LoginAsync, () => NewClient(false), Check);
         Console.WriteLine($"{checks - failures}/{checks} Prüfungen bestanden" + (failures == 0 ? "" : $", {failures} FEHLGESCHLAGEN"));
         return failures == 0 ? 0 : 1;
     }
@@ -2022,7 +2057,10 @@ try
             var helpTerms = new[] { "single_choice", "multiple_response", "free_text", "correct_indexes", "Quiz-Einstellungen", "Bestehensgrenze", "/api/schema/import/cards", "KI-Fragen", "Lernkarten visuell bearbeiten", "Karten bearbeiten", "Alternativtext", "Fragenpool", "++unterstrichen++", "Konflikt", "ungespeicherte Änderungen" };
             var missing = helpTerms.Where(t => !help.Contains(t)).ToList();
             Check(missing.Count == 0, "Hilfeseite: erklärt Fragetypen, Quiz-Einstellungen, KI-Fragen und verweist auf das Live-Importschema" + (missing.Count > 0 ? " — fehlt: " + string.Join(", ", missing) : ""));
-            Check(!help.Contains("WYSIWYG") && !help.Contains("Zertifikat"), "Hilfeseite: dokumentiert keine späteren Funktionen (Editor, Zertifikate) als verfügbar");
+            Check(!help.Contains("WYSIWYG"), "Hilfeseite: dokumentiert keine nicht vorhandenen Funktionen (WYSIWYG)");
+            var certTerms = new[] { "Learny Verified", "Modulversionen", "Lernziele", "Kompetenzen", "signierte PDF", "/verify", "/achievements", "LinkedIn", "Neuen Stand übernehmen", "CLR" };
+            var certMissing = certTerms.Where(t => !help.Contains(t)).ToList();
+            Check(certMissing.Count == 0, "Hilfeseite: erklärt Modulversionen, Kompetenzen, Zertifikate, signierte PDFs, Prüfung und LinkedIn" + (certMissing.Count > 0 ? " — fehlt: " + string.Join(", ", certMissing) : ""));
         }
         finally { StopProcess(statRun.Proc); }
     }
@@ -2030,6 +2068,10 @@ try
     // zuletzt: veröffentlicht ein globales Modul, das die früheren Prüfungen (genau ein globales Modul) nicht stören darf
     await TopicTransferTests.RunAsync(LoginAsync, () => NewClient(false), admin, mcpUrl, Check);   // Themenmodule, JSON, Klonen, MCP (ADR 0028)
     await TransferHardeningTests.RunAsync(LoginAsync, () => NewClient(false), mcpUrl, McpKey, PngLike, Check);   // Referenzen parallel, große Dateien, MCP-Matrix (ADR 0028)
+    await TopicViewTests.RunAsync(LoginAsync, Check);   // Themenseite: Entwurf nur bei Abweichung
+    await CompetencyTests.RunAsync(LoginAsync, () => NewClient(false), Check);   // Kompetenzen, Prüfungssnapshot, Badge (ADR 0031)
+    await TopicCredentialTests.RunAsync(LoginAsync, () => NewClient(false), admin, Check);   // Themenabschluss: Master-Badge + CLR (ADR 0032)
+    await ModuleVersionTests.RunAsync(LoginAsync, Check);   // Modulversionen, feste Modulversionen im Thema (ADR 0030)
     await CardToolsTests.RunAsync(LoginAsync, () => NewClient(false), admin, mcpUrl, McpKey, PngLike, Check);   // get_card, update_card, export_cards
     await TopicGovernanceTests.RunAsync(LoginAsync, () => NewClient(false), admin, mcpUrl, Check);   // Themenfreigaben, Pflicht, Themen-Admin, Lernstatus (ADR 0029)
 

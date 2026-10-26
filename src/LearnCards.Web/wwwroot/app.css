@@ -761,7 +761,8 @@ a.user-chip { text-decoration: none; }
 /* ─── Bestanden / Zertifikat (ADR 0021) ─────────────────────────── */
 .badge-pass { background: color-mix(in srgb, var(--ok) 16%, var(--surface)); color: var(--ok); border: 1px solid color-mix(in srgb, var(--ok) 55%, var(--border)); border-radius: 999px; padding: .15rem .6rem; font-size: .8rem; font-weight: 700; display: inline-block; }
 .module-pass { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin: .4rem 0 0; }
-.cert-filter { max-width: 28rem; }
+.cert-filter { max-width: 28rem; }
+
 
 /* ─── Themen (ADR 0027) ─────────────────────────────────────────── */
 .topic-card { text-decoration: none; color: inherit; display: block; }
@@ -842,3 +843,8 @@ a.user-chip { text-decoration: none; }
 .module-usage .badge { text-decoration: none; }
 .row-overdue td { background: color-mix(in srgb, var(--danger) 8%, transparent); }
 @media (max-width: 560px) { .mandatory-item { flex-direction: column; align-items: stretch; } }
+
+/* Prüfsiegel „Learny Verified“ (ADR 0033/0034) */
+.seal-link { display: inline-grid; place-items: center; margin-left: .4rem; opacity: .9; }
+.seal-link:hover, .seal-link:focus-visible { opacity: 1; }
+.seal-link img { display: block; }

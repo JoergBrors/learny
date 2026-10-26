@@ -38,3 +38,11 @@
 - Hinzufügen fremder Module nur, wenn global aktiv; Zugriff auf Themenkopien nie am `ResolveModuleAccessAsync`/`CanLearnTopicModuleAsync` vorbei.
 - Globale Aktionen und Benutzerzuordnung nie über MCP.
 - Tests: `TopicE2ETests` (T1–T80), `tests/browser/topics-browser-check.js`.
+
+## Nachtrag 2026-10-26 — Standardansicht der Themenseite
+
+Die Themenseite zeigt dem Eigentümer ohne Versionsangabe die **aktuelle Veröffentlichung**. Der Entwurf wird nur angeboten (und als Standard gezeigt), wenn er tatsächlich abweicht (`DraftRevision`/Modul-Inhaltskennungen, `TopicService.GetViewAsync`) oder das Thema nie veröffentlicht wurde; `?version=0` verlangt den Entwurf ausdrücklich. `GetDetailAsync` (Editor, API, MCP) bleibt unverändert.
+
+## Nachtrag 2026-10-26 — Modulversionen und Themenabschluss
+
+Themenversionen enthalten die festgelegten Modulversionen (eingefrorene Kopien) aus [ADR 0030](0030-einheitliche-modul-und-themenversionierung.md); die Änderungserkennung erfolgt über einen Inhaltsfingerabdruck. Die Aussage „keine Themenzertifikate“ ist durch [ADR 0032](0032-themenabschluss-clr-und-master-badge.md) ersetzt (Master-Badge + CLR); Blockchain-Sonderwege für Themen gibt es weiterhin nicht.

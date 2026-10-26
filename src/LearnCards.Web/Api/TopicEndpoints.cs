@@ -62,6 +62,10 @@ public static partial class ApiEndpoints
         return Results.File(bytes, "application/json", fileName);
     }
 
+    private static object CompetencyModelDto(ModuleCompetencyModel m) => new { learning_objectives = m.Objectives, competencies = m.Competencies };
+    private static object ModuleVersionDto(ModuleVersionInfo v) => new { version = v.VersionNumber, snapshot_module_id = v.SnapshotModuleId, published_at = v.PublishedAt, note = v.Note, cards = v.Cards, content_hash = v.ContentHash };
+    private static object ModuleVersionsDto(ModuleVersionOverview o) => new { module_id = o.ModuleId, reference_id = o.ReferenceId, latest_version = o.LatestVersion, has_unpublished_changes = o.HasUnpublishedChanges, versions = o.Versions.Select(ModuleVersionDto) };
+
     private static object ModuleSummaryDto(ModuleInfo m) => new { id = m.Id, name = m.Name, description = m.Description, icon = m.Icon, color = m.Color, card_count = m.ActiveCount, scope = m.Scope };
 
     /// <summary>Modul-JSON (Export, Import, Klonen): vollständig über <see cref="ModuleTransferService"/>; Bildspeicherfehler werden wie bei den Bild-Endpunkten gemeldet.</summary>
@@ -81,6 +85,17 @@ public static partial class ApiEndpoints
                 var b = await modules.ExportCardsAsync(Uid(http), moduleId, include_archived, offset, limit, http.RequestAborted);
                 return Results.Ok(new { module = b.ModuleName, context = b.Context, total = b.Total, offset = b.Offset, count = b.Count, next_offset = b.NextOffset, has_more = b.NextOffset is not null, cards = b.Cards });
             }));
+        // Lernziele und Kompetenzen (ADR 0031): lesen für alle Berechtigten, ändern nur der Eigentümer privater Module (Entwurf; Versionen bleiben unverändert)
+        secured.MapGet("/modules/{moduleId}/competencies", (string moduleId, HttpContext http, CompetencyService comps) =>
+            Run(async () => Results.Ok(CompetencyModelDto(await comps.GetReadableModelAsync(Uid(http), moduleId)))));
+        secured.MapPut("/modules/{moduleId}/competencies", (string moduleId, CompetencyModelRequest req, HttpContext http, CompetencyService comps) =>
+            Run(async () => { var model = new ModuleCompetencyModel { Objectives = req.LearningObjectives ?? new(), Competencies = req.Competencies ?? new() }; await comps.SaveModelAsync(Uid(http), moduleId, model); return Results.Ok(CompetencyModelDto(model)); }));
+
+        // Modulversionen (ADR 0030): nur eigene private Module
+        secured.MapGet("/modules/{moduleId}/versions", (string moduleId, HttpContext http, ModuleVersionService versions) =>
+            Run(async () => Results.Ok(ModuleVersionsDto(await versions.GetOverviewAsync(Uid(http), moduleId)))));
+        secured.MapPost("/modules/{moduleId}/versions", (string moduleId, ModuleVersionRequest? req, HttpContext http, ModuleVersionService versions) =>
+            Run(async () => Results.Json(ModuleVersionDto(await versions.PublishAsync(Uid(http), moduleId, req?.Note)), statusCode: 201)));
         secured.MapPost("/modules/import",(HttpContext http, ModuleTransferService modules) =>
             Run(async () => Results.Json(ModuleSummaryDto(await modules.ImportJsonAsync(Uid(http), await ReadBodyAsync(http), http.RequestAborted)), statusCode: 201)));
         secured.MapPost("/modules/{moduleId}/clone", (string moduleId, HttpContext http, ModuleTransferService modules) =>
@@ -102,6 +117,10 @@ public static partial class ApiEndpoints
         // Verwendung der eigenen Module in eigenen Themen (Entwurf/Versionen) — nur eigene Themen, nie fremde (ADR 0029)
         t.MapGet("/module-usage", (HttpContext http, TopicService topics) => GuardTopic(async () => Results.Ok(await topics.ListModuleUsageAsync(Uid(http)))));
 
+        // Standardansicht der Themenseite: aktuelle Veröffentlichung, Entwurf nur bei tatsächlicher Abweichung (version=0 = Entwurf ausdrücklich)
+        t.MapGet("/{id}/view", (string id, int? version, HttpContext http, TopicService topics) =>
+            GuardTopic(async () => Results.Ok(await topics.GetViewAsync(Uid(http), id, version))));
+
         t.MapGet("/{id}", (string id, int? version, HttpContext http, TopicService topics) =>
             GuardTopic(async () => Results.Ok(await topics.GetDetailAsync(Uid(http), id, version))));
         t.MapPut("/{id}", (string id, TopicWriteRequest req, HttpContext http, TopicService topics) =>
@@ -118,6 +137,9 @@ public static partial class ApiEndpoints
             GuardTopic(async () => Results.Json(await topics.CreateFromDefinitionAsync(Uid(http), await ReadBodyAsync(http)), statusCode: 201)));
         t.MapPut("/{id}/definition", (string id, HttpContext http, TopicService topics) =>
             GuardTopic(async () => Results.Ok(await topics.UpdateFromDefinitionAsync(Uid(http), id, await ReadBodyAsync(http)))));
+        // Neuere Modulversion ausdrücklich in den Entwurf übernehmen (ohne version: aktueller Stand des Moduls); veröffentlichte Themenversionen bleiben unverändert (ADR 0030)
+        t.MapPost("/{id}/modules/{moduleId}/adopt", (string id, string moduleId, ModuleAdoptRequest? req, HttpContext http, TopicService topics) =>
+            GuardTopic(async () => Results.Ok(new { module_version = await topics.AdoptModuleVersionAsync(Uid(http), id, moduleId, req?.Version) })));
         t.MapPost("/{id}/modules/{moduleId}/replace-with-clone", (string id, string moduleId, HttpContext http, TopicService topics) =>
             GuardTopic(async () => Results.Ok(ModuleSummaryDto(await topics.ReplaceWithOwnCloneAsync(Uid(http), id, moduleId)))));
 
@@ -210,6 +232,9 @@ public static partial class ApiEndpoints
 public class TopicWriteRequest { public string Name { get; set; } = ""; public string? Description { get; set; } }
 public class TopicArchiveRequest { public bool Archived { get; set; } = true; }
 public class TopicModuleRequest { public string ModuleId { get; set; } = ""; }
+public class CompetencyModelRequest { public List<LearningObjective>? LearningObjectives { get; set; } public List<Competency>? Competencies { get; set; } }
+public class ModuleVersionRequest { public string? Note { get; set; } }
+public class ModuleAdoptRequest { public int? Version { get; set; } }
 public class TopicOrderRequest { public List<string>? ModuleIds { get; set; } }
 public class TopicUserRequest { public string UserId { get; set; } = ""; }
 public class TopicAssignRequest { public string TopicId { get; set; } = ""; public string UserId { get; set; } = ""; public int? Version { get; set; } public bool? Mandatory { get; set; } public DateTime? DueAt { get; set; } }

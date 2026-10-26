@@ -23,7 +23,7 @@ public static partial class ApiEndpoints
 
     private static object CertificateDto(Certificate c, bool includeLearner = true) => new
     {
-        id = c.Id, number = c.Number, module_id = c.ModuleId, module_name = c.ModuleName, module_version = c.ModuleVersion, scope = c.ModuleScope, issued_at = c.IssuedAt,
+        id = c.Id, number = c.Number, kind = c.Kind, has_clr = c.ClrJws is not null, completed_at = c.CompletedAt, snapshot_hash = c.SnapshotHash.Length > 0 ? c.SnapshotHash : null, module_id = c.ModuleId, module_name = c.ModuleName, module_version = c.ModuleVersion, scope = c.ModuleScope, issued_at = c.IssuedAt,
         score_percent = c.ScorePercent, grade = c.Grade, grade_label = GermanGrade.Label(c.Grade), pass_percent = c.PassPercent, learner_name = includeLearner ? c.LearnerName : null, badge_hash = c.BadgeHash,
         status = c.IsRevoked ? "revoked" : "active", revoked_at = c.RevokedAt, revoked_reason = c.IsRevoked ? c.RevokedReason : null,
         chain = new
@@ -58,6 +58,13 @@ public static partial class ApiEndpoints
             return pkg is null ? Results.Json(new { detail = "Kein Verankerungsnachweis vorhanden." }, statusCode: 404) : Results.Json(pkg);
         }).AllowAnonymous();
 
+        // Prüfungsnachweis (Snapshot) zum Zertifikat — im Credential als Evidence verlinkt; ohne Lernendendaten, Antworten und Fragetexte
+        app.MapGet("/api/public/certificates/{id}/evidence", async (string id, CertificateService certs, HttpContext http) =>
+        {
+            if (!PublicAllowed(http, 120)) return Results.StatusCode(429);
+            return await certs.GetPublicEvidenceJsonAsync(id) is { } json ? Results.Text(json, "application/json") : Results.Json(new { detail = "Kein Prüfungsnachweis vorhanden." }, statusCode: 404);
+        }).AllowAnonymous();
+
         app.MapGet("/api/public/revocation-list", async (CertificateService certs) => Results.Json(await certs.RevocationListAsync())).AllowAnonymous();
 
         // Prüft ein Badge (JSON mit proof.jwt oder kompakte JWS). Eingabe begrenzt; Antwort ohne Lernendendaten.
@@ -72,6 +79,29 @@ public static partial class ApiEndpoints
             return Results.Json(new { valid = v.Valid, signature_valid = v.SignatureValid, signature_error = v.SignatureError, content_matches = v.ContentMatches, issuer_valid = v.IssuerValid, known = v.Known, revoked = v.Revoked,
                 revoked_at = v.RevokedAt, revoked_reason = v.RevokedReason, badge_hash = v.BadgeHash, certificate_id = v.CertificateId, number = v.Number, module_name = v.ModuleName, module_version = v.ModuleVersion,
                 issued_at = v.IssuedAt, chain_status = v.ChainStatus, chain_network = v.ChainNetwork, tx_hash = v.TxHash });
+        }).AllowAnonymous().DisableAntiforgery();
+
+        // Upload-Prüfung eines Zertifikats-PDFs: Signatur, Unversehrtheit, eingebettete Credentials, Hashes, Versionen, Widerruf – getrennt ausgewiesen. Das PDF wird nur im Speicher verarbeitet.
+        app.MapPost("/api/public/verify/pdf", async (HttpContext http, PdfVerificationService verifier) =>
+        {
+            if (!PublicAllowed(http, 60)) return Results.StatusCode(429);
+            if (http.Request.ContentLength is > PdfVerificationService.MaxPdfBytes) return Results.Json(new { detail = $"Die Datei ist zu groß (höchstens {PdfVerificationService.MaxPdfBytes / 1024 / 1024} MB)." }, statusCode: 413);
+            byte[] bytes;
+            if (http.Request.HasFormContentType)
+            {
+                var file = (await http.Request.ReadFormAsync()).Files.GetFile("file");
+                if (file is null) return Results.Json(new { detail = "Feld 'file' fehlt." }, statusCode: 400);
+                if (file.Length > PdfVerificationService.MaxPdfBytes) return Results.Json(new { detail = "Die Datei ist zu groß." }, statusCode: 413);
+                using var ms = new MemoryStream(); await file.CopyToAsync(ms); bytes = ms.ToArray();
+            }
+            else
+            {
+                using var ms = new MemoryStream();
+                var buf = new byte[81920]; int n;
+                while ((n = await http.Request.Body.ReadAsync(buf)) > 0) { ms.Write(buf, 0, n); if (ms.Length > PdfVerificationService.MaxPdfBytes) return Results.Json(new { detail = "Die Datei ist zu groß." }, statusCode: 413); }
+                bytes = ms.ToArray();
+            }
+            return Results.Text((await verifier.VerifyAsync(bytes)).ToJsonString(), "application/json");
         }).AllowAnonymous().DisableAntiforgery();
 
         // Unabhängige Blockchain-Prüfung eines Nachweis-Pakets (RPC-Ziel nur aus der Konfiguration, nie aus dem Paket)
@@ -89,7 +119,12 @@ public static partial class ApiEndpoints
 
         // ─── Eigene Zertifikate (Cookie-Login) ───
         var mine = secured.MapGroup("/certificates");
-        mine.MapGet("/", async (CertificateService certs, HttpContext http) => Results.Ok((await certs.ListForUserAsync(Uid(http))).Select(c => CertificateDto(c))));
+        // Vor dem Auflisten: noch nicht ausgestellte, aber tatsächlich erfüllte Themenabschlüsse nachziehen (Master-Badge + CLR; idempotent, Abschlusszeitpunkt bleibt)
+        mine.MapGet("/", async (CertificateService certs, TopicCredentialService topicCreds, HttpContext http) =>
+        {
+            await topicCreds.EnsureAllForUserAsync(Uid(http));
+            return Results.Ok((await certs.ListForUserAsync(Uid(http))).Select(c => CertificateDto(c)));
+        });
         mine.MapGet("/{id}", async (string id, CertificateService certs, HttpContext http) =>
             await certs.GetForUserAsync(Uid(http), id) is { } c ? Results.Ok(CertificateDto(c)) : Results.Json(new { detail = "Certificate not found" }, statusCode: 404));
         mine.MapGet("/{id}/badge", async (string id, CertificateService certs, HttpContext http) =>
@@ -105,6 +140,36 @@ public static partial class ApiEndpoints
             http.Response.Headers.ContentDisposition = (view ? "inline" : "attachment") + $"; filename=\"Zertifikat-{c.Number}.html\"";
             http.Response.Headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'";
             return Results.Text(certs.RenderCertificateHtml(c), "text/html; charset=utf-8");
+        });
+        // Angaben für „Auf LinkedIn hinzufügen“ (nur Eigentümer; keine Veröffentlichung, keine LinkedIn-API)
+        mine.MapGet("/{id}/linkedin", async (string id, CertificateService certs, HttpContext http) =>
+        {
+            if (await certs.GetForUserAsync(Uid(http), id) is not { } c) return Results.Json(new { detail = "Certificate not found" }, statusCode: 404);
+            var li = certs.LinkedInShare(c);
+            return Results.Ok(new { name = li.Name, organization = li.Organization, certificate_id = li.CertificateId, issue_year = li.IssueYear, issue_month = li.IssueMonth, certificate_url = li.VerifyUrl, add_url = li.AddUrl, automatic_publication = false });
+        });
+        // Signiertes Zertifikats-PDF (Modul- oder Themenabschluss) mit eingebetteten Credentials; einmal erzeugt, danach unverändert (ADR 0033). Ohne Signaturzertifikat: 503, nie ein unsigniertes PDF.
+        mine.MapGet("/{id}/certificate.pdf", async (string id, CertificatePdfService pdfs, TopicCredentialService topicCreds, HttpContext http, bool view = false) =>
+        {
+            try
+            {
+                await topicCreds.EnsureAllForUserAsync(Uid(http));
+                var pdf = await pdfs.GetOrCreateAsync(Uid(http), id, http.RequestAborted);
+                http.Response.Headers.ContentDisposition = (view ? "inline" : "attachment") + $"; filename=\"{pdf.FileName}\"";
+                http.Response.Headers["X-Content-Type-Options"] = "nosniff";
+                http.Response.Headers.CacheControl = "private, no-store";
+                http.Response.Headers["X-PDF-SHA256"] = pdf.Sha256;
+                return Results.File(pdf.Data, "application/pdf");
+            }
+            catch (KeyNotFoundException) { return Results.Json(new { detail = "Certificate not found" }, statusCode: 404); }
+            catch (PdfSigningUnavailableException e) { return Results.Json(new { detail = e.Message, code = "pdf_signing_unavailable" }, statusCode: 503); }
+        });
+        // Comprehensive Learner Record (CLR 2.0) eines Themenabschlusses: das signierte Credential unverändert als JSON-LD
+        mine.MapGet("/{id}/clr", async (string id, CertificateService certs, HttpContext http) =>
+        {
+            if (await certs.GetForUserAsync(Uid(http), id) is not { } c || certs.SignedClrJson(c) is not { } clr) return Results.Json(new { detail = "Kein CLR vorhanden." }, statusCode: 404);
+            http.Response.Headers.ContentDisposition = $"attachment; filename=\"clr-{c.Number}.json\"";
+            return Results.Text(clr.ToJsonString(new() { WriteIndented = true }), "application/ld+json");
         });
         mine.MapGet("/{id}/badge.jwt", async (string id, CertificateService certs, HttpContext http) =>
         {

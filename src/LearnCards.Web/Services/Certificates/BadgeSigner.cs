@@ -253,6 +253,34 @@ public sealed class BadgeSigner : IDisposable
         }
     }
 
+    /// <summary>
+    /// Prüft eine kompakte JWS (ES256) mit einem mitgelieferten öffentlichen Schlüssel (JWK, z. B. aus einem PDF) — Offline-Prüfung der Unversehrtheit. Das beweist
+    /// <b>nicht</b>, dass der Schlüssel dem Aussteller gehört: Das Ergebnis darf nur als „Inhalt zur Signatur passend“ gelten; die Echtheit des Schlüssels bestätigt allein
+    /// der Aussteller (<c>/.well-known/jwks.json</c>).
+    /// </summary>
+    public static JwsVerification VerifyWithJwk(string jws, JsonNode? jwk)
+    {
+        try
+        {
+            if (jwk?["kty"]?.GetValue<string>() != "EC" || jwk["crv"]?.GetValue<string>() != "P-256") return new(false, "Kein ES256-Schlüssel (EC P-256).", null, null);
+            var parts = jws.Trim().Split('.');
+            if (parts.Length != 3) return new(false, "Keine kompakte JWS (3 Teile erwartet).", null, null);
+            var header = JsonNode.Parse(FromB64(parts[0]));
+            var kid = header?["kid"]?.GetValue<string>();
+            if (header?["alg"]?.GetValue<string>() != "ES256") return new(false, "Nur ES256 wird akzeptiert.", null, kid);
+            var payload = JsonNode.Parse(FromB64(parts[1]));
+            var sig = FromB64Bytes(parts[2]);
+            if (sig.Length != 64) return new(false, "Signaturlänge ungültig.", payload, kid);
+            using var key = ECDsa.Create(new ECParameters { Curve = ECCurve.NamedCurves.nistP256, Q = new ECPoint { X = FromB64Bytes(jwk["x"]!.GetValue<string>()), Y = FromB64Bytes(jwk["y"]!.GetValue<string>()) } });
+            return key.VerifyData(Encoding.ASCII.GetBytes(parts[0] + "." + parts[1]), sig, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation)
+                ? new(true, null, payload, kid) : new(false, "Die Signatur stimmt nicht mit dem Inhalt überein.", payload, kid);
+        }
+        catch (Exception e) when (e is FormatException or JsonException or CryptographicException or ArgumentException or NullReferenceException or InvalidOperationException)
+        {
+            return new(false, "Die Signatur oder der Schlüssel konnte nicht gelesen werden.", null, null);
+        }
+    }
+
     /// <summary>Nutzlast (Teil 2) einer kompakten JWS als JSON-Text — ohne Signaturprüfung (nur für bereits geprüfte, gespeicherte Badges).</summary>
     public static string PayloadText(string jws) => FromB64(jws.Split('.')[1]);
 

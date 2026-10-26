@@ -45,3 +45,7 @@
 - Globale Veröffentlichung darf nie `mandatory` setzen; Pflicht entsteht nur durch eine ausdrückliche Zuweisung.
 - Statusauswertungen minimal halten (Datenschutz); keine Antworten, Inhalte oder E-Mail-Adressen.
 - Tests: `TopicGovernanceTests` (G1–G40), `TransferIntegrityUnitTests` (I24–I26), `WorkflowStructureTests` (W1–W9), `tests/browser/topics-browser-check.js`.
+
+## Nachtrag 2026-10-26 — Versionen, Abschlüsse
+
+Pflichtzuweisungen und Freigaben beziehen sich weiterhin auf konkrete Themenversionen, die ihrerseits konkrete Modulversionen (eingefrorene Kopien) enthalten ([ADR 0030](0030-einheitliche-modul-und-themenversionierung.md)); eine neue Modulversion ändert keine Zuweisung oder Freigabe. Ein Themenabschluss ([ADR 0032](0032-themenabschluss-clr-und-master-badge.md)) ist an Benutzer, Thema und Themenversion gebunden; Widerruf oder Rücknahme einer Freigabe ändert ausgestellte Nachweise nicht (nur der Administrator widerruft Zertifikate). Der Lernstatus-Endpunkt gibt weiterhin keine Credentials, Antworten oder Snapshots heraus.

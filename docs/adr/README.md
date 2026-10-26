@@ -34,9 +34,14 @@ Referenz dafür, *wie das System funktioniert und warum* — für Menschen und f
 | [0023](0023-secrets-und-badge-schluessel-unter-iis.md) | Geheimnisse und Badge-Schlüssel unter IIS (außerhalb des Webroots, Marker, fail-closed) | Akzeptiert (IIS-Test offen) |
 | [0024](0024-docker-hub-veroeffentlichung.md) | Veröffentlichung als Docker-Hub-Images mit Compose-Installationspaket | Akzeptiert (Erstveröffentlichung offen) |
 | [0026](0026-betriebsmodus-fail-closed.md) | Betriebsmodus fail closed: kein stiller Dev-Login, ENV_FILE verbindlich | Akzeptiert |
-| [0027](0027-themen-lernpfade-versionierung-und-abschlusspruefungen.md) | Themen, Lernpfade, Versionierung und Abschlussprüfungen | Teilweise ersetzt durch 0028, 0029 |
+| [0027](0027-themen-lernpfade-versionierung-und-abschlusspruefungen.md) | Themen, Lernpfade, Versionierung und Abschlussprüfungen | Teilweise ersetzt durch 0028, 0029, 0032, ergänzt durch 0030 |
 | [0028](0028-themenmodule-json-und-mcp-verwaltung.md) | Eigene Themenmodule, portable JSON-Definitionen und MCP-Verwaltung von Themenentwürfen | Akzeptiert |
 | [0029](0029-themenzugriff-pflichtzuweisungen-und-themenadministration.md) | Themenbezogene Modulzugriffe, Pflichtzuweisungen und delegierte Themenadministration (Rolle `themen_admin`) | Akzeptiert |
+| [0030](0030-einheitliche-modul-und-themenversionierung.md) | Einheitliche Modul- und Themenversionierung mit festgelegten Modulversionen | Akzeptiert |
+| [0031](0031-kompetenzmodell-und-pruefungssnapshots.md) | Kompetenzmodell, Prüfungssnapshots und kompetenzbasierte Modulzertifikate | Akzeptiert |
+| [0032](0032-themenabschluss-clr-und-master-badge.md) | Themenabschluss mit CLR 2.0 und Master-Open-Badge | Akzeptiert |
+| [0033](0033-signierte-zertifikats-pdfs.md) | Signierte Zertifikats-PDFs mit eingebetteten Credentials und Upload-Prüfung | Akzeptiert |
+| [0034](0034-nachweisuebersicht-pruefsiegel-und-linkedin.md) | Nachweisübersicht, Prüfsiegel „Learny Verified“ und LinkedIn-Angaben | Akzeptiert |
 | [0025](0025-sichere-speicherung-von-mcp-tokens.md) | Sichere Speicherung von MCP-Tokens, Codes und OAuth-Clients (Schutz bei Datenbankzugriff) | Akzeptiert und umgesetzt |
 
 Prüfberichte, die Anlass für ADRs sind, liegen unter [docs/reviews/](../reviews/) (aktuell: [Mehrbenutzer-Prüfbericht](../reviews/2026-10-24-mehrbenutzer-pruefbericht.md)).

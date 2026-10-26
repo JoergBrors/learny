@@ -74,7 +74,8 @@ static void RegisterCoreTools(McpServerEngine engine, LearnCardsApiClient api, M
         new ToolDefinition("add_card",
             "Create a single learning card in the LearnCards platform. Use only source-grounded facts and preserve the canonical import structure. Optional images[]: each entry needs mime_type (image/png, image/jpeg or image/webp) and data_base64 (plain standard Base64 of the real image file, no 'data:' prefix); alt_text and caption are optional. Limits: max 5 images per card, max 2 MiB per decoded image; prefer small images (< 200 KiB) because Base64 inside tool arguments consumes model context. Only include images you were actually given; never invent Base64 data. Call get_import_schema for the exact, current rules."+
             " Text fields (definition, how_it_works, context, key_fact, reference_answer) accept a small formatting syntax: **bold**, *italic*, ++underline++, '# ' headings, '- ' and '1. ' lists, [text](https://…) links; plain text stays valid; never send HTML (it is shown as plain text)."+
-            " Optional quiz[]: fixed quiz questions of the card. type single_choice (default; exactly 4 options + 0-based correct_index), multiple_response (3-6 options + correct_indexes = all correct 0-based indexes) or free_text (no options; explanation = model answer); every entry needs question and explanation. Omit quiz or send [] for none; AI-generated questions are managed by the server, never send them here.",
+            " Optional quiz[]: fixed quiz questions of the card. type single_choice (default; exactly 4 options + 0-based correct_index), multiple_response (3-6 options + correct_indexes = all correct 0-based indexes) or free_text (no options; explanation = model answer); every entry needs question and explanation. Omit quiz or send [] for none; AI-generated questions are managed by the server, never send them here."+
+            " Optional competencies[]: ids of the module's competencies this card teaches (the competencies themselves are part of the module definition, see get_module_import_schema).",
             CardUpsertSchema()),
         async (args, ct) =>
         {
@@ -213,7 +214,7 @@ static void RegisterCoreTools(McpServerEngine engine, LearnCardsApiClient api, M
                     "Modules (in order):",
                 };
                 foreach (var m in d["modules"]?.AsArray() ?? new JsonArray())
-                    lines.Add($"  {m?["position"]?.GetValue<int>() + 1}. {m?["name"]?.GetValue<string>()} — {m?["cards"]?.GetValue<int>()} cards, {m?["pool_questions"]?.GetValue<int>()} questions (module id: {m?["module_id"]?.GetValue<string>()})");
+                    lines.Add($"  {m?["position"]?.GetValue<int>() + 1}. {m?["name"]?.GetValue<string>()}{(m?["version"]?.GetValue<int>() is int mv && mv > 0 ? $" [module version {mv}{(m?["newer_available"]?.GetValue<bool>() == true ? ", newer state available — not adopted" : "")}]" : "")} — {m?["cards"]?.GetValue<int>()} cards, {m?["pool_questions"]?.GetValue<int>()} questions (module id: {m?["module_id"]?.GetValue<string>()})");
                 return new ToolCallResult(string.Join("\n", lines));
             }
             catch (McpApiException ex) { return new ToolCallResult($"API error {ex.StatusCode}: {ex.Message}", true); }
@@ -269,7 +270,7 @@ static void RegisterCoreTools(McpServerEngine engine, LearnCardsApiClient api, M
 
     engine.RegisterTool(
         new ToolDefinition("get_module_import_schema",
-            "Return the live JSON schema, rules and an example of the portable full module definition (format learny-module: cards with images and quiz, quiz configuration, extra pool questions). The plain card batch format stays available through get_import_schema.",
+            "Return the live JSON schema, rules and an example of the portable full module definition (format learny-module: cards with images and quiz, learning objectives and competencies, quiz configuration, extra pool questions). The plain card batch format stays available through get_import_schema.",
             """{"type": "object", "properties": {}}"""),
         async (_, ct) =>
         {
@@ -421,7 +422,7 @@ static void RegisterCoreTools(McpServerEngine engine, LearnCardsApiClient api, M
 
     engine.RegisterTool(
         new ToolDefinition("update_card",
-            "Update ONE existing card in one of YOUR OWN private modules (cards of shared, global or topic modules and other users' cards cannot be changed — you get a 404 error, code card_read_only for readable cards). Call get_import_schema first and never invent fields. Workflow: get_card → edit → update_card. card_definition is the COMPLETE new card in the canonical card JSON (category, term, question, definition, how_it_works, context, key_fact, reference_answer, chat_prompt, official_sources, slide_number, target_time_sec, quiz, images, archived, sort_order); fields you leave out are reset to their empty defaults, so always send the whole card as returned by get_card (the fields id, module, context, can_edit, created_at, updated_at in it are ignored; the card stays in its module). Text fields accept the safe formatting syntax of the schema (never HTML). quiz[] replaces the fixed quiz questions of the card (omit or [] = none). IMAGES: omit the images field = existing images are KEPT; images=[] = ALL images are REMOVED (only when explicitly wanted); images=[...] replaces the images — entries need mime_type + data_base64 (real PNG/JPEG/WebP, max 5 per card, max 2 MiB each) or only an image_id of an existing image of this card to keep it. archived and sort_order are part of the card: send archived=false/true deliberately. For concurrent edits pass expected_updated_at (updated_at from get_card): if the card changed meanwhile you get a conflict error — re-read the card and merge instead of overwriting.",
+            "Update ONE existing card in one of YOUR OWN private modules (cards of shared, global or topic modules and other users' cards cannot be changed — you get a 404 error, code card_read_only for readable cards). Call get_import_schema first and never invent fields. Workflow: get_card → edit → update_card. card_definition is the COMPLETE new card in the canonical card JSON (category, term, question, definition, how_it_works, context, key_fact, reference_answer, chat_prompt, official_sources, slide_number, target_time_sec, quiz, images, archived, sort_order); fields you leave out are reset to their empty defaults, so always send the whole card as returned by get_card (the fields id, module, context, can_edit, created_at, updated_at in it are ignored; the card stays in its module). Text fields accept the safe formatting syntax of the schema (never HTML). quiz[] replaces the fixed quiz questions of the card (omit or [] = none). IMAGES: omit the images field = existing images are KEPT; images=[] = ALL images are REMOVED (only when explicitly wanted); images=[...] replaces the images — entries need mime_type + data_base64 (real PNG/JPEG/WebP, max 5 per card, max 2 MiB each) or only an image_id of an existing image of this card to keep it. competencies[] works like images (omitted = keep, [] = remove). archived and sort_order are part of the card: send archived=false/true deliberately. For concurrent edits pass expected_updated_at (updated_at from get_card): if the card changed meanwhile you get a conflict error — re-read the card and merge instead of overwriting.",
             """
             {
               "type": "object",
@@ -964,6 +965,7 @@ static string CardUpsertSchema() =>
         "chat_prompt": {"type": "string", "description": "System prompt for the AI chatbot on this card."},
         "slide_number": {"type": "integer", "minimum": 1, "description": "Optional order in slide mode"},
         "target_time_sec": {"type": "integer", "minimum": 1, "description": "Optional target speaking time in seconds (slide mode)"},
+        "competencies": {"type": "array", "items": {"type": "string"}, "description": "Optional: ids of competencies of the module this card teaches (max 10; defined on the module, see get_module_import_schema). On update_card: omitted = keep, [] = remove."},
         "quiz": {
           "type": "array",
           "description": "Optional fixed quiz questions of this card. Default type is single_choice. Same rules as get_import_schema.",

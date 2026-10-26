@@ -22,9 +22,11 @@ public class ModuleTransferService
     private readonly CardImageService _images;
     private readonly QuizPoolService _pool;
     private readonly UserService _users;
+    private readonly CompetencyService _competencies;
 
-    public ModuleTransferService(CardRepository repo, CardImageService images, QuizPoolService pool, UserService users)
+    public ModuleTransferService(CardRepository repo, CardImageService images, QuizPoolService pool, UserService users, CompetencyService competencies)
     {
+        _competencies = competencies;
         _repo = repo;
         _images = images;
         _pool = pool;
@@ -103,6 +105,8 @@ public class ModuleTransferService
             ReferenceId = module.Scope == "private" && module.OwnerUserId is { } ownerId ? await _repo.EnsureReferenceIdAsync(module.Id, ownerId) : null,
             QuizConfig = await _pool.GetConfigAsync(module.Id, ct),
         };
+        var model = await _competencies.GetModelRawAsync(module.Id);
+        def.LearningObjectives = model.Objectives; def.Competencies = model.Competencies;
         var index = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         foreach (var c in cards)
         {
@@ -136,7 +140,7 @@ public class ModuleTransferService
     /// <summary>Liest eine Moduldefinition aus JSON; prüft Format, Version und unbekannte Felder und liefert verständliche Fehler (<see cref="ArgumentException"/>).</summary>
     public static ModuleDefinition Parse(string json)
     {
-        var def = TransferJson.Parse<ModuleDefinition>(json, TransferFormats.Module, new[] { "format", "schema_version", "reference_id", "name", "description", "icon", "color", "cards", "quiz_config", "pool_questions" });
+        var def = TransferJson.Parse<ModuleDefinition>(json, TransferFormats.Module, new[] { "format", "schema_version", "reference_id", "name", "description", "icon", "color", "cards", "learning_objectives", "competencies", "quiz_config", "pool_questions" });
         Validate(def, "");
         return def;
     }
@@ -171,6 +175,8 @@ public class ModuleTransferService
                     if (!imgOk) Err($"Karte {i + 1} ('{c.Term}'): {imgError}");
                 }
             }
+            def.LearningObjectives ??= new(); def.Competencies ??= new();
+            foreach (var e in new ModuleCompetencyModel { Objectives = def.LearningObjectives, Competencies = def.Competencies }.Validate()) Err("Kompetenzen: " + e);
             if (def.QuizConfig is not null)
                 foreach (var e in def.QuizConfig.Validate()) Err("quiz_config: " + e);
             for (var i = 0; i < def.PoolQuestions.Count && errors.Count < 10; i++)
@@ -228,6 +234,7 @@ public class ModuleTransferService
                 created.Add(await _repo.CreateCardAsync(cj, userId));
             }
             if (def.QuizConfig is not null) await _pool.SaveConfigAsync(module.Id, def.QuizConfig, ct);
+            await _competencies.WriteRawAsync(module.Id, new ModuleCompetencyModel { Objectives = def.LearningObjectives, Competencies = def.Competencies });
             foreach (var q in def.PoolQuestions)
             {
                 var card = q.CardIndex is { } ci ? created[ci] : null;

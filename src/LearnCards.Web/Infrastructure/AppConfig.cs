@@ -50,6 +50,9 @@ public class AppConfig
     // Blockchain-Verankerung und Badge-Signierung (ADR 0021/0022)
     public BlockchainSettings Blockchain { get; set; } = new();
 
+    // PDF-Signatur der Zertifikate (ADR 0033)
+    public PdfSigningSettings PdfSigning { get; set; } = new();
+
     // MCP
     public string McpApiKey { get; set; } = "";
     /// <summary>
@@ -124,6 +127,10 @@ public class AppConfig
         // ── Blockchain (ADR 0022): Konfiguration beim Start prüfen; Mainnet nie implizit ──
         cfg.Blockchain = BlockchainSettings.Load(Path.GetFullPath("data"));
         cfg.Blockchain.EnsureValid();
+
+        // ── PDF-Signatur (ADR 0033): eigenes Signaturzertifikat aus der .env; Entwicklungszertifikat nur in Development ──
+        var envName = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ?? "Production";
+        cfg.PdfSigning = PdfSigningSettings.Load(Path.GetFullPath("data"), envName.Equals("Development", StringComparison.OrdinalIgnoreCase));
 
         // ── Datenbank-Provider bestimmen ────────────────────────────────
         var provider = E("DB_PROVIDER", "auto").ToLowerInvariant();

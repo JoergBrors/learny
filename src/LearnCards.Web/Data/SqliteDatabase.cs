@@ -38,6 +38,14 @@ public sealed class SqliteDatabase : IDatabase
             EnsureColumn("cards", "slide_number", "INTEGER NULL");
             EnsureColumn("cards", "target_time_sec", "INTEGER NULL");
             EnsureColumn("cards", "quiz_json", "TEXT NOT NULL DEFAULT '[]'");
+            EnsureColumn("cards", "competencies_json", "TEXT NOT NULL DEFAULT '[]'");   // ADR 0031: Kompetenz-IDs der Karte
+            EnsureColumn("certificates", "snapshot_id", "TEXT NULL");   // ADR 0031: Prüfungssnapshot des Abschlusses
+            EnsureColumn("certificates", "snapshot_hash", "TEXT NOT NULL DEFAULT ''");
+            EnsureColumn("certificates", "kind", "TEXT NOT NULL DEFAULT 'module'");   // ADR 0032: 'module' | 'topic' (Themenabschluss: Master-Badge + CLR)
+            EnsureColumn("certificates", "clr_jws", "TEXT NULL");
+            EnsureColumn("certificates", "clr_hash", "TEXT NOT NULL DEFAULT ''");
+            EnsureColumn("certificates", "completed_at", "TEXT NULL");
+            EnsureColumn("exam_snapshots", "kind", "TEXT NOT NULL DEFAULT 'module'");
             EnsureColumn("cards", "images_json", "TEXT NOT NULL DEFAULT '[]'");   // ADR 0016 (seit ADR 0017 nur noch Altbestand)
             EnsureColumn("cards", "images_migrated", "INTEGER NOT NULL DEFAULT 0");   // ADR 0017: 1 = Bilder liegen in card_images
             EnsureColumn("cards", "quiz_synced", "INTEGER NOT NULL DEFAULT 0");   // ADR 0019: 1 = quiz[] ist in den Fragenpool übernommen
@@ -52,6 +60,7 @@ public sealed class SqliteDatabase : IDatabase
             EnsureColumn("mcp_links", "row_mac", "TEXT NOT NULL DEFAULT ''");
             EnsureColumn("mcp_link_codes", "key_id", "TEXT NOT NULL DEFAULT ''");
             EnsureColumn("mcp_link_codes", "row_mac", "TEXT NOT NULL DEFAULT ''");
+            EnsureColumn("topic_modules", "module_version", "INTEGER NULL");   // ADR 0030: festgelegte Modulversion im Themenentwurf (NULL = Altbestand, wird beim ersten Zugriff festgeschrieben)
             EnsureColumn("modules", "reference_id", "TEXT NULL");   // ADR 0028: stabile Modulreferenz für portable JSON-Definitionen
             ExecRaw("CREATE UNIQUE INDEX IF NOT EXISTS ux_modules_owner_reference ON modules(owner_user_id, reference_id)");
             EnsureColumn("topic_assignments", "topic_version", "INTEGER NULL");   // ADR 0029: Zuweisung an eine konkrete Themenversion (NULL = Altbestand: neueste veröffentlichte)

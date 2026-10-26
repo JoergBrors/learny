@@ -93,6 +93,13 @@ public static class CardImportSchema
                 ["nullable"] = true,
                 ["description"] = "Optional target speaking time in seconds for slide mode.",
             },
+            ["competencies"] = new JsonObject
+            {
+                ["type"] = "array",
+                ["nullable"] = true,
+                ["items"] = new JsonObject { ["type"] = "string", ["pattern"] = "^[a-z0-9][a-z0-9._-]{0,63}$" },
+                ["description"] = "Optional: ids of the competencies this card teaches (max 10). The competencies and learning objectives are defined on the module (see module schema: learning_objectives, competencies; or PUT /api/modules/{id}/competencies). A competency counts as demonstrated only if enough of its questions were asked in a verified module quiz and the pass percent was reached. On update: omitted = keep, [] = remove.",
+            },
             ["quiz"] = new JsonObject
             {
                 ["type"] = "array",

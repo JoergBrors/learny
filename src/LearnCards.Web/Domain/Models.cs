@@ -56,6 +56,8 @@ public class Card
     public int? SlideNumber { get; set; }
     public int? TargetTimeSec { get; set; }
     public List<CardQuizQuestion> Quiz { get; set; } = new();
+    /// <summary>Kompetenz-IDs dieser Karte (ADR 0031); die Kompetenzen sind am Modul definiert.</summary>
+    public List<string> Competencies { get; set; } = new();
     /// <summary>Optionale Bilder (Base64, ADR 0016); leer = keine Bilder.</summary>
     public List<CardImage> Images { get; set; } = new();
     public bool Archived { get; set; }
@@ -145,6 +147,8 @@ public class CardJson
     public int? SlideNumber { get; set; }
     public int? TargetTimeSec { get; set; }
     public List<CardQuizQuestion> Quiz { get; set; } = new();
+    /// <summary>Optional (ADR 0031): IDs der Kompetenzen, die diese Karte vermittelt (am Modul definiert; unbekannte IDs werden beim Nachweis ignoriert). Fehlend = keine.</summary>
+    public List<string>? Competencies { get; set; }
     /// <summary>
     /// Optionale Bilder (ADR 0016). <c>null</c> = Feld fehlt: neue Karte ohne Bilder, bestehende Karte behält ihre Bilder;
     /// <c>[]</c> = Bilder bewusst entfernen.
@@ -175,6 +179,11 @@ public class CardJson
         {
             var (quizOk, quizError) = quiz.Validate();
             if (!quizOk) return (false, quizError);
+        }
+        if (Competencies is { } comps)
+        {
+            if (comps.Count > CompetencyRules.MaxCardCompetencies) return (false, $"Höchstens {CompetencyRules.MaxCardCompetencies} Kompetenzen je Karte");
+            if (comps.Any(c => !CompetencyRules.IsValidId(c))) return (false, "'competencies' enthält eine ungültige Kompetenz-ID (Kleinbuchstaben, Ziffern, . _ -)");
         }
         var (imagesOk, imagesError) = CardImageValidator.ValidateAndNormalize(Images);
         if (!imagesOk) return (false, imagesError);

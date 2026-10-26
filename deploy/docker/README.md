@@ -213,6 +213,9 @@ Pflicht: **PostgreSQL-Betrieb** → `POSTGRES_PASSWORD`; **OIDC-Betrieb** → `O
 | `OPENAI_MODEL` | web | nein | `gpt-4o-mini` | Modell. |
 | `OPENAI_BASE_URL` | web | nein | `https://api.openai.com/v1` | Basis-URL einer OpenAI-kompatiblen API. |
 | `BADGE_SIGNING_KEY_PEM` | web | nein | leer | Signaturschlüssel der Badges (ECDSA P-256, PKCS#8-PEM). Leer = Schlüssel wird beim ersten Start im Volume erzeugt. |
+| `PDF_SIGNING_CERT_FILE` | web | nein | leer | PKCS#12-Datei (im Container eingebunden) mit dem eigenen PDF-Signaturzertifikat für signierte Zertifikats-PDFs (ADR 0033). Leer (und ohne Base64-Variante) = keine PDFs (503). Siehe `docs/pdf-signature.md`. |
+| `PDF_SIGNING_CERT_PASSWORD` | web | nein | leer | Passwort der PKCS#12-Datei bzw. -Base64-Variante. Streng geheim. |
+| `PDF_SIGNING_CERT_PFX_BASE64` | web | nein | leer | PKCS#12 als Base64-Text (Secret-Verwaltung); hat Vorrang vor `PDF_SIGNING_CERT_FILE`. |
 | `BLOCKCHAIN_ENABLED` | web | nein | `true` | Verankerung ein/aus (aus = nur signierte Badges). |
 | `BLOCKCHAIN_NETWORK` | web | nein | `polygon-amoy` | Netzwerk (Testnetz); Mainnet `polygon-mainnet` braucht zusätzlich Admin-Freigabe. |
 | `BLOCKCHAIN_AUTO_ANCHOR` | web | nein | `true` | Automatische Bündelung und Verankerung. |

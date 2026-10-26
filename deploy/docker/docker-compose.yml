@@ -81,6 +81,10 @@ services:
       # Zertifikate / Open Badges / Blockchain (ADR 0021/0022). Der Badge-Schlüssel wird beim ersten Start im Volume erzeugt
       # (/app/data/badge-signing-key.pem); BADGE_SIGNING_KEY_PEM (Secret-Verwaltung) hat Vorrang.
       BADGE_SIGNING_KEY_PEM: ${BADGE_SIGNING_KEY_PEM:-}
+      # PDF-Signatur der Zertifikate (ADR 0033): eigenes X.509-Zertifikat; ohne Konfiguration keine PDFs (503). Secrets nur über Umgebung/.env
+      PDF_SIGNING_CERT_FILE: ${PDF_SIGNING_CERT_FILE:-}
+      PDF_SIGNING_CERT_PASSWORD: ${PDF_SIGNING_CERT_PASSWORD:-}
+      PDF_SIGNING_CERT_PFX_BASE64: ${PDF_SIGNING_CERT_PFX_BASE64:-}
       BLOCKCHAIN_ENABLED: ${BLOCKCHAIN_ENABLED:-true}
       BLOCKCHAIN_NETWORK: ${BLOCKCHAIN_NETWORK:-polygon-amoy}
       BLOCKCHAIN_AUTO_ANCHOR: ${BLOCKCHAIN_AUTO_ANCHOR:-true}

@@ -37,6 +37,9 @@ public class ModuleDefinition
     public string Icon { get; set; } = "📚";
     public string Color { get; set; } = "#2AA79B";
     public List<CardJson> Cards { get; set; } = new();
+    /// <summary>Lernziele (ADR 0031); Kompetenzen verweisen darauf, Karten verweisen über <c>competencies[]</c> auf Kompetenzen.</summary>
+    public List<LearningObjective> LearningObjectives { get; set; } = new();
+    public List<Competency> Competencies { get; set; } = new();
     public QuizConfig? QuizConfig { get; set; }
     public List<ModulePoolQuestionDefinition> PoolQuestions { get; set; } = new();
 }

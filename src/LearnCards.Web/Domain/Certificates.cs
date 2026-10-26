@@ -78,6 +78,17 @@ public class Certificate
     public int ChainAttempts { get; set; }
     public DateTime? ChainUpdatedAt { get; set; }
     public DateTime? AnchoredAt { get; set; }
+    /// <summary>Unveränderlicher Prüfungssnapshot des Abschlusses (ADR 0031); null bei Altzertifikaten.</summary>
+    public string? SnapshotId { get; set; }
+    public string SnapshotHash { get; set; } = "";
+    /// <summary><c>module</c> (Modulabschluss) oder <c>topic</c> (Themenabschluss: <c>BadgeJws</c> = Master-Badge, <c>ClrJws</c> = CLR; <c>ModuleId</c>/<c>ModuleName</c>/<c>ModuleVersion</c> = Thema).</summary>
+    public string Kind { get; set; } = "module";
+    /// <summary>Signiertes ClrCredential (VC-JWT) — nur bei Themenabschlüssen.</summary>
+    public string? ClrJws { get; set; }
+    public string ClrHash { get; set; } = "";
+    /// <summary>Tatsächlicher Abschlusszeitpunkt (nicht Ausstellung, nicht letzte Lernaktivität); null bei Altzertifikaten (dann gilt <c>IssuedAt</c>).</summary>
+    public DateTime? CompletedAt { get; set; }
+    public bool IsTopic => Kind == "topic";
 
     public bool IsRevoked => Status == "revoked";
     /// <summary>Note nach deutscher Skala (1–6), berechnet aus dem Ergebnis in Prozent.</summary>

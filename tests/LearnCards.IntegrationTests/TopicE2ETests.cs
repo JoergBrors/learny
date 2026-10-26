@@ -208,6 +208,10 @@ public static class TopicE2ETests
         var impChange = await tina.PostAsync("/api/import/cards", Body(new { overwrite_existing = true, cards = new object[] { new { id = S(aCards[0], "id"), module = "TE-Entra", category = "Kat", term = S(aCards[0], "term"), question = "Geänderte Frage?", definition = "Geänderte Definition" } } }));
         var changedCard = await J(await tina.GetAsync($"/api/cards/{S(aCards[0], "id")}"));
         check(impChange.IsSuccessStatusCode && S(changedCard, "definition") == "Geänderte Definition", $"T44a Ausgangslage: Karte des Originalmoduls wurde geändert ({(int)impChange.StatusCode}: {S(changedCard, "definition")})");
+        var beforeAdopt = await J(await tina.GetAsync($"/api/topics/{topicId}"));
+        check(!beforeAdopt!["unpublished_changes"]!.GetValue<bool>() && beforeAdopt["modules"]!.AsArray().First(m => S(m, "module_id") == A)["newer_available"]!.GetValue<bool>(),
+            "T44b Geänderter Modulinhalt wird im Entwurf nur als „neuerer Stand verfügbar“ gemeldet, nicht stillschweigend übernommen (ADR 0030)");
+        check((await tina.PostAsync($"/api/topics/{topicId}/modules/{A}/adopt", Body(new { }))).IsSuccessStatusCode, "T44c Neuer Modulstand wird ausdrücklich in den Entwurf übernommen");
         check((await J(await tina.GetAsync($"/api/topics/{topicId}")))!["unpublished_changes"]!.GetValue<bool>()
               && S(await J(await tina.GetAsync($"/api/topics/{topicId}")), "changed_module_names.0") == "TE-Entra", "T45 Geänderter Modulinhalt wird als unveröffentlichte Änderung erkannt (betroffenes Modul genannt)");
         var vNew = await J(await tina.PostAsync($"/api/topics/{topicId}/versions", Body(new { })));

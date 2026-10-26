@@ -241,13 +241,20 @@ public partial class TopicService
         if (errors.Count > 0) throw new ArgumentException(string.Join(" ", errors));
 
         await _db.ExecuteAsync("UPDATE topics SET name = @n, description = @d, updated_at = @now WHERE id = @id", new (string, object?)[] { ("n", def.Name), ("d", def.Description), ("now", DateTime.UtcNow), ("id", topic.Id) });
+        // bereits festgelegte Modulversionen bleiben erhalten (keine stillschweigende Übernahme neuerer Stände); neue Module werden auf den aktuellen Stand festgelegt (ADR 0030)
+        var oldPins = (await ListDraftModuleRowsAsync(topic.Id)).Where(r => r.Version is not null).ToDictionary(r => r.ModuleId, r => r.Version, StringComparer.OrdinalIgnoreCase);
         await _db.ExecuteAsync("DELETE FROM topic_modules WHERE topic_id = @t", new[] { ("t", (object?)topic.Id) });
         for (var i = 0; i < resolved.Count; i++)
-            await _db.ExecuteAsync("INSERT INTO topic_modules (topic_id, module_id, sort_order, added_at) VALUES (@t, @m, @s, @n)", new (string, object?)[] { ("t", topic.Id), ("m", resolved[i].Module.Id), ("s", i), ("n", DateTime.UtcNow) });
+        {
+            await _db.ExecuteAsync("INSERT INTO topic_modules (topic_id, module_id, sort_order, added_at, module_version) VALUES (@t, @m, @s, @n, @v)",
+                new (string, object?)[] { ("t", topic.Id), ("m", resolved[i].Module.Id), ("s", i), ("n", DateTime.UtcNow), ("v", oldPins.GetValueOrDefault(resolved[i].Module.Id)) });
+        }
         await SaveExamConfigRawAsync(topic.Id, cfg);
         await _db.ExecuteAsync("DELETE FROM topic_questions WHERE topic_id = @t", new[] { ("t", (object?)topic.Id) });
         foreach (var q in def.TopicQuestions)
             await CreateQuestionRawAsync(topic.Id, new QuizQuestionInput { Type = q.Type, Question = q.Question, Options = q.Options.ToList(), CorrectIndexes = q.CorrectIndexes.ToList(), Explanation = q.Explanation ?? "" }, q.Active);
+        // Modulversionen erst zuletzt festlegen: scheitert ein früherer Schritt, entstehen keine Modulversionen (alles oder nichts, ADR 0028/0030)
+        foreach (var r in resolved.Where(r => !oldPins.ContainsKey(r.Module.Id))) await PinModuleAsync(topic.OwnerUserId, topic.Id, r.Module.Id, null);
         await TouchDraftAsync(topic.Id);
     }
 
@@ -256,7 +263,7 @@ public partial class TopicService
         await _db.ExecuteAsync("UPDATE topics SET name = @n, description = @d WHERE id = @id", new (string, object?)[] { ("n", b.Name), ("d", b.Description), ("id", topicId) });
         await _db.ExecuteAsync("DELETE FROM topic_modules WHERE topic_id = @t", new[] { ("t", (object?)topicId) });
         foreach (var m in b.Modules)
-            await _db.ExecuteAsync("INSERT INTO topic_modules (topic_id, module_id, sort_order, added_at) VALUES (@t, @m, @s, @n)", new (string, object?)[] { ("t", topicId), ("m", m.ModuleId), ("s", m.SortOrder), ("n", DateTime.UtcNow) });
+            await _db.ExecuteAsync("INSERT INTO topic_modules (topic_id, module_id, sort_order, added_at, module_version) VALUES (@t, @m, @s, @n, @v)", new (string, object?)[] { ("t", topicId), ("m", m.ModuleId), ("s", m.SortOrder), ("n", DateTime.UtcNow), ("v", m.Version) });
         await SaveExamConfigRawAsync(topicId, b.Config);
         await _db.ExecuteAsync("DELETE FROM topic_questions WHERE topic_id = @t", new[] { ("t", (object?)topicId) });
         foreach (var q in b.Questions)
@@ -297,7 +304,8 @@ public partial class TopicService
         var clone = await _modules.CloneGlobalAsync(ownerId, row.ModuleId);
         try
         {
-            await _db.ExecuteAsync("UPDATE topic_modules SET module_id = @new WHERE topic_id = @t AND module_id = @old", new (string, object?)[] { ("new", clone.Id), ("t", topic.Id), ("old", row.ModuleId) });
+            await _db.ExecuteAsync("UPDATE topic_modules SET module_id = @new, module_version = NULL WHERE topic_id = @t AND module_id = @old", new (string, object?)[] { ("new", clone.Id), ("t", topic.Id), ("old", row.ModuleId) });
+            await PinModuleAsync(ownerId, topic.Id, clone.Id, null);
             var cfg = await LoadExamConfigAsync(topic.Id);
             if (cfg.ModuleExams.Remove(row.ModuleId, out var exam)) cfg.ModuleExams[clone.Id] = exam;
             if (cfg.FinalExam.ManualCounts.Remove(row.ModuleId, out var count)) cfg.FinalExam.ManualCounts[clone.Id] = count;

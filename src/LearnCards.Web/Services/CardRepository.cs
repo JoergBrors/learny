@@ -104,8 +104,27 @@ public partial class CardRepository
         var deleted = await _db.ExecuteAsync("DELETE FROM modules WHERE id = @id AND owner_user_id = @owner",
             new (string, object?)[] { ("id", id), ("owner", ownerId) });
         if (deleted > 0) await _images.CleanupOrphansAsync(imageRefs);   // Binärdaten ohne weitere Verweise entfernen (Kopien/Freigaben behalten ihre)
+        if (deleted > 0) await DeleteUnusedModuleVersionsAsync(id);   // Versionsindex; eingefrorene Kopien nur, wenn keine Themenversion sie verwendet (ADR 0030)
         if (deleted > 0) await _db.ExecuteAsync("DELETE FROM topic_modules WHERE module_id = @id", new[] { ("id", (object?)id) });   // nur die Zuordnung zu Themenentwürfen; veröffentlichte Versionen behalten ihre eingefrorenen Kopien (ADR 0027)
         return deleted;
+    }
+
+    /// <summary>
+    /// Entfernt die Modulversionen eines gelöschten Moduls. Eingefrorene Kopien, die eine veröffentlichte Themenversion verwendet, bleiben erhalten
+    /// (unveränderlich, ADR 0027/0030); alle anderen werden samt Bildern entfernt.
+    /// </summary>
+    private async Task DeleteUnusedModuleVersionsAsync(string moduleId)
+    {
+        var snapshots = (await _db.QueryAsync("""
+            SELECT snapshot_module_id FROM module_versions mv
+            WHERE mv.module_id = @m AND NOT EXISTS (SELECT 1 FROM topic_version_modules vm WHERE vm.module_id = mv.snapshot_module_id)
+            """, new[] { ("m", (object?)moduleId) })).Select(r => r["snapshot_module_id"] ?? "").Where(x => x.Length > 0).ToList();
+        await _db.ExecuteAsync("DELETE FROM module_versions WHERE module_id = @m", new[] { ("m", (object?)moduleId) });
+        foreach (var snap in snapshots)
+        {
+            var refs = await _images.CollectForModuleAsync(snap);
+            if (await _db.ExecuteAsync("DELETE FROM modules WHERE id = @id AND scope = 'topic'", new[] { ("id", (object?)snap) }) > 0) await _images.CleanupOrphansAsync(refs);
+        }
     }
 
     // ─── Karten ─────────────────────────────────────────────────────────────
@@ -193,6 +212,7 @@ public partial class CardRepository
             SlideNumber = data.SlideNumber,
             TargetTimeSec = data.TargetTimeSec,
             Quiz = data.Quiz,
+            Competencies = (data.Competencies ?? new()).Distinct(StringComparer.Ordinal).ToList(),
             Archived = data.Archived,
             SortOrder = data.SortOrder,
         };
@@ -223,11 +243,11 @@ public partial class CardRepository
     private Task InsertCardAsync(Card c) => _db.ExecuteAsync("""
         INSERT INTO cards (id, module_id, owner_user_id, category, term, question, definition, how_it_works,
                            context, key_fact, reference_answer, chat_prompt, official_sources_json,
-                           slide_number, target_time_sec, quiz_json, images_json, images_migrated,
+                           slide_number, target_time_sec, quiz_json, competencies_json, images_json, images_migrated,
                            archived, sort_order, created_at, updated_at)
         VALUES (@id, @module_id, @owner_user_id, @category, @term, @question, @definition, @how_it_works,
                 @context, @key_fact, @reference_answer, @chat_prompt, @official_sources_json,
-                @slide_number, @target_time_sec, @quiz_json, @images_json, @images_migrated,
+                @slide_number, @target_time_sec, @quiz_json, @competencies_json, @images_json, @images_migrated,
                 @archived, @sort_order, @created_at, @updated_at)
         """, CardArgs(c));
 
@@ -259,6 +279,7 @@ public partial class CardRepository
         card.SlideNumber = data.SlideNumber;
         card.TargetTimeSec = data.TargetTimeSec;
         card.Quiz = data.Quiz;
+        if (data.Competencies is not null) card.Competencies = data.Competencies.Distinct(StringComparer.Ordinal).ToList();   // fehlend = behalten, [] = entfernen (wie images)
         if (data.Images is not null)   // fehlendes images = bestehende Bilder behalten; [] = entfernen
         {
             EnsureValidImages(data.Images);
@@ -271,7 +292,7 @@ public partial class CardRepository
             UPDATE cards SET category=@category, term=@term, question=@question, definition=@definition,
                 how_it_works=@how_it_works, context=@context, key_fact=@key_fact, reference_answer=@reference_answer,
                 chat_prompt=@chat_prompt, official_sources_json=@official_sources_json,
-                slide_number=@slide_number, target_time_sec=@target_time_sec, quiz_json=@quiz_json,
+                slide_number=@slide_number, target_time_sec=@target_time_sec, quiz_json=@quiz_json, competencies_json=@competencies_json,
                 archived=@archived, sort_order=@sort_order, updated_at=@updated_at
             WHERE id=@id AND owner_user_id=@owner_user_id
             """, CardArgs(card));
@@ -284,7 +305,7 @@ public partial class CardRepository
     {
         Id = c.Id, Module = moduleName, Category = c.Category, Term = c.Term, Question = c.Question, Definition = c.Definition, HowItWorks = c.HowItWorks,
         Context = c.Context, KeyFact = c.KeyFact, ReferenceAnswer = c.ReferenceAnswer, ChatPrompt = c.ChatPrompt, OfficialSources = c.OfficialSources.ToList(),
-        SlideNumber = c.SlideNumber, TargetTimeSec = c.TargetTimeSec, Quiz = c.Quiz.ToList(), Images = null, Archived = c.Archived, SortOrder = c.SortOrder,
+        SlideNumber = c.SlideNumber, TargetTimeSec = c.TargetTimeSec, Quiz = c.Quiz.ToList(), Competencies = c.Competencies.ToList(), Images = null, Archived = c.Archived, SortOrder = c.SortOrder,
     };
 
     /// <summary>
@@ -631,6 +652,7 @@ public partial class CardRepository
         SlideNumber = ParseNullableInt(r.GetValueOrDefault("slide_number")),
         TargetTimeSec = ParseNullableInt(r.GetValueOrDefault("target_time_sec")),
         Quiz = ParseCardQuiz(r.GetValueOrDefault("quiz_json")),
+        Competencies = ParseCompetencies(r.GetValueOrDefault("competencies_json")),
         Archived = DbValue.ToBool(r.GetValueOrDefault("archived")),
         SortOrder = DbValue.ToInt(r.GetValueOrDefault("sort_order")),
         CreatedAt = DbValue.ToDateTime(r.GetValueOrDefault("created_at")),
@@ -684,9 +706,17 @@ public partial class CardRepository
         ("question", c.Question), ("definition", c.Definition), ("how_it_works", c.HowItWorks),
         ("context", c.Context), ("key_fact", c.KeyFact), ("reference_answer", c.ReferenceAnswer),
         ("chat_prompt", c.ChatPrompt), ("official_sources_json", JsonSerializer.Serialize(c.OfficialSources, AppJson.Options)),
-        ("slide_number", c.SlideNumber), ("target_time_sec", c.TargetTimeSec), ("quiz_json", JsonSerializer.Serialize(c.Quiz, AppJson.Options)), ("images_json", "[]"), ("images_migrated", 1),
+        ("slide_number", c.SlideNumber), ("target_time_sec", c.TargetTimeSec), ("quiz_json", JsonSerializer.Serialize(c.Quiz, AppJson.Options)), ("competencies_json", JsonSerializer.Serialize(c.Competencies, AppJson.Options)), ("images_json", "[]"), ("images_migrated", 1),
         ("archived", c.Archived), ("sort_order", c.SortOrder), ("created_at", c.CreatedAt), ("updated_at", c.UpdatedAt),
     };
+
+    /// <summary>Kompetenz-IDs einer Karte aus <c>competencies_json</c> (fehlerhafte Daten ergeben eine leere Liste).</summary>
+    public static List<string> ParseCompetencies(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return new();
+        try { return JsonSerializer.Deserialize<List<string>>(json, AppJson.Options) ?? new(); }
+        catch (JsonException) { return new(); }
+    }
 
     private static List<OfficialSource> ParseOfficialSources(string? json)
     {

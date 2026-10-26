@@ -5,6 +5,7 @@
 @inject CertificateService Certs
 @inject ModuleTransferService Transfer
 @inject TopicService TopicSvc
+@inject ModuleVersionService ModuleVersions
 @inject NavigationManager Nav
 @inject AuthenticationStateProvider AuthState
 
@@ -205,6 +206,8 @@
                         <div class="module-top">
                             <span class="module-icon" aria-hidden="true">@mod.Icon</span>
                             <span class="pill">@mod.ActiveCount Karten</span>
+                            @if (_tab == "private" && _latestVersions.TryGetValue(mod.Id, out var lv)) { <span class="pill" title="Neueste veröffentlichte Modulversion">V@(lv)</span> }
+                            else if (_tab == "private") { <span class="pill" title="Noch keine Modulversion veröffentlicht">Entwurf</span> }
                         </div>
                         <h2>@mod.Name</h2>
                         @if (_tab == "private" && _usage.TryGetValue(mod.Id, out var uses) && uses.Count > 0)
@@ -252,6 +255,7 @@
 
 @code {
     private List<ModuleInfo> _modules = new();
+    private Dictionary<string, int> _latestVersions = new();
     private List<ModuleInfo> _shared = new();
     private List<ModuleInfo> _global = new();
     private string _tab = "private";
@@ -298,6 +302,7 @@
     {
         _loading = true;
         _modules = await Repo.ListModulesAsync(_userId);
+        _latestVersions = await ModuleVersions.ListLatestVersionNumbersAsync(_userId);
         _shared = await Repo.ListSharedWithMeAsync(_userId);
         _global = await Repo.ListGlobalModulesAsync();
         // bestandene Module: jüngstes Zertifikat je Modul (bei globalen Modulen gehört es zur jeweiligen Version)

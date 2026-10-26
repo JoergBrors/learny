@@ -41,6 +41,12 @@ builder.Services.AddSingleton<McpTokenProtector>();   // ADR 0025
 builder.Services.AddSingleton<McpLinkService>();
 builder.Services.AddSingleton<McpOAuthClientStore>();
 builder.Services.AddSingleton<SharingService>();
+builder.Services.AddSingleton<PdfVerificationService>();   // Upload-Prüfung signierter Zertifikats-PDFs (ADR 0033)
+builder.Services.AddSingleton<CertificatePdfService>();   // signierte Zertifikats-PDFs (ADR 0033)
+builder.Services.AddSingleton<PdfSigningProvider>();   // PDF-Signaturzertifikat (ADR 0033)
+builder.Services.AddSingleton<TopicCredentialService>();   // Themenabschluss: Master-Badge + CLR (ADR 0032)
+builder.Services.AddSingleton<CompetencyService>();   // Kompetenzmodell und Prüfungssnapshots (ADR 0031)
+builder.Services.AddSingleton<ModuleVersionService>();   // Modulversionen (ADR 0030)
 builder.Services.AddSingleton<ModuleTransferService>();   // Modul-JSON, Klonen (ADR 0028)
 builder.Services.AddSingleton<TopicService>();   // Themen (ADR 0027)
 // Zertifikate, Open Badges und Blockchain-Verankerung (ADR 0021/0022)
@@ -169,6 +175,10 @@ if (badgeSigner.GeneratedKeyFile && (await db.QueryAsync("SELECT id FROM certifi
     try { File.Delete(cfg.Blockchain.BadgeKeyFile); File.Delete(BadgeSigner.MarkerPath(cfg.Blockchain.BadgeKeyFile)); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     throw new InvalidOperationException("Es existieren bereits Zertifikate, der Badge-Signaturschlüssel fehlt aber. Es wird kein neuer Schlüssel verwendet, damit ausgestellte Badges gültig bleiben. Schlüssel aus der Sicherung wiederherstellen (docs/iis-deployment.md).");
 }
+var pdfSigning = app.Services.GetRequiredService<PdfSigningProvider>();   // konfiguriertes PDF-Signaturzertifikat beim Start prüfen (ADR 0033); unbrauchbar = Startabbruch
+pdfSigning.EnsureValidAtStartup();
+if (pdfSigning.Configured) app.Logger.LogInformation("PDF-Signatur: Zertifikat {Thumbprint}{Dev}.", pdfSigning.Thumbprint, pdfSigning.IsDevCertificate ? " (selbstsigniertes Entwicklungszertifikat, nicht vertrauenswürdig)" : "");
+else app.Logger.LogWarning("PDF-Signatur: kein Signaturzertifikat konfiguriert (PDF_SIGNING_CERT_FILE / PDF_SIGNING_CERT_PFX_BASE64) — signierte Zertifikats-PDFs sind nicht verfügbar.");
 var imageService = app.Services.GetRequiredService<CardImageService>();
 var convertedImages = await imageService.MigrateLegacyInlineImagesAsync();
 if (convertedImages > 0) app.Logger.LogInformation("Bilder von {Count} Karten in den Bildspeicher überführt (images_json bleibt unverändert).", convertedImages);

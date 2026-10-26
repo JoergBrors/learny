@@ -37,6 +37,25 @@ public partial class CardRepository
         return rows.Count > 0;
     }
 
+    /// <summary>Ist die eingefrorene Kopie eine Version eines Moduls dieses Benutzers (ADR 0030)? Dann darf er sie lesen (nie ändern).</summary>
+    private async Task<bool> OwnsModuleVersionSnapshotAsync(string userId, string snapshotModuleId) =>
+        (await _db.QueryAsync("""
+            SELECT 1 FROM module_versions mv JOIN modules m ON m.id = mv.module_id
+            WHERE mv.snapshot_module_id = @s AND m.owner_user_id = @u LIMIT 1
+            """, new (string, object?)[] { ("s", snapshotModuleId), ("u", userId) })).Count > 0;
+
+    /// <summary>Ist die eingefrorene Kopie das (kartenlose) Prüfungsmodul der Abschlussprüfung einer Themenversion?</summary>
+    public async Task<bool> IsTopicFinalExamModuleAsync(string moduleId) =>
+        (await _db.QueryAsync("SELECT 1 FROM topic_version_modules WHERE module_id = @m AND role = 'final_exam' LIMIT 1", new[] { ("m", (object?)moduleId) })).Count > 0;
+
+    /// <summary>Kopiert Lernziele und Kompetenzen eines Moduls in ein anderes (eingefrorene Kopien); ohne Quellmodell passiert nichts.</summary>
+    private async Task CopyCompetencyModelAsync(string sourceModuleId, string targetModuleId)
+    {
+        var rows = await _db.QueryAsync("SELECT definition_json FROM module_competencies WHERE module_id = @m", new[] { ("m", (object?)sourceModuleId) });
+        if (rows.Count == 0) return;
+        await _db.ExecuteAsync("INSERT INTO module_competencies (module_id, definition_json, updated_at) VALUES (@m, @j, @t)", new (string, object?)[] { ("m", targetModuleId), ("j", rows[0]["definition_json"] ?? "{}"), ("t", DateTime.UtcNow) });
+    }
+
     /// <summary>Alle aktiven Karten eines Moduls (inkl. Bildmetadaten) — nur für interne Snapshot-Erzeugung und Prüfungsaufbau, nach vorheriger Berechtigungsprüfung.</summary>
     public async Task<List<Card>> ListActiveCardsRawAsync(string moduleId)
     {
@@ -60,12 +79,14 @@ public partial class CardRepository
             var c = cards[i];
             index[c.Id] = i;
             Add("c", i, c.Category, c.Term, c.Question, c.Definition, c.HowItWorks, c.Context, c.KeyFact, c.ReferenceAnswer, c.ChatPrompt, c.SlideNumber, c.TargetTimeSec,
-                JsonSerializer.Serialize(c.OfficialSources, AppJson.Options), JsonSerializer.Serialize(c.Quiz, AppJson.Options),
+                JsonSerializer.Serialize(c.OfficialSources, AppJson.Options), JsonSerializer.Serialize(c.Quiz, AppJson.Options), string.Join(",", c.Competencies.OrderBy(x => x, StringComparer.Ordinal)),
                 string.Join(",", c.Images.OrderBy(im => im.SortOrder).Select(im => im.Checksum + ":" + im.SortOrder)));
         }
         foreach (var q in (await _quizPool.ListAsync(module.Id, null, null, true)).OrderBy(q => q.Question, StringComparer.Ordinal).ThenBy(q => q.Type, StringComparer.Ordinal))
             Add("q", q.CardId is not null && index.TryGetValue(q.CardId, out var ci) ? ci : -1, q.Type, q.Question, string.Join("|", q.Options), string.Join(",", q.CorrectIndexes), q.Explanation, q.Origin);
         Add("cfg", JsonSerializer.Serialize(await _quizPool.GetConfigAsync(module.Id), AppJson.Options));
+        var comp = await _db.QueryAsync("SELECT definition_json FROM module_competencies WHERE module_id = @m", new[] { ("m", (object?)module.Id) });
+        if (comp.Count > 0) Add("comp", comp[0]["definition_json"]);
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sb.ToString()))).ToLowerInvariant();
     }
 
@@ -125,7 +146,7 @@ public partial class CardRepository
             {
                 ModuleId = copy.Id, OwnerUserId = null, Category = c.Category, Term = c.Term, Question = c.Question, Definition = c.Definition,
                 HowItWorks = c.HowItWorks, Context = c.Context, KeyFact = c.KeyFact, ReferenceAnswer = c.ReferenceAnswer, ChatPrompt = c.ChatPrompt,
-                OfficialSources = c.OfficialSources, SlideNumber = c.SlideNumber, TargetTimeSec = c.TargetTimeSec, Quiz = c.Quiz, Archived = false, SortOrder = c.SortOrder,
+                OfficialSources = c.OfficialSources, SlideNumber = c.SlideNumber, TargetTimeSec = c.TargetTimeSec, Quiz = c.Quiz, Competencies = c.Competencies, Archived = false, SortOrder = c.SortOrder,
             };
             await InsertCardAsync(copyCard);
             await _images.CopyForCardAsync(c.Id, copyCard.Id);
@@ -133,6 +154,7 @@ public partial class CardRepository
         }
         await _quizPool.CopyForStagedModuleAsync(source.Id, copy.Id, cardIdMap, topicVersion);
         await _db.ExecuteAsync("UPDATE cards SET quiz_synced = 1 WHERE module_id = @m", new[] { ("m", (object?)copy.Id) });
+        await CopyCompetencyModelAsync(source.Id, copy.Id);   // Lernziele und Kompetenzen gehören zur Modulversion (ADR 0031)
         return copy;
     }
 

@@ -391,11 +391,16 @@ im 12-Schritte-Verfahren neu auf (Inline-`UNIQUE` auf `name` ist per `ALTER` nic
 Zehn Tabellen, alle über `CREATE TABLE IF NOT EXISTS` (SQLite und PostgreSQL), keine Änderung bestehender Tabellen; bewusst **ohne Fremdschlüssel auf `modules`** (Versionen überleben gelöschte Module).
 
 - **topics** — `id`, `owner_user_id`, `name` (unique je Eigentümer), `description`, `status` (`active|archived`), `draft_revision`, `published_revision`, Zeitstempel.
-- **topic_modules** — PK (`topic_id`, `module_id`), `sort_order`; ein Modul darf in mehreren Themen liegen. Index `ix_topic_modules_module`.
+- **topic_modules** — PK (`topic_id`, `module_id`), `sort_order`, `module_version` (festgelegte Modulversion, NULL = Altbestand; ADR 0030); ein Modul darf in mehreren Themen liegen. Index `ix_topic_modules_module`.
 - **topic_exam_configs** — `topic_id` (PK, FK → topics, `CASCADE`), `config_json` (Modulprüfungen + Abschlussprüfung).
 - **topic_questions** — eigene Themenfragen: `topic_id`, `options_json`, `correct_json`, `active` u. a. Index (`topic_id`, `active`).
 - **topic_versions** — `id`, `topic_id`, `version_number` (UNIQUE mit `topic_id`), `snapshot_json`, `global_status` (`none|pending_approval|active|superseded|rejected|deactivated`), `decision_reason`, Veröffentlichungs-/Entscheidungszeitpunkte. Index (`global_status`, `topic_id`).
 - **topic_version_modules** — PK (`version_id`, `module_id`): Zuordnung Version → eingefrorene Modulkopie mit `content_hash`. Index `ix_topic_version_modules_module`.
+- **certificates** (Ergänzungen ADR 0031/0032): `snapshot_id`/`snapshot_hash` (Prüfungssnapshot), `kind` (`module` | `topic`), `clr_jws`/`clr_hash` (nur Themenabschluss; `badge_jws` ist dann das Master-Badge), `completed_at` (tatsächlicher Abschlusszeitpunkt). `exam_snapshots.kind` (`module` | `topic`; bei `topic` ist `result_id` die Zertifikats-ID).
+- **certificate_pdfs** — ADR 0033: einmal erzeugtes, signiertes Zertifikats-PDF (PK `certificate_id`, `pdf_base64`, `pdf_sha256`, `size_bytes`, `signer_thumbprint`, `signer_subject`, `signed_at`, `created_at`); wird unverändert ausgeliefert.
+- **module_competencies** — ADR 0031: Lernziele und Kompetenzen eines Moduls (PK `module_id`, `definition_json`, `updated_at`); Teil des Inhaltshashes und der eingefrorenen Kopien. `cards.competencies_json` (Standard `[]`) hält die Kompetenz-IDs der Karte.
+- **exam_snapshots** — ADR 0031: unveränderliche Nachweissnapshots verifizierter Modulabschlüsse (PK `id`, UNIQUE `result_id`, `user_id`, `module_id`, `module_version`, `snapshot_json`, `snapshot_hash`, `created_at`). `certificates.snapshot_id`/`snapshot_hash` verweisen darauf (NULL bei Altzertifikaten).
+- **module_versions** — ADR 0030: unveränderliche Modulversionen eines eigenen Moduls. PK `id`, UNIQUE (`module_id`, `version_number`), `snapshot_module_id` (eingefrorene Modulkopie, `modules.scope = 'topic'`), `content_hash`, `note`, `published_at`, `published_by`. Index `ix_module_versions_snapshot`. Kein Fremdschlüssel auf `modules` (Kopien bleiben für Themenversionen erhalten; `DeleteModuleAsync` entfernt nur ungenutzte Kopien).
 - **topic_shares** — Freigabe an einen Benutzer (UNIQUE `topic_id`, `target_user_id`), Widerruf. Index (`target_user_id`, `revoked_at`).
 - **topic_assignments** — Zuweisung (UNIQUE `topic_id`, `user_id`), `assigned_by`, `assigned_at`, `status`. Index (`user_id`, `status`).
 - **topic_user_state** — PK (`topic_id`, `user_id`): zuletzt gesehene Version, `last_activity_at`.

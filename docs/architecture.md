@@ -189,7 +189,7 @@ MCP-Tokens und Einmal-Codes liegen nur als HMAC (Schlüssel `MCP_TOKEN_KEY` aus 
 
 ## Themen, Lernpfade und Abschlussprüfungen
 
-Ein Thema ([ADR 0027](adr/0027-themen-lernpfade-versionierung-und-abschlusspruefungen.md)) ordnet bestehende Module in einer Reihenfolge zu (keine Duplikate), konfiguriert Modul- und Abschlussprüfungen und wird über „Veröffentlichen“ in unveränderliche Versionen eingefroren. Unveränderte Module teilen sich die eingefrorene Kopie (Inhalts-Hash), geänderte erhalten eine neue.
+Die Nachweisübersicht `/achievements`, das Prüfsiegel und die LinkedIn-Eintragshilfe beschreibt [ADR 0034](adr/0034-nachweisuebersicht-pruefsiegel-und-linkedin.md). Zertifikats-PDFs ([ADR 0033](adr/0033-signierte-zertifikats-pdfs.md), `Services/Pdf/*`, `CertificatePdfService`) sind die menschenlesbare, CMS-signierte Darstellung der Credentials und betten diese als Dateien ein; `PdfVerificationService` prüft Uploads. Module besitzen Entwurf und unveränderliche Versionen, Themen binden konkrete Modulversionen ([ADR 0030](adr/0030-einheitliche-modul-und-themenversionierung.md), `ModuleVersionService`, `topic_modules.module_version`). Ein Thema ([ADR 0027](adr/0027-themen-lernpfade-versionierung-und-abschlusspruefungen.md)) ordnet bestehende Module in einer Reihenfolge zu (keine Duplikate), konfiguriert Modul- und Abschlussprüfungen und wird über „Veröffentlichen“ in unveränderliche Versionen eingefroren. Unveränderte Module teilen sich die eingefrorene Kopie (Inhalts-Hash), geänderte erhalten eine neue.
 
 ```
 Entwurf (topics, topic_modules, topic_exam_configs) ─ Veröffentlichen ─► topic_versions ─► topic_version_modules ─► eingefrorene Modulkopien (scope=topic)

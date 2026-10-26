@@ -7,6 +7,7 @@
 @using LearnCards.Web.Api
 @using System.Text.Json.Nodes
 @inject CertificateService Certs
+@inject PdfVerificationService PdfVerifier
 
 <PageTitle>Zertifikat prüfen — LearnCards</PageTitle>
 
@@ -33,6 +34,32 @@
                 @if (_status["chain"]?["explorer_url"]?.GetValue<string>() is { Length: > 0 } ex && ex.StartsWith("https://")) { <dt>Transaktion</dt><dd><a href="@ex" rel="noopener noreferrer" target="_blank">Im Explorer ansehen</a></dd> }
                 <dt>Prüfsumme (SHA-256)</dt><dd style="word-break:break-all"><code>@Str("badge_hash")</code></dd>
             </dl>
+            <img src="/brand/learny-verified.svg" alt="Learny Verified – Digitally Signed Credential" height="40" />
+            @if (_evidence is { } ev)
+            {
+                <h2 class="panel-title">Nachweise und Kompetenzen</h2>
+                <p class="muted">Vom Inhaber freigegebener Prüfungsnachweis (@(Ev("format") == "learny-topic-completion-snapshot" ? "Themenabschluss" : "Modulabschluss")). Er enthält weder Antworten noch Lerninhalte noch Angaben zur Person.</p>
+                @if (Ev("module.name") is { Length: > 0 } mname) { <p><strong>@mname</strong> @(Ev("module.version") is { Length: > 0 } mv2 && mv2 != "0" ? $"(Version {mv2})" : "") · Ergebnis @Ev("result.percent") % · Bestehensgrenze @Ev("exam.pass_percent") %</p> }
+                @if (Ev("topic.name") is { Length: > 0 } tname) { <p><strong>@tname</strong> (Version @Ev("topic.version")) · Abschluss @Ev("completed_at")</p> }
+                @foreach (var k in (ev["competencies"]?.AsArray() ?? new JsonArray()))
+                {
+                    <p style="margin:.2rem 0">@(k?["status"]?.ToString() == "demonstrated" ? "✔" : "—") <strong>@k?["name"]</strong> – @(k?["status"]?.ToString() switch { "demonstrated" => "nachgewiesen", "not_demonstrated" => "nicht nachgewiesen", _ => "nicht ausreichend geprüft" }) (@k?["percent"] %, @k?["questions_asked"] Fragen)</p>
+                }
+                @if (ev["modules"]?.AsArray() is { Count: > 0 } mods)
+                {
+                    <table class="table" aria-label="Module">
+                        <thead><tr><th scope="col">Modul</th><th scope="col">Version</th><th scope="col">Ergebnis</th><th scope="col">Nachgewiesene Kompetenzen</th></tr></thead>
+                        <tbody>
+                        @foreach (var m in mods)
+                        {
+                            <tr><td>@m?["name"]</td><td>@m?["version"]</td><td>@(m?["percent"] is { } p ? $"{p} %" : "–")</td>
+                                <td>@string.Join(", ", (m?["competencies"]?.AsArray() ?? new JsonArray()).Where(k => k?["status"]?.ToString() == "demonstrated").Select(k => k!["name"]!.ToString()))</td></tr>
+                        }
+                        </tbody>
+                    </table>
+                }
+                <p class="muted" style="word-break:break-all">Snapshot-Hash (SHA-256): <code>@Str("snapshot_hash")</code> · Nachweis: <a href="/api/public/certificates/@Id/evidence">JSON</a></p>
+            }
         }
     }
 
@@ -49,11 +76,45 @@
             <li>Zertifikat bekannt: @(v.Known ? "ja" : "nein")@(v.Revoked ? " — widerrufen" : "")</li>
         </ul>
     }
+
+    <h2 class="panel-title">Zertifikat-PDF prüfen</h2>
+    <p class="muted">Lade ein von LearnCards ausgestelltes Zertifikats-PDF hoch (höchstens 25 MB). Geprüft werden die PDF-Signatur, ob die Datei seit der Signierung unverändert ist, die eingebetteten Credentials (CLR, Master-Badge, Modulnachweise), Referenzen und Hashes, Versionen und der aktuelle Widerrufsstatus — getrennt ausgewiesen. Die Datei wird nur im Speicher verarbeitet und nicht gespeichert.</p>
+    <InputFile OnChange="CheckPdfAsync" accept="application/pdf,.pdf" aria-label="Zertifikats-PDF auswählen" />
+    @if (_pdfBusy) { <p class="muted" role="status">Wird geprüft …</p> }
+    @if (_pdfError is not null) { <p class="badge" role="alert">@_pdfError</p> }
+    @if (_pdf is { } r)
+    {
+        <p class="@(Flag(r, "overall.valid") ? "badge badge-pass" : "badge")" role="status">@(Flag(r, "overall.valid") ? "✔ " : "✖ ")@Txt(r, "overall.summary")</p>
+        <table class="table" aria-label="Prüfergebnis">
+            <thead><tr><th scope="col">Prüfpunkt</th><th scope="col">Ergebnis</th></tr></thead>
+            <tbody>
+                <tr><td>1. PDF-Signatur gültig</td><td>@Mark(Flag(r, "pdf.signature_valid"))@(Flag(r, "pdf.signature_present") ? "" : " – keine Signatur vorhanden") @Txt(r, "pdf.signature_error")</td></tr>
+                <tr><td>2. Datei seit der Signierung unverändert (inkl. Anhänge)</td><td>@Mark(Flag(r, "pdf.document_unchanged"))</td></tr>
+                <tr><td>3. Eingebettetes CLR gültig</td><td>@Mark(Flag(r, "credentials.clr.valid"))@(Flag(r, "credentials.clr.present") || Txt(r, "credentials.clr.id").Length > 0 ? "" : " – nicht enthalten")</td></tr>
+                <tr><td>4. Master-Badge gültig</td><td>@Mark(Flag(r, "credentials.master_badge.valid"))</td></tr>
+                <tr><td>5. Modul-Credentials gültig</td><td>@Mark(ModulesOk(r))@ModulesText(r)</td></tr>
+                <tr><td>6. Referenzen und Hashes stimmen überein</td><td>@Mark(Flag(r, "references.all_ok") && Flag(r, "attachments.hashes_match"))</td></tr>
+                <tr><td>7. Aussteller / PDF-Unterzeichner</td><td>@(TrustText(Txt(r, "overall.signer_trust"))); Credentials @(Flag(r, "issuer.credentials_signed_by_this_installation") ? "mit dem Schlüssel dieser Installation signiert" : "nicht bestätigt")</td></tr>
+                <tr><td>8. Widerruf</td><td>@(Flag(r, "revocation.any_revoked") ? "✖ widerrufen" : "✔ nicht widerrufen (Online-Abfrage)")</td></tr>
+                <tr><td>9. Versionen stimmen überein</td><td>@Mark(Flag(r, "versions.match"))</td></tr>
+            </tbody>
+        </table>
+        @if (r["pdf"]?["signer"] is { } sg)
+        {
+            <p class="muted">Unterzeichner: @Txt(sg, "subject") · gültig @Txt(sg, "not_before")[..10] bis @Txt(sg, "not_after")[..10] · Fingerabdruck <code>@Txt(sg, "thumbprint")</code>@(Txt(r, "pdf.signing_time") is { Length: > 0 } st ? " · signiert " + st : "")</p>
+        }
+        <details><summary>Eingebettete Dateien (@Txt(r, "attachments.count"))</summary>
+            <ul>@foreach (var f in r["attachments"]?["files"]?.AsArray() ?? new JsonArray()) { <li><code>@Txt(f, "name")</code> – @(Flag(f, "matches") ? "Prüfsumme stimmt" : "Prüfsumme weicht ab") <span class="muted">(@Txt(f, "sha256"))</span></li> }</ul>
+        </details>
+    }
 </div>
 
 @code {
     [Parameter] public string? Id { get; set; }
     private JsonNode? _status;
+    private JsonNode? _evidence;
+
+    private string Ev(string path) { JsonNode? n = _evidence; foreach (var p in path.Split('.')) n = (n as JsonObject)?[p]; return n?.ToString() ?? ""; }
     private string _input = "";
     private BadgeVerification? _result;
 
@@ -64,6 +125,32 @@
         _status = null;
         if (!string.IsNullOrEmpty(Id) && await Certs.GetPublicStatusAsync(Id) is { } s)
             _status = JsonSerializer.SerializeToNode(s, AppJson.Options);
+        _evidence = !string.IsNullOrEmpty(Id) && _status is not null && await Certs.GetPublicEvidenceJsonAsync(Id) is { } evJson ? JsonNode.Parse(evJson) : null;
+    }
+
+    private JsonNode? _pdf;
+    private bool _pdfBusy;
+    private string? _pdfError;
+
+    private static JsonNode? At(JsonNode? n, string path) { foreach (var p in path.Split('.')) n = n is JsonArray a ? (int.TryParse(p, out var i) && i < a.Count ? a[i] : null) : (n as JsonObject)?[p]; return n; }
+    private static bool Flag(JsonNode? n, string path) => At(n, path)?.ToString() == "true" || At(n, path)?.ToString() == "True";
+    private static string Txt(JsonNode? n, string path) => (At(n, path)?.ToString() ?? "").Trim('"');
+    private static string TrustText(string t) => t switch { "installation" => "✔ Unterzeichner ist diese Installation", "trusted_ca" => "✔ Zertifikat einer anerkannten Zertifizierungsstelle", "untrusted" => "⚠ Unterzeichner nicht vertrauenswürdig bestätigt (selbstsigniert/unbekannt)", _ => "✖ kein Unterzeichner" };
+    private static string Mark(bool ok) => ok ? "✔ ja" : "✖ nein";
+    private static bool ModulesOk(JsonNode r) => r["credentials"]?["modules"] is JsonArray m ? m.Count > 0 && m.All(x => Flag(x, "valid")) : Flag(r, "credentials.module_credential.valid");
+    private static string ModulesText(JsonNode r) => r["credentials"]?["modules"] is JsonArray m ? $" ({m.Count(x => Flag(x, "valid"))} von {m.Count})" : "";
+
+    private async Task CheckPdfAsync(InputFileChangeEventArgs e)
+    {
+        _pdf = null; _pdfError = null; _pdfBusy = true;
+        try
+        {
+            using var ms = new MemoryStream();
+            await e.File.OpenReadStream(PdfVerificationService.MaxPdfBytes).CopyToAsync(ms);
+            _pdf = await PdfVerifier.VerifyAsync(ms.ToArray());
+        }
+        catch (IOException) { _pdfError = "Die Datei ist zu groß oder nicht lesbar (höchstens 25 MB)."; }
+        finally { _pdfBusy = false; }
     }
 
     private async Task CheckAsync() => _result = await Certs.VerifyAsync(_input.Length > 20000 ? _input[..20000] : _input);

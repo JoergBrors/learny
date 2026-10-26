@@ -263,6 +263,16 @@ siehe `src/LearnCards.Web/wwwroot/app.css`.
 
 ## Themen und Lernpfade
 
+**Meine Abschlüsse:** Unter `/achievements` findest du alle eigenen Modul- und Themenabschlüsse mit PDF-, CLR- und Badge-Download, Prüf-Link und „Auf LinkedIn hinzufügen“ (nur Eintragshilfe, keine automatische Veröffentlichung; [ADR 0034](docs/adr/0034-nachweisuebersicht-pruefsiegel-und-linkedin.md)). Das Prüfsiegel „Learny Verified“ steht in Seitenkopf, PDFs und Prüfseite und ist keine Zertifizierung durch 1EdTech oder LinkedIn.
+
+**Signierte PDFs:** Zu jedem Modul- und Themenabschluss gibt es ein digital signiertes PDF (`GET /api/certificates/{id}/certificate.pdf`) mit Learny-Prüfsiegel, Kompetenznachweisen, QR-Code und den eingebetteten signierten Credentials (CLR, Master-Badge, Modulnachweise, `verification.json`). Voraussetzung ist ein eigenes Signaturzertifikat in der `.env` (`PDF_SIGNING_*`, [docs/pdf-signature.md](docs/pdf-signature.md), [ADR 0033](docs/adr/0033-signierte-zertifikats-pdfs.md)). Unter `/verify` lässt sich ein PDF hochladen und vollständig prüfen (Signatur, Unversehrtheit, Credentials, Hashes, Versionen, Widerruf).
+
+**Themenabschluss:** Wer ein Thema abschließt (alle Module gelernt und geprüft, Abschlussprüfung bestanden), erhält ein Master-Open-Badge („Erfolgreicher Themenabschluss“, Open Badges 3.0) und ein signiertes Comprehensive Learner Record (CLR 2.0) mit allen Modulabschlüssen ([ADR 0032](docs/adr/0032-themenabschluss-clr-und-master-badge.md)); Download über `GET /api/certificates/{id}/badge` bzw. `/clr`. Keine 1EdTech-Zertifizierung.
+
+**Kompetenzen:** Module können Lernziele und Kompetenzen definieren, Karten ordnen sich zu ([ADR 0031](docs/adr/0031-kompetenzmodell-und-pruefungssnapshots.md)). Modulzertifikate (Open Badge 3.0) bescheinigen nur ausreichend geprüfte und bestandene Kompetenzen und verweisen auf einen unveränderlichen Prüfungsnachweis (`/api/public/certificates/{id}/evidence`).
+
+**Versionen:** Module und Themen haben einen Entwurf und unveränderliche, nummerierte Versionen ([ADR 0030](docs/adr/0030-einheitliche-modul-und-themenversionierung.md)). Ein Thema hält je Modul eine konkrete Modulversion fest; neuere Modulstände werden nur ausdrücklich übernommen („Neuen Stand übernehmen“), Freigaben und globale Veröffentlichungen verwenden die festgelegten Versionen.
+
 Unter **Themen** (`/topics`) fasst du mehrere Lernmodule zu einem Lernpfad zusammen, legst Modulprüfungen und eine Abschlussprüfung fest, veröffentlichst unveränderliche Versionen und teilst oder weist Themen anderen Benutzern zu. Globale Themenversionen benötigen die Freigabe eines Administrators. Details: [ADR 0027](docs/adr/0027-themen-lernpfade-versionierung-und-abschlusspruefungen.md). MCP-Clients können Themen lesen (`list_topics`, `get_topic`, `get_topic_exam_structure`) und eigene Themenentwürfe per JSON verwalten (siehe unten, ADR 0028).
 
 ### Module und Themen als JSON, Klonen und MCP

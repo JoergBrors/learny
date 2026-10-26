@@ -60,12 +60,12 @@
             <div class="alert alert-error" role="status">⚠️ @w</div>
         }
 
-        @if (_versions.Count > 1 || (d.IsOwner && _versions.Count > 0))
+        @if (_versions.Count > 1 || (d.IsOwner && _versions.Count > 0 && (d.DraftDiffers || d.IsDraft)))
         {
             <div class="form-row topic-versions">
                 <label for="ver">Ansicht</label>
                 <select id="ver" class="input" @onchange="e => ChangeVersion(e.Value?.ToString())">
-                    @if (d.IsOwner) { <option value="0" selected="@d.IsDraft">Entwurf (aktueller Stand)</option> }
+                    @if (d.IsOwner && (d.DraftDiffers || d.IsDraft)) { <option value="0" selected="@d.IsDraft">Entwurf (unveröffentlichte Änderungen)</option> }
                     @foreach (var v in _versions)
                     {
                         <option value="@v.VersionNumber" selected="@(!d.IsDraft && d.Version == v.VersionNumber)">Version @v.VersionNumber (@(v.PublishedAt?.ToLocalTime().ToString("dd.MM.yyyy") ?? "—"))</option>
@@ -112,6 +112,7 @@
                     <li class="card panel topic-module @(m.Unavailable ? "topic-module-off" : "")">
                         <div class="topic-module-head">
                             <h3><span aria-hidden="true">@m.Icon</span> @m.Name</h3>
+                            @if (m.Version > 0) { <span class="badge" title="In dieser Themenversion enthaltene Modulversion">Modulversion @m.Version</span> }
                             @if (mp is { Completed: true }) { <span class="badge badge-pass">abgeschlossen</span> }
                             else if (mp is { Started: true }) { <span class="badge">begonnen</span> }
                             @if (m.Exam.Enabled) { <span class="badge @(mp is { ExamPassed: true } ? "badge-pass" : "")">Modulprüfung@(mp is { ExamPassed: true } ? " bestanden" : "")</span> }
@@ -191,7 +192,7 @@
         _loading = true; _session = null; _message = null;
         try
         {
-            _detail = await Topics.GetDetailAsync(_userId, Id, Version);
+            _detail = await Topics.GetViewAsync(_userId, Id, Version);
             _versions = _detail.IsOwner ? await Topics.ListVersionsAsync(_userId, Id) : new();
             await ReloadProgressAsync();
             if (!_detail.IsDraft) await Topics.MarkSeenAsync(_userId, Id, _detail.Version);
@@ -206,7 +207,7 @@
         _progress = _detail is null || _detail.IsDraft ? null : await Topics.GetProgressAsync(_userId, Id, _detail.Version);
     }
 
-    private void ChangeVersion(string? value) => Nav.NavigateTo(int.TryParse(value, out var v) && v > 0 ? $"/topics/{Id}?version={v}" : $"/topics/{Id}");
+    private void ChangeVersion(string? value) => Nav.NavigateTo(int.TryParse(value, out var v) && v > 0 ? $"/topics/{Id}?version={v}" : $"/topics/{Id}?version=0");
 
     private async Task StartModuleExamAsync(TopicModuleView m)
     {

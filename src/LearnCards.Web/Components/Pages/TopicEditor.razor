@@ -75,6 +75,13 @@
                         <span aria-hidden="true">@m.Icon</span>
                         <strong>@m.Name</strong>
                         <span class="muted">@m.Cards Karten · @m.PoolQuestions Fragen</span>
+                        @if (m.Version > 0) { <span class="badge" title="In diesem Thema festgelegte Modulversion">Modulversion @m.Version</span> }
+                        @if (m.NewerAvailable)
+                        {
+                            <span class="badge badge-warn" title="Das Modul hat einen neueren Stand. Er wird nicht automatisch übernommen.">@(m.LatestVersion > m.Version ? $"Neuere Version {m.LatestVersion} verfügbar" : "Unveröffentlichte Änderungen am Modul")</span>
+                            <button class="btn btn-ghost btn-sm" @onclick="() => AdoptAsync(m.ModuleId)" disabled="@_busy"
+                                    title="Übernimmt den aktuellen Stand des Moduls (bei Bedarf als neue Modulversion) in den Themenentwurf. Veröffentlichte Themenversionen bleiben unverändert.">⇄ Neuen Stand übernehmen</button>
+                        }
                         @if (m.Unavailable) { <span class="badge badge-warn">nicht mehr verfügbar</span> }
                         @if (m.RequiresOwnCopy)
                         {
@@ -379,6 +386,8 @@
         var json = _pendingJson; _pendingJson = null;
         if (json is not null) await RunAsync(() => Topics.UpdateFromDefinitionAsync(_userId, Id, json), "Entwurf aus der JSON-Definition aktualisiert. Es wurde nichts veröffentlicht.");
     }
+
+    private Task AdoptAsync(string moduleId) => RunAsync(() => Topics.AdoptModuleVersionAsync(_userId, Id, moduleId), "Der aktuelle Modulstand wurde in den Entwurf übernommen (noch nicht veröffentlicht).");
 
     private Task ReplaceWithCloneAsync(string moduleId) => RunAsync(() => Topics.ReplaceWithOwnCloneAsync(_userId, Id, moduleId), "Das globale Modul wurde durch eine eigene Kopie ersetzt.");
 

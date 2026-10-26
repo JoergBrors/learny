@@ -15,9 +15,11 @@
                         </span>
                         <span>LearnCards</span>
                     </a>
+                    <a href="/verify" class="seal-link" title="Learny Verified – Zertifikate prüfen" aria-label="Learny Verified – Zertifikate prüfen"><img src="/brand/learny-verified-mark.svg" alt="" width="26" height="26" /></a>
                     <div class="topbar-actions">
                         <a class="btn btn-ghost btn-sm" href="/" aria-label="Module">Module</a>
                         <a class="btn btn-ghost btn-sm" href="/topics" aria-label="Themen">Themen</a>
+                        <a class="btn btn-ghost btn-sm" href="/achievements" aria-label="Meine Abschlüsse und Nachweise">Abschlüsse</a>
                         @if (context.User.IsInRole(Roles.Admin) || context.User.IsInRole(Roles.TopicAdmin))
                         {
                             <a class="btn btn-ghost btn-sm" href="/topic-admin">Zuweisungen</a>

@@ -163,6 +163,7 @@ public static class Schema
                 slide_number INTEGER NULL,
                 target_time_sec INTEGER NULL,
                 quiz_json     TEXT NOT NULL DEFAULT '[]',
+                competencies_json TEXT NOT NULL DEFAULT '[]',
                 images_json   TEXT NOT NULL DEFAULT '[]',
                 images_migrated INTEGER NOT NULL DEFAULT 0,
                 quiz_synced INTEGER NOT NULL DEFAULT 0,
@@ -386,7 +387,13 @@ public static class Schema
                 chain_error        TEXT NOT NULL DEFAULT '',
                 chain_attempts     INTEGER NOT NULL DEFAULT 0,
                 chain_updated_at   TEXT NULL,
-                anchored_at        TEXT NULL
+                anchored_at        TEXT NULL,
+                snapshot_id        {id} NULL,
+                snapshot_hash      TEXT NOT NULL DEFAULT '',
+                kind               TEXT NOT NULL DEFAULT 'module',
+                clr_jws            TEXT NULL,
+                clr_hash           TEXT NOT NULL DEFAULT '',
+                completed_at       TEXT NULL
             )
             """;
 
@@ -500,6 +507,62 @@ public static class Schema
             )
             """;
         yield return "CREATE INDEX IF NOT EXISTS ix_topic_version_modules_module ON topic_version_modules(module_id)";
+
+        // Modulversionen (ADR 0030): unveränderliche Veröffentlichungsstände eigener Module; der Inhalt liegt in einer eingefrorenen Modulkopie (scope = 'topic')
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS module_versions (
+                id                 {id} PRIMARY KEY,
+                module_id          {id} NOT NULL,
+                version_number     INTEGER NOT NULL,
+                snapshot_module_id {id} NOT NULL,
+                content_hash       TEXT NOT NULL,
+                note               TEXT NOT NULL DEFAULT '',
+                published_at       TEXT NOT NULL,
+                published_by       TEXT NULL,
+                UNIQUE (module_id, version_number)
+            )
+            """;
+        yield return "CREATE INDEX IF NOT EXISTS ix_module_versions_snapshot ON module_versions(snapshot_module_id)";
+
+        // Ausgestellte, signierte Zertifikats-PDFs (ADR 0033): einmal erzeugt, danach unverändert abrufbar (Base64 im TEXT-Feld, datenbankunabhängig)
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS certificate_pdfs (
+                certificate_id   {id} PRIMARY KEY,
+                pdf_base64       TEXT NOT NULL,
+                pdf_sha256       TEXT NOT NULL,
+                size_bytes       INTEGER NOT NULL,
+                signed           INTEGER NOT NULL DEFAULT 1,
+                signer_thumbprint TEXT NOT NULL DEFAULT '',
+                signer_subject   TEXT NOT NULL DEFAULT '',
+                signed_at        TEXT NOT NULL,
+                created_at       TEXT NOT NULL
+            )
+            """;
+
+        // Kompetenzmodell eines Moduls (ADR 0031): Lernziele und Kompetenzen; Teil der Modulversion (eingefrorene Kopien erhalten eine Kopie)
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS module_competencies (
+                module_id       {id} PRIMARY KEY,
+                definition_json TEXT NOT NULL,
+                updated_at      TEXT NOT NULL
+            )
+            """;
+
+        // Unveränderliche Nachweissnapshots verifizierter Modulabschlüsse (ADR 0031)
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS exam_snapshots (
+                id             {id} PRIMARY KEY,
+                result_id      {id} NOT NULL,
+                user_id        {id} NOT NULL,
+                module_id      {id} NOT NULL,
+                module_version INTEGER NOT NULL DEFAULT 0,
+                kind           TEXT NOT NULL DEFAULT 'module',
+                snapshot_json  TEXT NOT NULL,
+                snapshot_hash  TEXT NOT NULL,
+                created_at     TEXT NOT NULL,
+                UNIQUE (result_id)
+            )
+            """;
 
         yield return $"""
             CREATE TABLE IF NOT EXISTS topic_shares (

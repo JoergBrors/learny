@@ -18,6 +18,38 @@ public partial class TopicService
         public TopicExamConfig ExamConfig { get; set; } = new();
         public List<TopicModuleView> Modules { get; set; } = new();
         public string ExamModuleId { get; set; } = "";
+        /// <summary>Inhaltskennung des Entwurfs bei der Veröffentlichung (ADR 0030); leer bei Altbestand (dann gilt der Revisionszähler).</summary>
+        public string DraftFingerprint { get; set; } = "";
+    }
+
+    /// <summary>
+    /// Inhaltskennung des Entwurfs: Name, Beschreibung, Module in Reihenfolge mit festgelegter Modulversion, Prüfungskonfiguration und aktive Themenfragen.
+    /// Gleiche Kennung = gleicher veröffentlichungsfähiger Inhalt — unabhängig von Zeitstempeln und Revisionszählern (zurückgenommene Änderungen zählen nicht).
+    /// </summary>
+    private async Task<string> ComputeDraftFingerprintAsync(TopicInfo topic)
+    {
+        var rows = await ListDraftModuleRowsAsync(topic.Id);
+        var cfg = await LoadExamConfigAsync(topic.Id);
+        var sb = new System.Text.StringBuilder();
+        void Add(params object?[] parts) { foreach (var p in parts) sb.Append(p?.ToString()).Append('\u001f'); sb.Append('\u001e'); }
+        Add("t", topic.Name, topic.Description);
+        foreach (var r in rows) Add("m", r.ModuleId.ToLowerInvariant(), r.Version, JsonSerializer.Serialize(cfg.ModuleExams.TryGetValue(r.ModuleId, out var e) ? e : new TopicModuleExamConfig(), AppJson.Options));
+        var fin = cfg.FinalExam;
+        var finNode = (System.Text.Json.Nodes.JsonObject)JsonSerializer.SerializeToNode(fin, AppJson.Options)!;
+        finNode["manual_counts"] = JsonSerializer.SerializeToNode(fin.ManualCounts.OrderBy(k => k.Key, StringComparer.Ordinal).ToDictionary(k => k.Key.ToLowerInvariant(), k => k.Value), AppJson.Options);
+        Add("f", finNode.ToJsonString());
+        foreach (var q in (await ListQuestionsRawAsync(topic.Id, activeOnly: true)).OrderBy(q => q.Question, StringComparer.Ordinal).ThenBy(q => q.Type, StringComparer.Ordinal))
+            Add("q", q.Type, q.Question, string.Join("|", q.Options), string.Join(",", q.CorrectIndexes), q.Explanation);
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(sb.ToString()))).ToLowerInvariant();
+    }
+
+    /// <summary>Weicht der Entwurf von der neuesten Veröffentlichung ab? Mit gespeicherter Inhaltskennung exakt, sonst (Altbestand) über den Revisionszähler.</summary>
+    private async Task<bool> DraftDiffersFromLatestAsync(TopicInfo topic, TopicVersionInfo? latest)
+    {
+        if (latest is null) return true;
+        var snap = ReadSnapshot(latest);
+        if (snap is null || snap.DraftFingerprint.Length == 0) return topic.HasUnpublishedChanges;
+        return !string.Equals(snap.DraftFingerprint, await ComputeDraftFingerprintAsync(topic), StringComparison.Ordinal);
     }
 
     // ─── Zählungen ──────────────────────────────────────────────────────────
@@ -58,7 +90,16 @@ public partial class TopicService
                 list.Add(new TopicModuleView { ModuleId = row.ModuleId, Position = pos++, Name = "(nicht mehr verfügbar)", Unavailable = true, Exam = exam });
                 continue;
             }
-            list.Add(await ViewOfModuleAsync(access.Module, pos++, exam));
+            if (row.Version is int pinned && await _moduleVersions.GetVersionRawAsync(row.ModuleId, pinned) is { } ver && await _repo.GetModuleRawAsync(ver.SnapshotModuleId) is { } frozen)
+            {
+                // Anzeige aus dem festgelegten Modulstand (nicht aus dem veränderlichen Original)
+                var view = await ViewOfModuleAsync(frozen, pos++, exam);
+                view.ModuleId = row.ModuleId; view.SourceModuleId = row.ModuleId; view.Version = ver.VersionNumber;
+                var (latest, changed) = await _moduleVersions.GetStateAsync(access.Module);
+                view.LatestVersion = latest; view.ModuleHasUnpublishedChanges = changed; view.NewerAvailable = latest > ver.VersionNumber || changed;
+                list.Add(view);
+            }
+            else list.Add(await ViewOfModuleAsync(access.Module, pos++, exam));
         }
         return list;
     }
@@ -174,6 +215,30 @@ public partial class TopicService
         return DetailFromVersion(topic, ver, isOwner, section);
     }
 
+    /// <summary>
+    /// Ansicht für die Themenseite. Ohne Versionsangabe zeigt der Eigentümer die aktuelle Veröffentlichung, solange der Entwurf nicht tatsächlich abweicht
+    /// (Revisionszähler plus Inhaltskennung aller Module, kein Zeitstempel); ein nie veröffentlichtes Thema zeigt den Entwurf. <c>version = 0</c> verlangt ausdrücklich den Entwurf.
+    /// <see cref="GetDetailAsync"/> bleibt unverändert (Entwurf ohne Versionsangabe; Editor und API).
+    /// </summary>
+    public async Task<TopicDetail> GetViewAsync(string userId, string topicId, int? version = null)
+    {
+        var topic = await GetTopicRawAsync(topicId) ?? throw new KeyNotFoundException("Thema nicht gefunden.");
+        if (!string.Equals(topic.OwnerUserId, userId, StringComparison.OrdinalIgnoreCase)) return await GetDetailAsync(userId, topicId, version is > 0 ? version : null);
+
+        var latest = await LoadLatestPublishedAsync(topic.Id);
+        if (version is > 0 || (version is null && latest is not null))
+        {
+            var draft = await GetDetailAsync(userId, topicId);
+            if (version is null && draft.UnpublishedChanges) { draft.DraftDiffers = true; return draft; }
+            var d = await GetDetailAsync(userId, topicId, version ?? latest!.VersionNumber);
+            d.DraftDiffers = draft.UnpublishedChanges;
+            return d;
+        }
+        var dr = await GetDetailAsync(userId, topicId);
+        dr.DraftDiffers = dr.UnpublishedChanges || latest is null;
+        return dr;
+    }
+
     private static TopicDetail DetailFromVersion(TopicInfo topic, TopicVersionInfo ver, bool isOwner, string section)
     {
         var snap = ReadSnapshot(ver) ?? new TopicSnapshot();
@@ -193,14 +258,14 @@ public partial class TopicService
     private async Task FillDraftChangesAndWarningsAsync(TopicDetail d, string userId)
     {
         var latest = await LoadLatestPublishedAsync(d.Topic.Id);
-        var previous = latest is null ? new Dictionary<string, string>() : await PreviousHashesAsync(d.Topic.Id);
-        d.UnpublishedChanges = d.Topic.HasUnpublishedChanges || latest is null && d.Modules.Count > 0;
+        var previous = latest is null ? new Dictionary<string, string>() : await PreviousModuleCopiesAsync(d.Topic.Id);
+        d.UnpublishedChanges = latest is null ? d.Modules.Count > 0 : await DraftDiffersFromLatestAsync(d.Topic, latest);
+        var pins = (await ListDraftModuleRowsAsync(d.Topic.Id)).ToDictionary(r => r.ModuleId, r => r.Version, StringComparer.OrdinalIgnoreCase);
         foreach (var m in d.Modules.Where(m => !m.Unavailable))
         {
-            var access = await _repo.ResolveModuleAccessAsync(userId, m.ModuleId);
-            if (access is null) continue;
-            var hash = await _repo.ComputeModuleContentHashAsync(access.Module);
-            if (latest is not null && (!previous.TryGetValue(m.ModuleId, out var prev) || !string.Equals(prev, hash, StringComparison.Ordinal)))
+            // Änderung = festgelegte Modulversion weicht von der in der letzten Themenversion eingefrorenen Kopie ab (ADR 0030) — neuere Modulstände allein ändern den Entwurf nicht
+            var frozen = pins.GetValueOrDefault(m.ModuleId) is int pv ? (await _moduleVersions.GetVersionRawAsync(m.ModuleId, pv))?.SnapshotModuleId : null;
+            if (latest is not null && (frozen is null || !previous.TryGetValue(m.ModuleId, out var prev) || !string.Equals(prev, frozen, StringComparison.OrdinalIgnoreCase)))
             {
                 d.UnpublishedChanges = true;
                 d.ChangedModuleNames.Add(m.Name);
@@ -228,12 +293,13 @@ public partial class TopicService
     }
 
     /// <summary>Inhaltskennungen der Module der zuletzt veröffentlichten Version, nach ursprünglicher Modul-ID.</summary>
-    private async Task<Dictionary<string, string>> PreviousHashesAsync(string topicId)
+    /// <summary>Quellmodul → ID der eingefrorenen Modulkopie in der neuesten veröffentlichten Themenversion.</summary>
+    private async Task<Dictionary<string, string>> PreviousModuleCopiesAsync(string topicId)
     {
         var latest = await LoadLatestPublishedAsync(topicId);
         if (latest is null) return new();
-        var rows = await _db.QueryAsync("SELECT source_module_id, content_hash FROM topic_version_modules WHERE version_id = @v AND role = 'module'", new[] { ("v", (object?)latest.Id) });
-        return rows.Where(r => !string.IsNullOrEmpty(r.GetValueOrDefault("source_module_id"))).ToDictionary(r => r["source_module_id"]!, r => r["content_hash"] ?? "", StringComparer.OrdinalIgnoreCase);
+        var rows = await _db.QueryAsync("SELECT source_module_id, module_id FROM topic_version_modules WHERE version_id = @v AND role = 'module'", new[] { ("v", (object?)latest.Id) });
+        return rows.Where(r => !string.IsNullOrEmpty(r.GetValueOrDefault("source_module_id"))).ToDictionary(r => r["source_module_id"]!, r => r["module_id"] ?? "", StringComparer.OrdinalIgnoreCase);
     }
 
     // ─── Veröffentlichen ────────────────────────────────────────────────────
@@ -265,11 +331,19 @@ public partial class TopicService
 
         // Gibt es überhaupt etwas Neues? (Themenänderung oder geänderter Modulinhalt)
         var latest = await LoadLatestPublishedAsync(topic.Id);
-        var previous = await PreviousHashesAsync(topic.Id);
-        var hashes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var s in sources) hashes[s.Id] = await _repo.ComputeModuleContentHashAsync(s);
-        var changed = latest is null || topic.HasUnpublishedChanges
-                      || sources.Any(s => !previous.TryGetValue(s.Id, out var h) || h != hashes[s.Id]) || previous.Keys.Except(hashes.Keys, StringComparer.OrdinalIgnoreCase).Any();
+        var previous = await PreviousModuleCopiesAsync(topic.Id);
+        // festgelegte Modulversionen (ADR 0030): die eingefrorene Kopie der Modulversion ist der Inhalt der Themenversion — nie der veränderliche aktuelle Stand
+        var hashes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);   // Quellmodul → ID der eingefrorenen Modulkopie
+        var versionOf = new Dictionary<string, ModuleVersionInfo>(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in rows)
+        {
+            var ver = row.Version is int pv ? await _moduleVersions.GetVersionRawAsync(row.ModuleId, pv) : null;
+            if (ver is null) throw new ArgumentException("Für ein Modul ist keine Modulversion festgelegt. Öffne das Thema im Editor und übernimm eine Modulversion.");
+            hashes[row.ModuleId] = ver.SnapshotModuleId; versionOf[row.ModuleId] = ver;
+        }
+        var fingerprint = await ComputeDraftFingerprintAsync(topic);
+        var changed = await DraftDiffersFromLatestAsync(topic, latest)
+                      || sources.Any(s => !previous.TryGetValue(s.Id, out var h) || !string.Equals(h, hashes[s.Id], StringComparison.OrdinalIgnoreCase)) || previous.Keys.Except(hashes.Keys, StringComparer.OrdinalIgnoreCase).Any();
         if (!changed) throw new InvalidOperationException($"Keine Änderungen seit Version {latest!.VersionNumber}. Ändere das Thema oder eines seiner Module, bevor du eine neue Version veröffentlichst.");
         if ((await _db.QueryAsync("SELECT 1 FROM topic_versions WHERE topic_id = @t AND status = 'building'", new[] { ("t", (object?)topic.Id) })).Count > 0)
             throw new InvalidOperationException("Eine Veröffentlichung dieses Themas läuft bereits.");
@@ -297,10 +371,10 @@ public partial class TopicService
         // (die Prüfung oben las ggf. veralteten Zustand), wird die eigene Zeile verworfen — so entsteht bei gleichzeitigen Aufrufen genau eine Version.
         var fresh = await RequireOwnTopicAsync(ownerId, topicId);
         var olderBuilding = (await _db.QueryAsync("SELECT 1 FROM topic_versions WHERE topic_id = @t AND status = 'building' AND version_number < @n", new (string, object?)[] { ("t", topic.Id), ("n", next) })).Count > 0;
-        var freshPrevious = await PreviousHashesAsync(topic.Id);
+        var freshPrevious = await PreviousModuleCopiesAsync(topic.Id);
         var freshLatest = await LoadLatestPublishedAsync(topic.Id);
-        var stillChanged = freshLatest is null || fresh.HasUnpublishedChanges
-                           || sources.Any(s => !freshPrevious.TryGetValue(s.Id, out var h) || h != hashes[s.Id]) || freshPrevious.Keys.Except(hashes.Keys, StringComparer.OrdinalIgnoreCase).Any();
+        var stillChanged = await DraftDiffersFromLatestAsync(fresh, freshLatest)
+                           || sources.Any(s => !freshPrevious.TryGetValue(s.Id, out var h) || !string.Equals(h, hashes[s.Id], StringComparison.OrdinalIgnoreCase)) || freshPrevious.Keys.Except(hashes.Keys, StringComparer.OrdinalIgnoreCase).Any();
         if (olderBuilding || !stillChanged)
         {
             await _db.ExecuteAsync("DELETE FROM topic_versions WHERE id = @id AND status = 'building'", new[] { ("id", (object?)versionId) });
@@ -309,7 +383,8 @@ public partial class TopicService
 
         try
         {
-            var snapshot = await BuildSnapshotAsync(topic, versionId, next, sources, hashes, cfg);
+            var snapshot = await BuildSnapshotAsync(topic, versionId, next, sources, hashes, versionOf, cfg);
+            snapshot.DraftFingerprint = fingerprint;
             // Reihenfolge: erst die Revision, dann der Status — eine parallele Veröffentlichung sieht so entweder „läuft noch“ oder den vollständigen neuen Stand
             await _db.ExecuteAsync("UPDATE topics SET published_revision = @r, updated_at = @n WHERE id = @t AND published_revision < @r", new (string, object?)[] { ("r", revisionAtStart), ("n", DateTime.UtcNow), ("t", topic.Id) });
             await _db.ExecuteAsync("""
@@ -328,7 +403,7 @@ public partial class TopicService
         return published;
     }
 
-    private async Task<TopicSnapshot> BuildSnapshotAsync(TopicInfo topic, string versionId, int versionNumber, List<ModuleInfo> sources, Dictionary<string, string> hashes, TopicExamConfig draftCfg)
+    private async Task<TopicSnapshot> BuildSnapshotAsync(TopicInfo topic, string versionId, int versionNumber, List<ModuleInfo> sources, Dictionary<string, string> frozenIds, Dictionary<string, ModuleVersionInfo> versionOf, TopicExamConfig draftCfg)
     {
         var snap = new TopicSnapshot { Name = topic.Name, Description = topic.Description };
         var idMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);   // Quelle → Kopie
@@ -336,20 +411,17 @@ public partial class TopicService
         for (var i = 0; i < sources.Count; i++)
         {
             var src = sources[i];
-            // unveränderte Module: vorhandene eingefrorene Kopie wiederverwenden (gleiche Karten-IDs ⇒ Lernstand und bestandene Modulprüfungen bleiben erhalten)
-            var reuse = await _db.QueryAsync("""
-                SELECT vm.module_id FROM topic_version_modules vm JOIN topic_versions v ON v.id = vm.version_id
-                WHERE v.topic_id = @t AND v.status = 'published' AND vm.role = 'module' AND vm.source_module_id = @s AND vm.content_hash = @h
-                ORDER BY v.version_number DESC LIMIT 1
-                """, new (string, object?)[] { ("t", topic.Id), ("s", src.Id), ("h", hashes[src.Id]) });
-            var copyId = reuse.Count > 0 ? reuse[0]["module_id"]! : (await _repo.CreateTopicSnapshotModuleAsync(src, versionNumber)).Id;
+            // Die eingefrorene Kopie gehört der festgelegten Modulversion und wird von allen Themenversionen mit dieser Modulversion geteilt
+            // (gleiche Karten-IDs ⇒ Lernstand und bestandene Modulprüfungen bleiben erhalten). Es entsteht keine neue Kopie des aktuellen Moduls (ADR 0030).
+            var copyId = frozenIds[src.Id];
             idMap[src.Id] = copyId;
             await _db.ExecuteAsync("INSERT INTO topic_version_modules (version_id, module_id, role, position, source_module_id, content_hash) VALUES (@v, @m, 'module', @p, @s, @h)",
-                new (string, object?)[] { ("v", versionId), ("m", copyId), ("p", i), ("s", src.Id), ("h", hashes[src.Id]) });
+                new (string, object?)[] { ("v", versionId), ("m", copyId), ("p", i), ("s", src.Id), ("h", versionOf[src.Id].ContentHash) });
             var copy = (await _repo.GetModuleRawAsync(copyId))!;
             var exam = draftCfg.ModuleExams.TryGetValue(src.Id, out var e) ? e : new TopicModuleExamConfig();
             snap.Modules.Add(await ViewOfModuleAsync(copy, i, exam));
             snap.Modules[^1].SourceModuleId = src.Id;
+            snap.Modules[^1].Version = versionOf[src.Id].VersionNumber;
             snap.ExamConfig.ModuleExams[copyId] = exam;
         }
 

@@ -56,6 +56,18 @@ public static class TransferSchema
             ["icon"] = Str("Emoji/Symbol, Standard 📚."),
             ["color"] = Str("Farbe als #RRGGBB, Standard #2AA79B."),
             ["cards"] = Arr(new JsonObject { ["$ref"] = "/api/schema/import/cards#card_schema", ["description"] = "Kanonisches Karten-JSON" }, "Karten in Reihenfolge (höchstens 2000)."),
+            ["learning_objectives"] = Arr(new JsonObject { ["type"] = "object", ["required"] = new JsonArray("id", "text"), ["properties"] = new JsonObject { ["id"] = Str("Kleinbuchstaben, Ziffern, . _ - (höchstens 64 Zeichen), eindeutig."), ["text"] = Str("Lernziel, höchstens 500 Zeichen.") } }, "Optional (ADR 0031): Lernziele des Moduls (höchstens 50)."),
+            ["competencies"] = Arr(new JsonObject
+            {
+                ["type"] = "object", ["required"] = new JsonArray("id", "name"),
+                ["properties"] = new JsonObject
+                {
+                    ["id"] = Str("Eindeutige Kompetenz-ID (Kleinbuchstaben, Ziffern, . _ -); Karten verweisen darauf (competencies[])."), ["objective_id"] = Str("Optional: ID eines Lernziels dieses Moduls."),
+                    ["name"] = Str("Bezeichnung, höchstens 120 Zeichen."), ["description"] = Str("Beschreibung, höchstens 500 Zeichen."),
+                    ["pass_percent"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1, ["maximum"] = 100, ["default"] = 60, ["description"] = "Bestehensgrenze der Kompetenz (Anteil der Punkte ihrer Fragen)." },
+                    ["min_questions"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1, ["maximum"] = 50, ["default"] = 1, ["description"] = "Erforderliche Prüfungsabdeckung: Mindestanzahl geprüfter Fragen dieser Kompetenz." },
+                },
+            }, "Optional (ADR 0031): Kompetenzen des Moduls (höchstens 100). Nachgewiesen gilt eine Kompetenz nur bei ausreichender Prüfung im verifizierten Modulquiz."),
             ["quiz_config"] = new JsonObject
             {
                 ["type"] = "object",

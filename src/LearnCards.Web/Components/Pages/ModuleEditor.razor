@@ -4,6 +4,8 @@
 @inject CardRepository Repo
 @inject QuizService Quiz
 @inject TopicService TopicSvc
+@inject ModuleVersionService ModuleVersions
+@inject CompetencyService CompetencySvc
 @inject NavigationManager Nav
 @inject AuthenticationStateProvider AuthState
 @inject IJSRuntime JS
@@ -36,6 +38,60 @@
                     <button class="btn btn-primary" @onclick="NewCardAsync">+ Neue Karte</button>
                 </div>
             </div>
+            @if (_mv is not null)
+            {
+                <div class="module-versions" role="group" aria-label="Modulversionen">
+                    <span class="badge @(_mv.HasUnpublishedChanges ? "badge-draft" : "")">@(_mv.LatestVersion == 0 ? "Noch nicht veröffentlicht" : $"Version {_mv.LatestVersion}")@(_mv.HasUnpublishedChanges && _mv.LatestVersion > 0 ? " + Entwurf mit Änderungen" : "")</span>
+                    <button class="btn btn-ghost btn-sm" @onclick="PublishModuleVersionAsync" disabled="@(!_mv.HasUnpublishedChanges || _versionBusy)"
+                            title="Friert den aktuellen Stand (Karten, Bilder, Quiz, Konfiguration, Fragenpool) als unveränderliche Modulversion ein.">⬆ Version veröffentlichen</button>
+                    @if (_mv.Versions.Count > 0)
+                    {
+                        <span class="muted">Frühere Stände (nur lesbar):</span>
+                        @foreach (var v in _mv.Versions)
+                        {
+                            <a class="badge" href="/module/@v.SnapshotModuleId" title="@VersionTitle(v)">V@(v.VersionNumber)</a>
+                        }
+                    }
+                    @if (_versionMessage is not null) { <span class="muted" role="status">@_versionMessage</span> }
+                </div>
+            }
+            <div class="module-competencies">
+                <button class="btn btn-ghost btn-sm" @onclick="() => _compOpen = !_compOpen" aria-expanded="@_compOpen">🎯 Lernziele &amp; Kompetenzen (@_model.Competencies.Count)</button>
+                @if (_compOpen)
+                {
+                    <div class="card panel" role="group" aria-label="Lernziele und Kompetenzen">
+                        <p class="muted">Kompetenzen werden Karten zugeordnet (im Karteneditor). Im Zertifikat steht nur, was im verifizierten Modulquiz ausreichend geprüft und bestanden wurde — „Modul bestanden“ allein bescheinigt keine Kompetenz.</p>
+                        <h3>Lernziele</h3>
+                        @foreach (var o in _model.Objectives.ToList())
+                        {
+                            <div class="form-row">
+                                <input class="input" style="max-width:9rem" aria-label="Lernziel-ID" @bind="o.Id" />
+                                <input class="input" aria-label="Lernziel" placeholder="Lernziel" @bind="o.Text" />
+                                <button class="icon-btn" title="Entfernen" aria-label="Lernziel entfernen" @onclick="() => _model.Objectives.Remove(o)">✕</button>
+                            </div>
+                        }
+                        <button class="btn btn-ghost btn-sm" @onclick="AddObjective">+ Lernziel</button>
+                        <h3>Kompetenzen</h3>
+                        @foreach (var c in _model.Competencies.ToList())
+                        {
+                            <div class="form-row">
+                                <input class="input" style="max-width:9rem" aria-label="Kompetenz-ID" @bind="c.Id" />
+                                <input class="input" aria-label="Bezeichnung" placeholder="Bezeichnung" @bind="c.Name" />
+                                <select class="input" style="max-width:14rem" aria-label="Lernziel" @bind="c.ObjectiveId">
+                                    <option value="">(ohne Lernziel)</option>
+                                    @foreach (var o in _model.Objectives) { <option value="@o.Id">@o.Id – @o.Text</option> }
+                                </select>
+                                <label>ab <input class="input" style="max-width:5rem" type="number" min="1" max="100" @bind="c.PassPercent" /> %</label>
+                                <label>≥ <input class="input" style="max-width:4rem" type="number" min="1" max="50" @bind="c.MinQuestions" /> Fragen</label>
+                                <button class="icon-btn" title="Entfernen" aria-label="Kompetenz entfernen" @onclick="() => _model.Competencies.Remove(c)">✕</button>
+                            </div>
+                        }
+                        <button class="btn btn-ghost btn-sm" @onclick="AddCompetency">+ Kompetenz</button>
+                        <p><button class="btn btn-primary" @onclick="SaveCompetenciesAsync">Speichern</button>
+                            @if (_compMessage is not null) { <span class="@(_compError ? "alert alert-error" : "muted")" role="status">@_compMessage</span> }</p>
+                    </div>
+                }
+            </div>
             @if (_usage.Count > 0)
             {
                 <div class="module-usage">
@@ -44,7 +100,7 @@
                     {
                         <a class="badge" href="@UsageHref(u)">@u.TopicName@(u.InDraft ? " · Entwurf" : "")@(u.Versions.Count > 0 ? " · veröffentlicht in V" + string.Join("/", u.Versions) : "")</a>
                     }
-                    <span class="muted">Änderungen am Modul wirken auf Themen erst mit der nächsten Themenversion.</span>
+                    <span class="muted">Themen verwenden festgelegte Modulversionen: Änderungen am Modul wirken erst nach einer neuen Modulversion und der ausdrücklichen Übernahme im Thema.</span>
                 </div>
             }
         </section>
@@ -156,6 +212,18 @@
                             <button type="button" class="btn btn-ghost btn-sm" @onclick="AddSource">+ Quelle</button>
                         </fieldset>
 
+                        @if (_model.Competencies.Count > 0)
+                        {
+                            <fieldset class="editor-section">
+                                <legend>Kompetenzen dieser Karte</legend>
+                                <p class="muted">Fragen dieser Karte zählen im Modulquiz als Nachweis für die gewählten Kompetenzen.</p>
+                                @foreach (var comp in _model.Competencies)
+                                {
+                                    var cid = comp.Id;
+                                    <label class="check"><input type="checkbox" checked="@_draft.Competencies.Contains(cid)" @onchange="e => ToggleCompetency(cid, e.Value is true)" /> @comp.Name <span class="muted">(@cid)</span></label>
+                                }
+                            </fieldset>
+                        }
                         <fieldset class="editor-section">
                             <legend>Folienmodus (optional)</legend>
                             <div class="form-grid">
@@ -348,10 +416,63 @@
         public List<OfficialSource> Sources = new();
         public List<DraftImage> Images = new();
         public List<QuizQuestionInput> Quiz = new();
+        public HashSet<string> Competencies = new(StringComparer.Ordinal);
     }
 
     private ModuleInfo? _module;
     private List<ModuleTopicUsage> _usage = new();
+    private ModuleCompetencyModel _model = new();
+    private bool _compOpen;
+    private string? _compMessage;
+    private bool _compError;
+
+    private void ToggleCompetency(string id, bool on)
+    {
+        if (_draft is null) return;
+        if (on) _draft.Competencies.Add(id); else _draft.Competencies.Remove(id);
+    }
+
+    private void AddObjective() => _model.Objectives.Add(new LearningObjective { Id = "lz" + (_model.Objectives.Count + 1), Text = "" });
+    private void AddCompetency() => _model.Competencies.Add(new Competency { Id = "k" + (_model.Competencies.Count + 1), Name = "", PassPercent = 60, MinQuestions = 1 });
+
+    private async Task SaveCompetenciesAsync()
+    {
+        _compMessage = null; _compError = false;
+        try
+        {
+            await CompetencySvc.SaveModelAsync(_userSub, ModuleId, _model);
+            _model = await CompetencySvc.GetModelRawAsync(ModuleId);
+            await LoadVersionsAsync();
+            _compMessage = "Lernziele und Kompetenzen gespeichert (Entwurf; sie gelten für Nachweise ab der nächsten Modulversion).";
+        }
+        catch (Exception e) when (e is ArgumentException or KeyNotFoundException) { _compMessage = e.Message; _compError = true; }
+    }
+
+    private ModuleVersionOverview? _mv;
+    private bool _versionBusy;
+    private string? _versionMessage;
+
+    private static string VersionTitle(ModuleVersionInfo v) =>
+        v.PublishedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm") + (v.Note.Length > 0 ? " · " + v.Note : "") + " · " + v.Cards + " Karten";
+
+    private async Task LoadVersionsAsync()
+    {
+        try { _mv = _module is null ? null : await ModuleVersions.GetOverviewAsync(_userSub, _module.Id); }
+        catch (KeyNotFoundException) { _mv = null; }
+    }
+
+    private async Task PublishModuleVersionAsync()
+    {
+        _versionBusy = true; _versionMessage = null;
+        try
+        {
+            var v = await ModuleVersions.PublishAsync(_userSub, ModuleId);
+            _versionMessage = $"Version {v.VersionNumber} veröffentlicht.";
+        }
+        catch (Exception e) when (e is InvalidOperationException or KeyNotFoundException) { _versionMessage = e.Message; }
+        await LoadVersionsAsync();
+        _versionBusy = false;
+    }
     private static string UsageHref(ModuleTopicUsage u) => u.Versions.Count > 0 ? "/topics/" + u.TopicId + "?version=" + u.Versions.Max() : "/topics/" + u.TopicId + "/edit";
     private string _userSub = "";
     private bool _loading = true, _configOpen, _showArchived, _preview, _saving, _conflict, _quizPreviewOpen;
@@ -372,6 +493,8 @@
         _userSub = auth.User.GetUserId() ?? throw new UnauthorizedAccessException();
         _module = await Repo.GetModuleAsync(ModuleId, _userSub);
         _usage = _module is null ? new() : (await TopicSvc.ListModuleUsageAsync(_userSub)).GetValueOrDefault(_module.Id) ?? new();   // nur eigene Module (Besitzprüfung in der SQL-Abfrage)
+        await LoadVersionsAsync();
+        _model = _module is null ? new() : await CompetencySvc.GetModelRawAsync(_module.Id);
         if (_module is not null)
         {
             await LoadCardsAsync();
@@ -401,6 +524,7 @@
             Sources = card.OfficialSources.Select(s => new OfficialSource { Title = s.Title, Url = s.Url, Publisher = s.Publisher }).ToList(),
             Images = card.Images.OrderBy(i => i.SortOrder).Select(i => new DraftImage { ImageId = i.ImageId, Mime = i.MimeType, Alt = i.AltText, Caption = i.Caption }).ToList(),
             Quiz = card.Quiz.Select(q => QuizPoolService.FromCardQuiz(card.Id, q)).ToList(),
+            Competencies = card.Competencies.ToHashSet(StringComparer.Ordinal),
         };
         await LoadPoolAsync();
         ResetBaseline();
@@ -432,6 +556,7 @@
         Sources = _draft.Sources.Select(s => new { s.Title, s.Url, s.Publisher }),
         Images = _draft.Images.Select(i => new { i.ImageId, i.Mime, i.Alt, i.Caption, New = i.Data is not null, Len = i.Data?.Length ?? 0 }),
         Quiz = _draft.Quiz,
+        Competencies = _draft.Competencies.OrderBy(c => c, StringComparer.Ordinal),
     });
 
     private bool IsDirty => _draft is not null && Snapshot() != _baseline;
@@ -545,6 +670,7 @@
         OfficialSources = _draft.Sources.Where(s => !string.IsNullOrWhiteSpace(s.Title) || !string.IsNullOrWhiteSpace(s.Url))
             .Select(s => new OfficialSource { Title = s.Title.Trim(), Url = s.Url.Trim(), Publisher = (s.Publisher ?? "").Trim() }).ToList(),
         Quiz = _draft.Quiz.Select(ToCardQuiz).ToList(),
+        Competencies = _draft.Competencies.OrderBy(c => c, StringComparer.Ordinal).ToList(),
         // Immer die vollständige Liste senden: vorhandene Bilder per image_id behalten (inkl. neuer Texte/Reihenfolge), neue mit Daten — so geht beim Speichern nichts verloren
         Images = _draft.Images.Select(i => i.Data is null
             ? new CardImage { ImageId = i.ImageId, MimeType = i.Mime, AltText = i.Alt, Caption = i.Caption }

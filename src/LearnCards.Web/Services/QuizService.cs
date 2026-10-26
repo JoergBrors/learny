@@ -33,8 +33,15 @@ public partial class QuizService
     private readonly CertificateService _certificates;
     private readonly Microsoft.Extensions.Logging.ILogger<QuizService> _log;
 
-    public QuizService(CardRepository repo, OpenAiClient openAi, QuizPoolService pool, CertificateService certificates, Microsoft.Extensions.Logging.ILogger<QuizService> log)
+    private readonly IServiceProvider _services;
+    private readonly CompetencyService _competencies;
+    private readonly ModuleVersionService _moduleVersions;
+
+    public QuizService(CardRepository repo, OpenAiClient openAi, QuizPoolService pool, CertificateService certificates, CompetencyService competencies, ModuleVersionService moduleVersions, IServiceProvider services, Microsoft.Extensions.Logging.ILogger<QuizService> log)
     {
+        _services = services;
+        _competencies = competencies;
+        _moduleVersions = moduleVersions;
         _certificates = certificates;
         _repo = repo;
         _openAi = openAi;
@@ -502,18 +509,49 @@ public partial class QuizService
         await _repo.SaveQuizResultAsync(record);
         result.ResultId = record.Id;
         if (access.Context == CardRepository.ContextTopic) await _repo.CompleteTopicAttemptAsync(record);   // Prüfungsversuch mit Themenversion und Ergebnis verbinden (ADR 0027)
-        // Abschlussnachweis (ADR 0021): nur nach bestandenem, sitzungsverifiziertem Modulquiz; die Bewertung selbst bleibt hier — ein Fehler darf das Ergebnis nie gefährden
-        // Themenprüfungen stellen (noch) keine Zertifikate aus: Das Zertifikatsmodell (ADR 0021) kennt nur Module; eine Themenabschluss-Erweiterung ist in ADR 0027 vorbereitet
-        if (passed && record.SessionId is not null && string.IsNullOrEmpty(record.CardId) && access.Context != CardRepository.ContextTopic)
+        // Abschlussnachweis (ADR 0021/0031): nur nach bestandenem, sitzungsverifiziertem Modulquiz; die Bewertung selbst bleibt hier — ein Fehler darf das Ergebnis nie gefährden.
+        // Themenmodule (eingefrorene Kopien) stellen Modulzertifikate für ihre Modulprüfung aus (Baustein des Themenabschlusses, ADR 0032); die Abschlussprüfung des Themas nicht.
+        if (passed && record.SessionId is not null && string.IsNullOrEmpty(record.CardId))
         {
             try
             {
-                var cert = await _certificates.TryIssueAsync(record, access.Module.Name, access.Context, access.Module.GlobalVersion);
+                var cert = await IssueModuleCredentialAsync(record, access.Module, access.Context, all);
                 if (cert is not null) result.CertificateId = cert.Id;
+                // Themenabschluss prüfen (Master-Badge + CLR): bewusst über den Dienstanbieter, weil der Abschlussdienst selbst auf Themen und damit auf diesen Dienst aufbaut
+                if (access.Context == CardRepository.ContextTopic && _services.GetService(typeof(TopicCredentialService)) is TopicCredentialService topicCreds)
+                    await topicCreds.EnsureForResultAsync(userSub, record.Id);
             }
             catch (Exception ex) when (ex is not OperationCanceledException) { _log.LogWarning("Zertifikat konnte nicht ausgestellt werden: {Message}", ex.Message); }
         }
         return result;
+    }
+
+    /// <summary>
+    /// Stellt für ein verifiziertes, bestandenes Modulquiz den Prüfungssnapshot und das Modulzertifikat aus (idempotent). Modulversion: eigene private Module werden bei Bedarf als
+    /// Modulversion eingefroren (ADR 0030); globale/Themenmodule tragen ihre feste Version. Ohne <paramref name="graded"/> werden die gespeicherten bewerteten Antworten des Ergebnisses verwendet
+    /// (nachträgliche Ausstellung für ältere Themenergebnisse). Liefert null, wenn kein Zertifikat vorgesehen ist (z. B. Abschlussprüfung eines Themas).
+    /// </summary>
+    public async Task<Certificate?> IssueModuleCredentialAsync(QuizResultRecord record, ModuleInfo module, string context, IReadOnlyList<GradedAnswer>? graded = null)
+    {
+        if (record.Passed != true || string.IsNullOrEmpty(record.SessionId) || !string.IsNullOrEmpty(record.CardId)) return null;
+        if (context == CardRepository.ContextTopic && await _repo.IsTopicFinalExamModuleAsync(module.Id)) return null;   // Abschlussprüfung des Themas: kein Modulzertifikat
+        graded ??= System.Text.Json.JsonSerializer.Deserialize<List<GradedAnswer>>(record.AnswersJson, AppJson.Options) ?? new();
+        int? certVersion = module.GlobalVersion;
+        string contentHash;
+        if (context == CardRepository.ContextPrivate && string.Equals(module.OwnerUserId, record.UserSub, StringComparison.OrdinalIgnoreCase))
+        {
+            var mv = await _moduleVersions.EnsureCurrentVersionAsync(record.UserSub, module.Id, "Automatisch beim Abschluss");
+            certVersion = mv.VersionNumber; contentHash = mv.ContentHash;
+        }
+        else if (context == CardRepository.ContextTopic)
+        {
+            var mv = await _moduleVersions.FindBySnapshotAsync(module.Id);   // eingefrorene Kopie einer Modulversion (ADR 0030); Altbestand ohne Version: 0
+            certVersion = mv?.VersionNumber ?? 0; contentHash = mv?.ContentHash ?? await _repo.ComputeModuleContentHashAsync(module);
+        }
+        else contentHash = await _repo.ComputeModuleContentHashAsync(module);
+        var evidence = await _competencies.EvaluateAsync(module.Id, graded.Select(g => new CompetencyService.GradedItem(g.SourceCardId, g.Score, g.Max)).ToList());
+        var snapshot = await _competencies.CreateSnapshotAsync(record, module, certVersion ?? 0, contentHash, graded.Count, evidence);
+        return await _certificates.TryIssueAsync(record, module.Name, context, certVersion, snapshot, evidence);
     }
 
     private static string GradeFor(double pct) => pct >= 90 ? "A" : pct >= 75 ? "B" : pct >= 60 ? "C" : pct >= 45 ? "D" : "F";

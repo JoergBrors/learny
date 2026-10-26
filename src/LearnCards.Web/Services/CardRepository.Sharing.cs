@@ -58,7 +58,7 @@ public partial class CardRepository
         }
 
         // Eingefrorene Modulkopie einer veröffentlichten Themenversion (ADR 0027): nur lernbar über Eigentum am Thema, Freigabe, Zuweisung oder aktive globale Version
-        if (module.Scope == ScopeTopic && await CanLearnTopicModuleAsync(userId, module.Id))
+        if (module.Scope == ScopeTopic && (await CanLearnTopicModuleAsync(userId, module.Id) || await OwnsModuleVersionSnapshotAsync(userId, module.Id)))
         {
             module.Context = ContextTopic;
             return new ModuleAccess(module, ContextTopic, CanEdit: false);
@@ -234,7 +234,7 @@ public partial class CardRepository
             {
                 ModuleId = copy.Id, OwnerUserId = null, Category = c.Category, Term = c.Term, Question = c.Question, Definition = c.Definition,
                 HowItWorks = c.HowItWorks, Context = c.Context, KeyFact = c.KeyFact, ReferenceAnswer = c.ReferenceAnswer, ChatPrompt = c.ChatPrompt,
-                OfficialSources = c.OfficialSources, SlideNumber = c.SlideNumber, TargetTimeSec = c.TargetTimeSec, Quiz = c.Quiz,
+                OfficialSources = c.OfficialSources, SlideNumber = c.SlideNumber, TargetTimeSec = c.TargetTimeSec, Quiz = c.Quiz, Competencies = c.Competencies,
                 Archived = false, SortOrder = c.SortOrder,
             };
             await InsertCardAsync(copyCard);
@@ -244,6 +244,7 @@ public partial class CardRepository
         // Quizkonfiguration und aktive Fragen (feste und gespeicherte KI-Fragen) werden mit der Version eingefroren (ADR 0019)
         await _quizPool.CopyForStagedModuleAsync(source.Id, copy.Id, cardIdMap, version);
         await _db.ExecuteAsync("UPDATE cards SET quiz_synced = 1 WHERE module_id = @m", new[] { ("m", (object?)copy.Id) });
+        await CopyCompetencyModelAsync(source.Id, copy.Id);   // Lernziele und Kompetenzen werden mit der Version eingefroren (ADR 0031)
         return (copy, sourceCards.Count);
     }
 

@@ -1,6 +1,7 @@
 # 0021 — Zertifikate und signierte Open Badges 3.0
 
 - **Status:** Akzeptiert (Grundlage umgesetzt; Oberfläche teilweise offen, siehe „Offene Punkte“)
+- **Ergänzt durch:** [0031](0031-kompetenzmodell-und-pruefungssnapshots.md) (Kompetenznachweise, Prüfungssnapshot im Credential)
 - **Datum:** 2026-10-26
 - **Ergänzt:** [0019](0019-einheitliches-quizsystem.md) (verifiziertes Ergebnis), [0011](0011-mehrbenutzerarchitektur.md), [0015](0015-freigaben-globale-lernmodule.md) (Rechte), [0022](0022-polygon-verankerung-und-kostenschranke.md)
 - **Bezug:** [0002](0002-keine-nuget-pakete.md)
