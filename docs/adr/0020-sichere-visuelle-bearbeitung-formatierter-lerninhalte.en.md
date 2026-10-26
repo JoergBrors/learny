@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-26
-- **Supplements:** [0006](0006-kanonisches-karten-json.en.md) (optional formatting syntax in existing fields, no new fields), [0016](0016-bilder-in-lernkarten.en.md)/[0017](0017-konfigurierbare-bildspeicher.en.md)/[0018](0018-zentraler-image-proxy-und-storage-zugriff.en.md) (images), [0019](0019-einheitliches-quizsystem.md) (reuse quiz engine and pool)
+- **Supplements:** [0006](0006-kanonisches-karten-json.en.md) (optional formatting syntax in existing fields, no new fields), [0016](0016-bilder-in-lernkarten.en.md)/[0017](0017-konfigurierbare-bildspeicher.en.md)/[0018](0018-zentraler-image-proxy-und-storage-zugriff.en.md) (images), [0019](0019-einheitliches-quizsystem.en.md) (reuse quiz engine and pool)
 - **Related:** [0002](0002-keine-nuget-pakete.en.md) (no editor library), [0003](0003-eine-deploybare-einheit.en.md), [0011](0011-mehrbenutzerarchitektur.en.md), [0015](0015-freigaben-globale-lernmodule.en.md)
 
 ## Context
