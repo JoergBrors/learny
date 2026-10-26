@@ -23,3 +23,10 @@ deploy/docker/certs/
 # MCP-Hauptschlüssel für die lokale Entwicklung (ADR 0025) — nie committen (unter Windows ist data/ dasselbe Verzeichnis wie Data/)
 **/mcp-token.key
 *.key
+src/LearnCards.Web/Data/pdf-signing-dev.pfx
+
+# Learny-PKI (ADR 0035): Schluesseldateien nie einchecken
+data/pki/
+**/data/pki/
+*.pfx
+*.p12
