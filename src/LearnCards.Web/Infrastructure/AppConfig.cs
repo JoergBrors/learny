@@ -53,6 +53,9 @@ public class AppConfig
     // PDF-Signatur der Zertifikate (ADR 0033)
     public PdfSigningSettings PdfSigning { get; set; } = new();
 
+    // Learny-PKI (ADR 0035)
+    public PkiSettings Pki { get; set; } = new();
+
     // MCP
     public string McpApiKey { get; set; } = "";
     /// <summary>
@@ -130,6 +133,8 @@ public class AppConfig
 
         // ── PDF-Signatur (ADR 0033): eigenes Signaturzertifikat aus der .env; Entwicklungszertifikat nur in Development ──
         var envName = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ?? "Production";
+        cfg.Pki = PkiSettings.Load(Path.GetFullPath("data"));
+        if (cfg.Pki.Validate() is { Count: > 0 } pkiErrors) throw new InvalidOperationException("Ungültige PKI-Konfiguration: " + string.Join(" ", pkiErrors));
         cfg.PdfSigning = PdfSigningSettings.Load(Path.GetFullPath("data"), envName.Equals("Development", StringComparison.OrdinalIgnoreCase));
 
         // ── Datenbank-Provider bestimmen ────────────────────────────────

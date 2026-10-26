@@ -524,6 +524,92 @@ public static class Schema
             """;
         yield return "CREATE INDEX IF NOT EXISTS ix_module_versions_snapshot ON module_versions(snapshot_module_id)";
 
+        // ─── Learny-PKI (ADR 0035): Zertifikatsregister, Widerrufsregister, CRL-Historie, Ereignisse; private Schlüssel liegen nie in der Datenbank ───
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS pki_state (
+                id              INTEGER PRIMARY KEY,
+                status          TEXT NOT NULL,
+                initialized_at  TEXT NULL,
+                initialized_by  TEXT NULL,
+                root_cert_id    {id} NULL,
+                issuing_cert_id {id} NULL,
+                key_algorithm   TEXT NOT NULL DEFAULT 'rsa',
+                base_url        TEXT NOT NULL DEFAULT '',
+                note            TEXT NOT NULL DEFAULT '',
+                updated_at      TEXT NOT NULL
+            )
+            """;
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS pki_certificates (
+                id                   {id} PRIMARY KEY,
+                ca_id                {id} NOT NULL,
+                serial_number        TEXT NOT NULL,
+                subject              TEXT NOT NULL,
+                issuer               TEXT NOT NULL,
+                certificate_type     TEXT NOT NULL,
+                certificate_pem      TEXT NOT NULL,
+                certificate_sha256   TEXT NOT NULL,
+                subject_key_id       TEXT NOT NULL DEFAULT '',
+                public_key_algorithm TEXT NOT NULL,
+                signature_algorithm  TEXT NOT NULL,
+                not_before           TEXT NOT NULL,
+                not_after            TEXT NOT NULL,
+                issued_at            TEXT NOT NULL,
+                issued_by            TEXT NULL,
+                status               TEXT NOT NULL DEFAULT 'active',
+                revoked_at           TEXT NULL,
+                revocation_reason    TEXT NULL,
+                key_reference        TEXT NOT NULL DEFAULT '',
+                created_at           TEXT NOT NULL,
+                UNIQUE (ca_id, serial_number)
+            )
+            """;
+        yield return "CREATE UNIQUE INDEX IF NOT EXISTS ux_pki_certificates_sha ON pki_certificates(certificate_sha256)";
+        yield return "CREATE INDEX IF NOT EXISTS ix_pki_certificates_type ON pki_certificates(certificate_type, status)";
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS pki_certificate_events (
+                id             {id} PRIMARY KEY,
+                certificate_id {id} NOT NULL,
+                event          TEXT NOT NULL,
+                detail         TEXT NOT NULL DEFAULT '',
+                actor          TEXT NULL,
+                created_at     TEXT NOT NULL
+            )
+            """;
+        yield return "CREATE INDEX IF NOT EXISTS ix_pki_events_cert ON pki_certificate_events(certificate_id, created_at)";
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS pki_revocations (
+                id                      {id} PRIMARY KEY,
+                certificate_id          {id} NOT NULL,
+                issuing_ca_id           {id} NOT NULL,
+                certificate_serial_number TEXT NOT NULL,
+                revocation_time         TEXT NOT NULL,
+                reason_code             INTEGER NOT NULL DEFAULT 0,
+                invalidity_date         TEXT NULL,
+                revoked_by              TEXT NULL,
+                created_at              TEXT NOT NULL,
+                audit_reference         TEXT NOT NULL DEFAULT '',
+                released_at             TEXT NULL
+            )
+            """;
+        yield return "CREATE UNIQUE INDEX IF NOT EXISTS ux_pki_revocations_active ON pki_revocations(certificate_id) WHERE released_at IS NULL";
+        yield return "CREATE INDEX IF NOT EXISTS ix_pki_revocations_ca ON pki_revocations(issuing_ca_id, released_at)";
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS pki_crls (
+                id                  {id} PRIMARY KEY,
+                issuer_ca_id        {id} NOT NULL,
+                crl_number          INTEGER NOT NULL,
+                this_update         TEXT NOT NULL,
+                next_update         TEXT NOT NULL,
+                crl_base64          TEXT NOT NULL,
+                crl_sha256          TEXT NOT NULL,
+                signature_algorithm TEXT NOT NULL,
+                entry_count         INTEGER NOT NULL DEFAULT 0,
+                created_at          TEXT NOT NULL,
+                UNIQUE (issuer_ca_id, crl_number)
+            )
+            """;
+
         // Ausgestellte, signierte Zertifikats-PDFs (ADR 0033): einmal erzeugt, danach unverändert abrufbar (Base64 im TEXT-Feld, datenbankunabhängig)
         yield return $"""
             CREATE TABLE IF NOT EXISTS certificate_pdfs (
