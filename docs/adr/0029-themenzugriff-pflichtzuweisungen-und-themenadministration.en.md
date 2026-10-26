@@ -1,6 +1,6 @@
 # 0029 — Topic-specific Module Access, Mandatory Assignments, and Delegated Topic Administration
 
-- **Status:** Accepted (supersedes item 5 of [0027](0027-themen-lernpfade-versionierung-und-abschlusspruefungen.en.md): owners no longer assign learners; supplements [0011](0011-mehrbenutzerarchitektur.en.md), [0012](0012-rollen-aus-entra-app-roles.en.md), [0015](0015-freigaben-globale-lernmodule.en.md), and [0028](0028-themenmodule-json-und-mcp-verwaltung.md))
+- **Status:** Accepted (supersedes item 5 of [0027](0027-themen-lernpfade-versionierung-und-abschlusspruefungen.en.md): owners no longer assign learners; supplements [0011](0011-mehrbenutzerarchitektur.en.md), [0012](0012-rollen-aus-entra-app-roles.en.md), [0015](0015-freigaben-globale-lernmodule.en.md), and [0028](0028-themenmodule-json-und-mcp-verwaltung.en.md))
 - **Date:** 2026-10-26
 - **Motivation:** Clicking “Learn” in a topic module showed “Page not found.” Global/shared topics were not clearly distinguished from mandatory assignments, assignments appeared in the topic editor, and neither a mandatory-task indicator nor administrator progress views existed.
 - **Related:** ADRs 0004, 0005, 0009, 0011, 0012, 0013, 0015, 0019, 0023, 0027, and 0028.
