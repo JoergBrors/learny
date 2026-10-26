@@ -19,7 +19,7 @@ LearnCards supports multiple users ([ADR 0011](docs/adr/0011-mehrbenutzerarchite
 - **Sharing and global modules** ([ADR 0015](docs/adr/0015-freigaben-globale-lernmodule.en.md)): Owners grant selected users revocable study-only access and may submit modules for global publication. Admins review and publish frozen, versioned copies. Tabs distinguish *My modules*, *Shared with me*, *Global modules*. Results always belong to learners; admins/auditors only have read access to global results.
 - Roles `user`, `admin` (user management/publication at `/admin`), and `auditor` (read-only global records/results), assignable in-app or through Entra app roles (`Admin.All` → `admin`, [ADR 0012](docs/adr/0012-rollen-aus-entra-app-roles.en.md)).
 - MCP access is user-scoped and revocable from profile.
-- Security review: [multi-user report](docs/reviews/2026-10-24-mehrbenutzer-pruefbericht.md); notably configure `AUTH_MODE=oidc` explicitly for production.
+- Security review: [multi-user report](docs/reviews/2026-10-24-mehrbenutzer-pruefbericht.en.md); notably configure `AUTH_MODE=oidc` explicitly for production.
 
 ## Database: SQLite Locally, PostgreSQL in Production
 
@@ -182,12 +182,12 @@ Optional; missing or `[]` means no fixed questions. Older `single_choice` files 
 - [ADRs](docs/adr/README.en.md)
 - [Developing with AI Assistants](docs/ai-development.en.md) · [AGENTS](AGENTS.en.md)
 - [Local Development, VS Code, PostgreSQL, MCP](docs/local-development.en.md)
-- [Database Schema](docs/database-schema.md)
+- [Database Schema](docs/database-schema.en.md)
 - [Tests](docs/testing.en.md)
-- [Multi-user Review Report](docs/reviews/2026-10-24-mehrbenutzer-pruefbericht.md)
+- [Multi-user Review Report](docs/reviews/2026-10-24-mehrbenutzer-pruefbericht.en.md)
 - [GPT Project Prompt](docs/gpt-project-prompt.en.md)
 - [Azure Deployment](docs/azure-deployment.en.md)
-- [IIS Deployment via GitHub Actions](docs/iis-deployment.md)
+- [IIS Deployment via GitHub Actions](docs/iis-deployment.en.md)
 - [Migration from Python](docs/migration-notes.en.md)
 
 ## Design
@@ -214,4 +214,4 @@ Under **Topics** (`/topics`), group learning modules into a path, configure modu
 - **Global** = visible/optional for everyone, **shared** = explicitly allowed recipients, **assigned** = specific version by admin/topic admin, **mandatory** = a flagged assignment. Only explicit mandatory assignments appear as “My mandatory topics” on home.
 - Learners with topic access can open all version modules and exams; original private modules remain inaccessible.
 - **Topic Admin** (`themen_admin`, granted by admins) can assign topics and view progress under `/topic-admin`; auditors can read progress. See [ADR 0029](docs/adr/0029-themenzugriff-pflichtzuweisungen-und-themenadministration.en.md).
-- IIS deployment restarts and validates MCP HTTP service after file replacement; see [IIS deployment](docs/iis-deployment.md).
+- IIS deployment restarts and validates MCP HTTP service after file replacement; see [IIS deployment](docs/iis-deployment.en.md).
