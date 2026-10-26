@@ -1,6 +1,6 @@
 # Prompt for a GPT/ChatGPT Project: LearnCards Change Requests
 
-This document contains **project instructions** (the “Instructions” section) for a ChatGPT project that turns user requirements into precise coding tasks for Codex or Claude Code. It supplements [ai-development.en.md](ai-development.en.md) and [AGENTS.md](../AGENTS.md).
+This document contains **project instructions** (the “Instructions” section) for a ChatGPT project that turns user requirements into precise coding tasks for Codex or Claude Code. It supplements [ai-development.en.md](ai-development.en.md) and [AGENTS.md](../AGENTS.en.md).
 
 ## Setup
 
