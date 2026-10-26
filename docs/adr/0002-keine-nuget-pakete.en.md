@@ -18,7 +18,7 @@ Both projects (`LearnCards.Web`, `LearnCards.McpServer`) use only the .NET SDK a
 
 ## Guardrails for Changes
 
-- **Do not add `PackageReference`**, even for tests or helper libraries, without a new ADR. Therefore, the tests (`tests/LearnCards.IntegrationTests`) are a package-free console application (see [testing.md](../testing.md)).
+- **Do not add `PackageReference`**, even for tests or helper libraries, without a new ADR. Therefore, the tests (`tests/LearnCards.IntegrationTests`) are a package-free console application (see [testing.md](../testing.en.md)).
 - Replacing the custom implementations with standard packages is facilitated by `IDatabase` and `OpenAiClient` (see [0004](0004-datenbank-abstraktion.en.md)); it must not change the API or UI.
 - Do not add external package sources to `NuGet.config`.
 
