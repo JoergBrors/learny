@@ -1,8 +1,8 @@
 # 0012 — Roles from Entra ID App Roles
 
-- **Status:** Accepted (supplemented by [0029](0029-themenzugriff-pflichtzuweisungen-und-themenadministration.md): `themen_admin` can be mapped through `OIDC_ROLE_MAP`)
+- **Status:** Accepted (supplemented by [0029](0029-themenzugriff-pflichtzuweisungen-und-themenadministration.en.md): `themen_admin` can be mapped through `OIDC_ROLE_MAP`)
 - **Date:** 2026-10-24
-- **Supplements:** [0011](0011-mehrbenutzerarchitektur.md) (roles), [0005](0005-authentifizierung.en.md) (OIDC)
+- **Supplements:** [0011](0011-mehrbenutzerarchitektur.en.md) (roles), [0005](0005-authentifizierung.en.md) (OIDC)
 
 ## Context
 
@@ -29,7 +29,7 @@ Roles should be managed centrally in the identity provider, not only in the appl
 ## Guardrails for Changes
 
 - Never trust unvalidated token roles: read only the validated ID token and map exclusively via `RoleMap`.
-- For a new IdP-controlled role, update `RoleMap`, `Roles.All` in `Domain/Users.cs`, integration tests, [database-schema.md](../database-schema.md), and this ADR.
+- For a new IdP-controlled role, update `RoleMap`, `Roles.All` in `Domain/Users.cs`, integration tests, [database-schema.md](../database-schema.en.md), and this ADR.
 - `granted_by = 'idp'` exclusively identifies IdP-controlled roles.
 
 ## Configuration in Entra ID
