@@ -224,6 +224,7 @@ try
     WorkflowStructureTests.Run(Check, repoRoot);   // IIS-Workflow: MCP-Neustart (ADR 0029)
     await McpTokenUnitTests.RunAsync(Check, tmp);   // Schutz der MCP-Tokens bei Datenbankzugriff (ADR 0025)
     AuthModeTests.Run(Check);   // Betriebsmodus fail closed (ADR 0026)
+    OidcCallbackTests.Run(Check);   // OIDC form_post, Cookie, Redirect-URI, state (ADR 0036)
     DockerConfigTests.Run(Check, repoRoot);   // Docker-Hub-Veröffentlichung (ADR 0024)
     Console.WriteLine();
 
@@ -266,6 +267,9 @@ try
         if (!ready) throw new Exception("MCP-Server wurde nicht bereit.\n" + log);
     }
     Console.WriteLine($"MCP-Server läuft auf {mcpUrl}\n");
+
+    await OidcCallbackTests.RunHttpAsync(Check, () => NewClient(false));   // POST /auth/callback: Abweisungen (ADR 0036)
+    await OidcFlowTests.RunAsync(Check, psi.Environment, webDll, tmp, FreePort);   // vollständiger OIDC-Ablauf mit lokalem Test-IdP (ADR 0036)
 
     var admin = await LoginAsync(null);          // local-dev-user = Bootstrap-Administrator im Dev-Modus
     if (Environment.GetEnvironmentVariable("TEST_ONLY") == "topics")   // Entwicklungsabkürzung: nur Themen-/Modulversions-Tests

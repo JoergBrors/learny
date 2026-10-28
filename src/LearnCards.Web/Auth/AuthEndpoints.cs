@@ -10,7 +10,7 @@ using LearnCards.Web.Services;
 namespace LearnCards.Web.Auth;
 
 /// <summary>
-/// /auth/login, /auth/callback, /auth/logout — Cookie-Session + OIDC Code Flow.
+/// /auth/login, POST /auth/callback (form_post, ADR 0036), /auth/logout — Cookie-Session + OIDC Code Flow.
 /// Im Dev-Modus (AUTH_MODE=dev oder keine OIDC-Konfiguration) erfolgt ein lokaler Login ohne Provider.
 /// </summary>
 public static class AuthEndpoints
@@ -47,73 +47,87 @@ public static class AuthEndpoints
                 return Results.Redirect(returnUrl);
             }
 
-            var state = OidcService.CreateState(returnUrl);
-            var protector = dp.CreateProtector("oidc-state");
-            http.Response.Cookies.Append(StateCookie, protector.Protect(JsonSerializer.Serialize(state)),
-                new CookieOptions
-                {
-                    HttpOnly = true,
-                    Secure = http.Request.IsHttps,
-                    SameSite = SameSiteMode.Lax,   // Lax nötig: Callback kommt als Top-Level-Redirect vom Provider
-                    MaxAge = TimeSpan.FromMinutes(15),
-                    Path = "/auth",
-                });
+            var redirectUri = BuildRedirectUri(http, cfg);
+            if (redirectUri is null) return Results.Redirect("/login?error=HTTPS+f%C3%BCr+die+Anmeldung+erforderlich");
 
-            var redirectUri = BuildRedirectUri(http);
+            var state = OidcService.CreateState(returnUrl);
+            var protector = dp.CreateProtector("oidc-state").ToTimeLimitedDataProtector();
+            http.Response.Cookies.Append(StateCookie, protector.Protect(JsonSerializer.Serialize(state), OidcCallback.StateLifetime),
+                OidcCallback.StateCookieOptions());   // SameSite=None: Rücksprung per Cross-Site-POST (form_post, ADR 0036)
+
             var url = await oidc.BuildAuthorizeUrlAsync(state, redirectUri);
             return Results.Redirect(url);
         }).AllowAnonymous();
 
-        app.MapGet("/auth/callback", async (HttpContext http, OidcService oidc, UserService users, IDataProtectionProvider dp,
-            string? code, string? state, string? error, string? error_description) =>
-        {
-            if (error is not null)
-                return Results.Redirect($"/login?error={Uri.EscapeDataString(error_description ?? error)}");
-            if (code is null || state is null)
-                return Results.Redirect("/login?error=Antwort+des+Identity-Providers+unvollst%C3%A4ndig");
+        // Alte GET-Rücksprünge (response_mode=query) werden nicht mehr verarbeitet; ein Code in der URL wird nie ausgewertet.
+        app.MapGet(OidcCallback.CallbackPath, (HttpContext http) =>
+            NoStoreRedirect(http, "/login?error=Anmeldung+bitte+erneut+starten")).AllowAnonymous();
 
+        // Rücksprung des Identity Providers (response_mode=form_post): Cross-Site-POST ohne Antiforgery-Token.
+        // Schutz vor Login-CSRF ist die Korrelation: state im Formular = state im verschlüsselten, einmaligen Cookie.
+        app.MapPost(OidcCallback.CallbackPath, async (HttpContext http, OidcService oidc, UserService users, IDataProtectionProvider dp) =>
+        {
+            var sizeLimit = http.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
+            if (sizeLimit is { IsReadOnly: false }) sizeLimit.MaxRequestBodySize = OidcCallback.MaxBodyBytes;
+
+            // Korrelationscookie bei jedem Ausgang entfernen (einmalige Nutzung)
             var raw = http.Request.Cookies[StateCookie];
-            if (raw is null) return Results.Redirect("/login?error=Login-Sitzung+abgelaufen");
-            http.Response.Cookies.Delete(StateCookie, new CookieOptions { Path = "/auth" });
+            http.Response.Cookies.Delete(StateCookie, OidcCallback.StateCookieOptions());
+
+            if (!http.Request.HasFormContentType)
+                return NoStoreRedirect(http, "/login?error=Antwort+des+Identity-Providers+ung%C3%BCltig");
+
+            OidcCallback.Form? form;
+            try { form = OidcCallback.ParseForm(await http.Request.ReadFormAsync()).Form; }
+            catch (Exception ex) when (ex is InvalidDataException or BadHttpRequestException or IOException) { form = null; }
+            if (form is null) return NoStoreRedirect(http, "/login?error=Antwort+des+Identity-Providers+ung%C3%BCltig");
+
+            if (form.Error is not null)
+                return NoStoreRedirect(http, $"/login?error={Uri.EscapeDataString(OidcCallback.SafeErrorText(form.Error))}");
+            if (raw is null) return NoStoreRedirect(http, "/login?error=Login-Sitzung+abgelaufen");
 
             OidcService.AuthState authState;
             try
             {
-                var protector = dp.CreateProtector("oidc-state");
+                var protector = dp.CreateProtector("oidc-state").ToTimeLimitedDataProtector();
                 authState = JsonSerializer.Deserialize<OidcService.AuthState>(protector.Unprotect(raw))!;
             }
-            catch { return Results.Redirect("/login?error=State-Cookie+ung%C3%BCltig"); }
+            catch { return NoStoreRedirect(http, "/login?error=State-Cookie+ung%C3%BCltig"); }
 
-            if (authState.State != state)
-                return Results.Redirect("/login?error=State-Parameter+stimmt+nicht");
+            if (!System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+                    System.Text.Encoding.UTF8.GetBytes(authState.State), System.Text.Encoding.UTF8.GetBytes(form.State!)))
+                return NoStoreRedirect(http, "/login?error=State-Parameter+stimmt+nicht");
+            if (!OidcCallback.TryConsume(authState.State))
+                return NoStoreRedirect(http, "/login?error=Login-Sitzung+bereits+verwendet");
 
             try
             {
-                var redirectUri = BuildRedirectUri(http);
-                var (idToken, _) = await oidc.ExchangeCodeAsync(code, authState.CodeVerifier, redirectUri);
+                var redirectUri = BuildRedirectUri(http, cfg);
+                if (redirectUri is null) return NoStoreRedirect(http, "/login?error=HTTPS+f%C3%BCr+die+Anmeldung+erforderlich");
+                var (idToken, _) = await oidc.ExchangeCodeAsync(form.Code!, authState.CodeVerifier, redirectUri);
                 var claims = await oidc.ValidateIdTokenAsync(idToken, authState.Nonce);
 
                 string? Get(string key) => claims.TryGetValue(key, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
 
                 var sub = Get("sub");
                 if (string.IsNullOrWhiteSpace(sub))
-                    return Results.Redirect("/login?error=ID-Token+enth%C3%A4lt+kein+Subject");
+                    return NoStoreRedirect(http, "/login?error=ID-Token+enth%C3%A4lt+kein+Subject");
 
                 var appUser = await users.SignInAsync(cfg.OidcIssuer, sub,
                     Get("name") ?? Get("preferred_username") ?? "Unbekannt",
                     Get("email") ?? Get("preferred_username") ?? "",
                     idpRoles: GetRoles(claims));
                 if (!appUser.IsActive)
-                    return Results.Redirect("/login?error=Zugang+gesperrt");
+                    return NoStoreRedirect(http, "/login?error=Zugang+gesperrt");
 
                 await SignInAsync(http, appUser, sub);
-                return Results.Redirect(authState.ReturnUrl);
+                return NoStoreRedirect(http, authState.ReturnUrl);
             }
             catch (Exception ex)
             {
-                return Results.Redirect($"/login?error={Uri.EscapeDataString(ex.Message)}");
+                return NoStoreRedirect(http, $"/login?error={Uri.EscapeDataString(ex.Message)}");
             }
-        }).AllowAnonymous();
+        }).AllowAnonymous().DisableAntiforgery();
 
         app.MapGet("/auth/logout", async (HttpContext http, OidcService oidc) =>
         {
@@ -173,8 +187,20 @@ public static class AuthEndpoints
         return result;
     }
 
-    private static string BuildRedirectUri(HttpContext http) =>
-        $"{http.Request.Scheme}://{http.Request.Host}/auth/callback";
+    /// <summary>Öffentliche Callback-Adresse (PUBLIC_BASE_URL hat Vorrang); außerhalb der Entwicklung nur HTTPS, sonst null.</summary>
+    private static string? BuildRedirectUri(HttpContext http, AppConfig cfg) =>
+        OidcCallback.ResolveRedirectUri(cfg.Blockchain.PublicBaseUrl, http.Request.Scheme, http.Request.Host,
+            allowHttp: http.RequestServices.GetRequiredService<IWebHostEnvironment>().IsDevelopment());
+
+    /// <summary>303 See Other nach dem POST, ohne Zwischenspeicherung; die Ziel-URL enthält nie Codes.</summary>
+    private static IResult NoStoreRedirect(HttpContext http, string url)
+    {
+        http.Response.Headers.CacheControl = "no-store";
+        http.Response.Headers.Pragma = "no-cache";
+        http.Response.StatusCode = StatusCodes.Status303SeeOther;
+        http.Response.Headers.Location = url;
+        return Results.Empty;
+    }
 
     private static string SafeReturnUrl(string? url) =>
         !string.IsNullOrEmpty(url) && url.StartsWith('/') && !url.StartsWith("//") ? url : "/";

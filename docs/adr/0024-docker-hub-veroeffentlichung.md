@@ -29,3 +29,7 @@ Anwender sollen Learny ohne Quellcode, Git und .NET SDK betreiben können. Bishe
 
 - Neue Umgebungsvariablen: gleichzeitig in `Infrastructure/*`, `deploy/docker/docker-compose.yml`, `deploy/docker/.env.example` und der Variablentabelle in `deploy/docker/README.md` ergänzen (der Test schlägt sonst fehl).
 - Keine Geheimnisse, Datenbanken oder Schlüssel in Images; kein `latest` für Vorabversionen; Actions nur mit Commit-SHA.
+
+## Nachtrag (ADR 0036, CVE-2026-111497)
+
+`publish-docker.yml` baut mit `pull: true` und bricht die Veröffentlichung ab, wenn die .NET-Laufzeit der Images oder Basisimages unter 10.0.14 liegt (`tools/docker/RuntimeCheck.cs`); Basisimages bleiben bewegliche Tags, Digests stehen im Job-Summary. Siehe [0036](0036-oidc-form-post-und-https-callbacks.md).

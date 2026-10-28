@@ -36,3 +36,7 @@ Die App läuft in drei Umgebungen: Windows/IIS (selbstgehosteter Runner), Docker
 ## Betroffener Code
 
 - `.github/workflows/*`, `deploy/**`, `docker-compose.yml`, `nginx/*`, `src/*/Dockerfile`, `docs/*-deployment.md`
+
+## Nachtrag (ADR 0036)
+
+HTTPS für den OIDC-Callback ist in Produktion Pflicht (`PUBLIC_BASE_URL`); IIS Request Filtering wird nicht gelockert, siehe [0036](0036-oidc-form-post-und-https-callbacks.md).

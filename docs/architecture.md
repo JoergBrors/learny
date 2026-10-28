@@ -67,7 +67,7 @@ API-Endpunkten oder der UI möglich ist.
   `PostgresDatabase` (natives Wire-Protokoll v3, SCRAM-SHA-256/MD5/Cleartext, TLS optional)
 - `Services/` — `CardRepository` (besitzgefilterter Datenzugriff; `.Sharing.cs`: Zugriffsentscheid und Lesepfade für freigegebene/globale Module), `UserService` (Benutzer, Rollen, Audit), `SharingService` (Freigaben, Einreichung, Veröffentlichung, globale Ergebnisse), `McpLinkService` (MCP-Zugänge), `OpenAiClient`, `QuizService`, `ChatService`
 - `Auth/` — `OidcService` (Discovery, Authorization-Code-Flow + PKCE, ID-Token-Validierung gegen
-  JWKS), `AuthEndpoints` (`/auth/login`, `/auth/callback`, `/auth/logout`)
+  JWKS), `AuthEndpoints` (`/auth/login`, `POST /auth/callback` (form_post, ADR 0036), `/auth/logout`)
 - `Api/` — `ApiEndpoints` (Minimal-API unter `/api`, kompatibel zum ursprünglichen FastAPI-Schema)
 - `Components/` — Blazor-Seiten (`Home`, `ModulePage`, `Login`, `Profile`, `Admin`, `McpConnect`, `Help`; Shared u. a. `SharePanel`) und Shared-Komponenten
   (`FlashCardView`, `ChatPanel`, `QuizPanel`)

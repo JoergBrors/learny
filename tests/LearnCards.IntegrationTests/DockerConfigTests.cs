@@ -80,6 +80,39 @@ public static class DockerConfigTests
         check(!Regex.IsMatch(workflow, @"git (tag|push)") && !workflow.Contains("deploy-iis"), "Docker-Workflow: erzeugt keine Git-Tags und löst kein IIS-Deployment aus");
         check(workflow.Contains("STABLE") && workflow.Contains("latest") && workflow.Contains("case \"$version\" in *-*) stable=false"), "Docker-Workflow: Prereleases überschreiben latest nicht");
         check(File.ReadAllText(Path.Combine(repoRoot, "src", "LearnCards.Web", "Dockerfile")).Contains("USER 1654") && File.ReadAllText(Path.Combine(repoRoot, "src", "LearnCards.McpServer", "Dockerfile")).Contains("USER 1654"), "Docker: beide Images laufen als unprivilegierter Benutzer");
+
+        // .NET-Laufzeitprüfung vor der Veröffentlichung (CVE-2026-111497, ADR 0036)
+        var pullCount = Regex.Matches(workflow, @"^\s+pull: true", RegexOptions.Multiline).Count;
+        check(pullCount == 4, "Docker-Workflow: alle vier Image-Builds aktualisieren die Basisimages (pull: true)");
+        var checkAt = workflow.IndexOf("RuntimeCheck.cs", StringComparison.Ordinal);
+        var publishAt = workflow.IndexOf("name: Veröffentlichen learny-web", StringComparison.Ordinal);
+        var minMatch = Regex.Match(workflow, @"MIN_DOTNET:\s*""(\d+\.\d+\.\d+)""");
+        check(checkAt > 0 && publishAt > checkAt && minMatch.Success && Version.Parse(minMatch.Groups[1].Value) >= new Version(10, 0, 14),
+            "Docker-Workflow: Laufzeitprüfung (Mindestversion ≥ 10.0.14) läuft vor der Veröffentlichung");
+        check(workflow.Contains("Microsoft.NETCore.App,Microsoft.AspNetCore.App") && workflow.Contains("learny-web:smoke") && workflow.Contains("learny-mcp:smoke") && workflow.Contains("linux/arm64") && workflow.Contains("imagetools inspect mcr.microsoft.com/dotnet/"),
+            "Docker-Workflow: Web und MCP (beide Frameworks), arm64-Basisimage und Basisimage-Digests werden geprüft/protokolliert");
+
+        // Prüfprogramm selbst: bestanden/nicht bestanden (numerischer Vergleich)
+        const string both = "Microsoft.NETCore.App,Microsoft.AspNetCore.App";
+        int Rt(string listing)
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("dotnet", $"run \"{Path.Combine(repoRoot, "tools", "docker", "RuntimeCheck.cs")}\" -- --min 10.0.14 --require {both} --label test")
+            { RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = Path.GetTempPath() };
+            using var p = System.Diagnostics.Process.Start(psi)!;
+            p.StandardInput.Write(listing); p.StandardInput.Close();
+            p.StandardOutput.ReadToEnd(); p.StandardError.ReadToEnd(); p.WaitForExit();
+            return p.ExitCode;
+        }
+        string L(string core, string asp) => $"Microsoft.NETCore.App {core} [/usr/share/dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.AspNetCore.App {asp} [/usr/share/dotnet/shared/Microsoft.AspNetCore.App]\n";
+        check(Rt(L("10.0.14", "10.0.14")) == 0, "Laufzeitprüfung: 10.0.14 besteht");
+        check(Rt(L("10.0.20", "10.0.20")) == 0, "Laufzeitprüfung: höhere bereinigte Patchversion (10.0.20) besteht");
+        check(Rt(L("10.0.9", "10.0.14")) == 1, "Laufzeitprüfung: 10.0.9 < 10.0.14 schlägt fehl (numerisch, nicht als Zeichenfolge)");
+        check(Rt(L("10.0.11", "10.0.11")) == 1, "Laufzeitprüfung: verwundbare Runtime 10.0.11 schlägt fehl");
+        check(Rt(L("10.0.14", "10.0.11")) == 1, "Laufzeitprüfung: zu altes ASP.NET Core bei aktuellem NETCore schlägt fehl");
+        check(Rt("Microsoft.NETCore.App 10.0.14 [/x]\n") == 1, "Laufzeitprüfung: fehlendes Microsoft.AspNetCore.App schlägt fehl");
+        check(Rt(L("9.0.22", "9.0.22")) == 1, "Laufzeitprüfung: nur .NET 9 erfüllt die .NET-10-Anforderung nicht");
+        check(Rt(L("10.0.14-rc.1", "10.0.14-rc.1")) == 1, "Laufzeitprüfung: Vorabversion zählt nicht");
+        check(Rt("") == 1, "Laufzeitprüfung: leere Ausgabe schlägt fehl");
     }
 
     private static string Section(string text, string start, string end)

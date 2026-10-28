@@ -147,6 +147,7 @@ jobs:
           context: .
           file: src/LearnCards.Web/Dockerfile
           platforms: linux/amd64
+          pull: true   # Basisimages bei jedem Build neu auflösen (Sicherheitsupdates, CVE-2026-111497)
           load: true
           tags: learny-web:smoke
           cache-from: type=gha,scope=web
@@ -157,10 +158,42 @@ jobs:
           context: .
           file: src/LearnCards.McpServer/Dockerfile
           platforms: linux/amd64
+          pull: true   # Basisimages bei jedem Build neu auflösen (Sicherheitsupdates, CVE-2026-111497)
           load: true
           tags: learny-mcp:smoke
           cache-from: type=gha,scope=mcp
           provenance: false
+      # Sicherheitsprüfung vor der Veröffentlichung (CVE-2026-111497, ADR 0036): Die tatsächlichen .NET-Laufzeiten der gebauten Images und der
+      # Basisimages müssen mindestens MIN_DOTNET haben (numerischer Vergleich, höhere Patchversionen bestehen). Schlägt das fehl, wird nichts veröffentlicht.
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: .NET-Laufzeit der Images prüfen und Digests protokollieren
+        shell: bash
+        env:
+          MIN_DOTNET: "10.0.14"
+        run: |
+          set -euo pipefail
+          check() { # Bezeichnung Image Plattform
+            docker run --rm --platform "$3" --entrypoint dotnet "$2" --list-runtimes \
+              | dotnet run tools/docker/RuntimeCheck.cs -- --min "$MIN_DOTNET" --require Microsoft.NETCore.App,Microsoft.AspNetCore.App --label "$1"
+          }
+          {
+            echo "### .NET-Laufzeitprüfung (Mindestversion $MIN_DOTNET)"
+            echo '```'
+            check web-fertig-amd64 learny-web:smoke linux/amd64
+            check mcp-fertig-amd64 learny-mcp:smoke linux/amd64
+            check aspnet-basis-amd64 mcr.microsoft.com/dotnet/aspnet:10.0 linux/amd64
+            check aspnet-basis-arm64 mcr.microsoft.com/dotnet/aspnet:10.0 linux/arm64
+            check sdk-basis-amd64 mcr.microsoft.com/dotnet/sdk:10.0 linux/amd64
+            echo '```'
+            echo "### Verwendete Basisimage-Digests (Index) und lokale Image-IDs"
+            for base in sdk aspnet; do
+              echo "- \`mcr.microsoft.com/dotnet/$base:10.0\` → \`$(docker buildx imagetools inspect mcr.microsoft.com/dotnet/$base:10.0 | awk '/^Digest:/ {print $2; exit}')\`"
+            done
+            for img in learny-web:smoke learny-mcp:smoke; do echo "- \`$img\` (amd64, Rauchtest) → \`$(docker image inspect "$img" --format '{{.Id}}')\`"; done
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Rauchtest
         shell: bash
         run: |
@@ -199,6 +232,7 @@ jobs:
           context: .
           file: src/LearnCards.Web/Dockerfile
           platforms: ${{ env.PLATFORMS }}
+          pull: true
           push: ${{ env.PUBLISH == 'true' }}
           tags: ${{ steps.tags.outputs.web }}
           build-args: |
@@ -216,6 +250,7 @@ jobs:
           context: .
           file: src/LearnCards.McpServer/Dockerfile
           platforms: ${{ env.PLATFORMS }}
+          pull: true
           push: ${{ env.PUBLISH == 'true' }}
           tags: ${{ steps.tags.outputs.mcp }}
           build-args: |

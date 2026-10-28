@@ -272,3 +272,15 @@ Selten benötigte Bildspeicher-Optionen (`…_ALLOW_HTTP`, `…_ALLOW_PRIVATE_NE
 ## Veröffentlichen (für Maintainer)
 
 Ein GitHub Release löst den Workflow [`publish-docker.yml`](../../.github/workflows/publish-docker.yml) aus (Tests → Images bauen → Docker Hub → Beschreibungen → ZIP am Release). Voraussetzungen: Repository-Secrets `DOCKERHUB_USERNAME` (`joergb23`) und `DOCKERHUB_TOKEN` (Docker-Hub-Zugriffstoken mit Lese-, Schreib- und Löschrechten; für das Aktualisieren der Beschreibung nötig). Das Release auf einem **bereits vorhandenen Tag** anlegen — ein Release mit neuem Tag erzeugt den Tag und startet dadurch auch den IIS-Workflow. Vorabversionen (`1.0.0-rc.1` oder als „Pre-release“ markiert) bekommen nur ihren Versionstag; `latest` und die Docker-Hub-Beschreibung bleiben unverändert.
+
+## Laufzeitstand prüfen (CVE-2026-111497)
+
+Die Veröffentlichung prüft automatisch, dass die .NET-Laufzeit der Images mindestens 10.0.14 ist; ein erfolgreicher Build belegt aber nicht den Stand eines bereits laufenden Containers. Auf dem Docker-Host (lesend):
+
+```
+docker ps --format '{{.Names}} {{.Image}}'
+docker image inspect --format '{{index .RepoDigests 0}} {{.Created}}' joergb23/learny-web:<version>
+docker exec <container> dotnet --list-runtimes
+```
+
+Liegt `Microsoft.NETCore.App` oder `Microsoft.AspNetCore.App` unter 10.0.14: neue Version ziehen (`docker compose pull && docker compose up -d`). Details: [docs/security-update-cve-2026-111497.md](../../docs/security-update-cve-2026-111497.md).

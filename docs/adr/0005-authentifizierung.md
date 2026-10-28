@@ -36,3 +36,7 @@ einen Nicht-Browser-Zugang.
 ## Betroffener Code
 
 - `src/LearnCards.Web/Auth/*`, `Api/ApiEndpoints.cs` (Filter), `Infrastructure/AppConfig.cs`, `Program.cs`
+
+## Nachtrag (ADR 0036)
+
+Der OIDC-Rücksprung erfolgt per `response_mode=form_post` (`POST /auth/callback`); siehe [0036](0036-oidc-form-post-und-https-callbacks.md).

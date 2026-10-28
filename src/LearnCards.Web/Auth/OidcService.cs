@@ -81,20 +81,26 @@ public class OidcService
     public async Task<string> BuildAuthorizeUrlAsync(AuthState state, string redirectUri, CancellationToken ct = default)
     {
         var disco = await GetDiscoveryAsync(ct);
+        return BuildAuthorizeUrl(disco.AuthorizationEndpoint, _cfg.OidcClientId, _cfg.OidcScope, state, redirectUri);
+    }
+
+    /// <summary>Authorization Code Flow mit PKCE (S256). <c>response_mode=form_post</c>: der Code kommt per POST-Body zurück, nie in der URL (ADR 0036).</summary>
+    public static string BuildAuthorizeUrl(string authorizationEndpoint, string clientId, string scope, AuthState state, string redirectUri)
+    {
         var challenge = Base64Url(SHA256.HashData(Encoding.ASCII.GetBytes(state.CodeVerifier)));
         var query = new Dictionary<string, string>
         {
-            ["client_id"] = _cfg.OidcClientId,
+            ["client_id"] = clientId,
             ["response_type"] = "code",
             ["redirect_uri"] = redirectUri,
-            ["response_mode"] = "query",
-            ["scope"] = _cfg.OidcScope,
+            ["response_mode"] = "form_post",
+            ["scope"] = scope,
             ["state"] = state.State,
             ["nonce"] = state.Nonce,
             ["code_challenge"] = challenge,
             ["code_challenge_method"] = "S256",
         };
-        return disco.AuthorizationEndpoint + "?" +
+        return authorizationEndpoint + "?" +
                string.Join("&", query.Select(kv => $"{kv.Key}={Uri.EscapeDataString(kv.Value)}"));
     }
 
@@ -117,7 +123,7 @@ public class OidcService
         using var res = await http.PostAsync(disco.TokenEndpoint, new FormUrlEncodedContent(form), ct);
         var body = await res.Content.ReadAsStringAsync(ct);
         if (!res.IsSuccessStatusCode)
-            throw new InvalidOperationException($"Token-Endpoint-Fehler {(int)res.StatusCode}: {body[..Math.Min(body.Length, 500)]}");
+            throw new InvalidOperationException($"Token-Endpoint-Fehler {(int)res.StatusCode}");   // Antwortkörper nie weitergeben (könnte Codes/Details enthalten)
 
         using var doc = JsonDocument.Parse(body);
         var idToken = doc.RootElement.GetProperty("id_token").GetString()
@@ -171,7 +177,8 @@ public class OidcService
         };
         if (!audOk) throw new InvalidOperationException("Audience stimmt nicht mit der Client-ID überein.");
 
-        if (payload.TryGetProperty("exp", out var exp) && exp.GetInt64() + skew < now)
+        // exp ist Pflicht: ein ID-Token ohne Ablaufzeit wäre unbegrenzt gültig
+        if (!payload.TryGetProperty("exp", out var exp) || exp.ValueKind != JsonValueKind.Number || exp.GetInt64() + skew < now)
             throw new InvalidOperationException("ID-Token ist abgelaufen.");
         if (payload.TryGetProperty("nbf", out var nbf) && nbf.GetInt64() - skew > now)
             throw new InvalidOperationException("ID-Token ist noch nicht gültig (nbf).");

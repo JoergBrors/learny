@@ -350,3 +350,9 @@ POST https://<mcp-host>/mcp  ohne Token                            → 401 mit W
 - **Ursache** (Vorfall 2026-10-26): Nach dem Verschieben der `.env` aus dem Webroot (ADR 0023) wurde der Pfad (`ENV_FILE`) nicht wirksam; ältere Versionen starteten dann ohne Konfiguration und fielen bei `AUTH_MODE=auto` still auf den Dev-Login zurück.
 - **Jetzt:** Die Anwendung bricht bei fehlender/unlesbarer `ENV_FILE` ab (HTTP 500.30, Grund im Log `<Webroot>\logs\stdout_*.log`) und aktiviert außerhalb von `Development` keinen Dev-Login ohne ausdrückliches `AUTH_MODE=dev`. `ENV_FILE` steht als Umgebungsvariable am App-Pool **und** in der `web.config` (`aspNetCore/environmentVariables`). Nach dem Start prüft der Workflow (`Verify Secure Configuration`), dass die Anmeldeseite keinen Dev-Login zeigt und die Aussteller-URL zu `PUBLIC_BASE_URL` passt.
 - **Prüfen auf dem Server:** `type C:\inetpub\wwwroot\LearnCards\logs\stdout_*.log` zeigt „.env: <Pfad>“ in der Startzeile; der App-Pool-Konto `IIS AppPool\<Pool>` braucht Leserecht auf `<IIS_CONFIG_ROOT>\config\.env` (Standard `C:\ProgramData\LearnCards\<Site>`).
+
+## OIDC form_post und CVE-2026-111497
+
+Abschnitte zu `POST /auth/callback` (ADR 0036) und zum Sicherheitsupdate: [security-update-cve-2026-111497.md](security-update-cve-2026-111497.md). Tests: `OidcCallbackTests.cs` (Formular, Cookie, Redirect-URI, state-Einmaligkeit, HTTP-Abweisungen).
+
+Der Laufzeitnachweis des Betreibers (w3wp und MCP mit 10.0.14) und offene Betriebsaufgaben (alte Runtimes 10.0.11/9.0.4) stehen in [security-update-cve-2026-111497.md](security-update-cve-2026-111497.md).

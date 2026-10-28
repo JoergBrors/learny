@@ -126,3 +126,7 @@ Der MCP-Server läuft nicht in Azure — er ist ein lokaler stdio-Prozess, den C
 auf dem Rechner des Nutzers startet und der über `LEARNCARDS_API_URL=https://learncards-app.azurewebsites.net/api`
 im Namen **des Benutzers** gegen die Azure Web App spricht: dazu unter `/profile` ein persönliches Token erzeugen und als `LEARNCARDS_MCP_TOKEN` setzen.
 Der `MCP_API_KEY` ist nur ein Dienstschlüssel (OAuth-Code-Tausch) und gewährt keinen Datenzugriff. Ein als HTTP-Dienst betriebener MCP-Server meldet Benutzer per OAuth an (`LEARNCARDS_WEB_PUBLIC_URL` = öffentliche Web-URL).
+
+## Laufzeitstand prüfen (CVE-2026-111497)
+
+Es gibt keinen Repository-Nachweis für die in Azure aktive Runtime. Ermitteln: bei verwalteter Runtime (Code-Deployment, framework-dependent) in Kudu (`<app>.scm.azurewebsites.net`) `dotnet --list-runtimes` (mindestens 10.0.14) und App neu starten; bei Container-Deployment gilt der Docker-Nachweis (Digest im Bereitstellungscenter notieren); self-contained wäre mit gepatchtem SDK neu zu veröffentlichen (Learny ist nicht self-contained). Siehe [security-update-cve-2026-111497.md](security-update-cve-2026-111497.md).

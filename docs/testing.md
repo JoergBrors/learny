@@ -130,3 +130,11 @@ Im Block „Beispiele, Templates, Schema, MCP, Hilfe“ werden zusätzlich `modu
 - `TransferIntegrityUnitTests` I24–I26: Zuweisung an die aktive globale Version, Überfälligkeit nur bei offener Pflicht, Rollenprüfung im Dienst.
 - `WorkflowStructureTests` (W1–W9): statische Prüfung des IIS-Workflows (Dienst/Aufgabe wird vor dem Dateiaustausch gestoppt und es wird gewartet; Start danach; nicht vorhandener Dienst wird nicht gestartet; stdio-Modus startet nichts; Health-Retry; Fehlstart bricht ab; keine Geheimnisse). Ein echter Lauf auf einem Windows-Runner mit IIS ist nicht Teil der Tests.
 - Browser (`tests/browser/topics-browser-check.js`): Pflichtbereich auf der Startseite, Beginnen/Fortsetzen, Themenmodul-Seite, Zuweisungsverwaltung (Rolle sichtbar/unsichtbar), Themeneditor ohne Zuweisung, Modulverwendung.
+
+## OIDC form_post und CVE-2026-111497
+
+`OidcCallbackTests.cs` prüft den form_post-Callback (ADR 0036); Details: [security-update-cve-2026-111497.md](security-update-cve-2026-111497.md).
+
+### OIDC-Ablauf und Docker-Laufzeitprüfung (ADR 0036)
+
+`OidcFlowTests` startet die Anwendung zusätzlich im OIDC-Modus (Development, SQLite) gegen einen lokalen Test-IdP (`HttpListener`, RS256, eigene JWKS) und prüft den vollständigen Ablauf samt Negativfällen. `DockerConfigTests` prüft `publish-docker.yml` und führt `tools/docker/RuntimeCheck.cs` mit gültigen und zu alten Laufzeitlisten aus (benötigt `dotnet run <Datei>`, .NET-10-SDK). Nicht automatisiert: echte Entra-Anmeldung unter IIS, Lauf des Workflows auf einem GitHub-Runner.
