@@ -55,6 +55,11 @@ public sealed partial class CertificateService
     public string BaseUrl => !string.IsNullOrEmpty(_cfg.Blockchain.PublicBaseUrl) ? _cfg.Blockchain.PublicBaseUrl : ObservedOrigin ?? "http://localhost";
     public string IssuerId => BaseUrl + "/badges/issuer";
     public string KeyId => IssuerId + "#" + _signer.KeyId;
+    /// <summary>
+    /// <c>kid</c> neuer Credentials: eine URL, die <b>genau ein JWK</b> liefert (<c>GET /badges/keys/&lt;Schlüssel-ID&gt;</c>). Der 1EdTech-Validator ruft die <c>kid</c>-URL ab und liest das Ergebnis direkt als JWK
+    /// (<c>kty</c>, <c>x</c>, <c>y</c>); die frühere Form <c>…/badges/issuer#&lt;ID&gt;</c> lieferte das Ausstellerprofil statt eines Schlüssels. Ältere Credentials behalten ihre <c>kid</c>.
+    /// </summary>
+    public string JwtKeyId => BaseUrl + "/badges/keys/" + _signer.KeyId;
 
     /// <summary>
     /// Lokale Kontextdefinition für <c>credentialStatus.type = 1EdTechRevocationList</c>: Der veröffentlichte OB-3.0.3-Kontext definiert den Begriff nicht, die JSON-LD-Prüfung der
@@ -91,9 +96,10 @@ public sealed partial class CertificateService
             Number = NewNumber(), UserId = result.UserSub, ModuleId = result.ModuleId, ModuleName = moduleName, ModuleVersion = version, ModuleScope = moduleScope,
             ResultId = result.Id, LearnerName = learner, ScorePercent = percent, PassPercent = result.PassPercent ?? 0, IssuedAt = DateTime.UtcNow,
             SnapshotId = snapshot?.Id, SnapshotHash = snapshot?.Hash ?? "", CompletedAt = snapshot is null ? null : result.CompletedAt,
+            IssueSource = "exam", IssuedByName = "Prüfsystem",
         };
         var credential = BuildCredential(cert, snapshot, evidence);
-        cert.BadgeJws = _signer.Sign(credential, KeyId);
+        cert.BadgeJws = _signer.SignCredential(credential, JwtKeyId);
         cert.BadgeHash = BadgeSigner.HashHex(cert.BadgeJws);
         cert.LeafHash = MerkleTree.Hex(MerkleTree.Leaf(MerkleTree.FromHex(cert.BadgeHash)));
         if (settings.Enabled) { cert.ChainStatus = Domain.ChainStatus.Pending; cert.ChainNetwork = settings.Network; cert.ChainId = settings.ChainId; }
@@ -118,15 +124,15 @@ public sealed partial class CertificateService
         ? new JsonObject { ["type"] = "IdentityObject", ["hashed"] = false, ["identityType"] = "name", ["identityHash"] = name }
         : new JsonObject { ["type"] = "IdentityObject", ["hashed"] = false, ["identityType"] = "name", ["identity"] = name };
 
-    private static string NewNumber()
+    private static string NewNumber(string prefix = "LC")
     {
         const string alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";   // Crockford-Base32 (ohne verwechselbare Zeichen)
         var bytes = RandomNumberGenerator.GetBytes(8);
-        return $"LC-{DateTime.UtcNow.Year}-" + new string(bytes.Select(b => alphabet[b % 32]).ToArray());
+        return $"{prefix}-{DateTime.UtcNow.Year}-" + new string(bytes.Select(b => alphabet[b % 32]).ToArray());
     }
 
     /// <summary>Open-Badge-3.0-Credential (W3C VC 2.0). Der Inhalt ist nach der Signierung unveränderlich; die Blockchain-Verankerung steht in einem separaten Nachweis-Paket.</summary>
-    public JsonObject BuildCredential(Certificate c, ExamSnapshot? snapshot = null, IReadOnlyList<CompetencyEvidence>? evidence = null)
+    public JsonObject BuildCredential(Certificate c, ExamSnapshot? snapshot = null, IReadOnlyList<CompetencyEvidence>? evidence = null, bool? conformantIdentity = null)
     {
         var achievementId = $"{BaseUrl}/badges/achievements/{c.ModuleId}/{c.ModuleVersion}";
         var demonstrated = (evidence ?? Array.Empty<CompetencyEvidence>()).Where(e => e.Status == CompetencyStatus.Demonstrated).ToList();
@@ -145,8 +151,8 @@ public sealed partial class CertificateService
             ["name"] = $"{c.ModuleName} — Abschluss",
             ["credentialSubject"] = new JsonObject
             {
-                ["type"] = new JsonArray("AchievementSubject"),
-                ["identifier"] = new JsonArray(Identity(c.LearnerName, snapshot is not null)),
+                ["id"] = SubjectId(c.UserId), ["type"] = new JsonArray("AchievementSubject"),
+                ["identifier"] = new JsonArray(Identity(c.LearnerName, conformantIdentity ?? snapshot is not null)),
                 ["achievement"] = new JsonObject
                 {
                     ["id"] = achievementId, ["type"] = new JsonArray("Achievement"), ["achievementType"] = "Course", ["name"] = c.ModuleName,
@@ -211,12 +217,34 @@ public sealed partial class CertificateService
         return rows.Count == 0 ? null : rows[0]["snapshot_json"];
     }
 
-    /// <summary>Signiertes Open Badge als JSON: Credential plus eingebettete Signatur (<c>proof.jwt</c>, VC-JWT).</summary>
+    /// <summary>
+    /// Open Badge als JSON. Neue Credentials: das reine Credential (kein erfundener Proof-Typ; das JWT ist der Proof und wird getrennt geliefert, OB 3.0 §8.2.2).
+    /// Altbestand (Profil <c>vc+jwt</c>): Credential plus die ursprüngliche Hülle <c>proof.jwt</c>, unverändert.
+    /// </summary>
     public JsonObject SignedBadgeJson(Certificate c)
     {
-        var credential = (JsonObject)JsonNode.Parse(BadgeSigner.PayloadText(c.BadgeJws))!;
-        credential["proof"] = ProofEnvelope(c.BadgeJws!, c.IssuedAt);
+        var credential = BadgeSigner.CredentialFromJws(c.BadgeJws);
+        // Altbestand (typ vc+jwt) behält seine Hülle; neue Credentials tragen keinen erfundenen Proof-Typ: Das JWT ist der Proof (OB 3.0 §8.2.2: proof darf entfallen) und wird getrennt geliefert.
+        if (BadgeSigner.IsLegacyProfile(c.BadgeJws)) credential["proof"] = ProofEnvelope(c.BadgeJws!, c.IssuedAt);
         return credential;
+    }
+
+    /// <summary>Ersetzt in <c>credentialSubject.verifiableCredential</c> kompakte JWS durch das jeweilige Credential (Objekt), damit JSON- und JWT-Darstellung eines CLR vergleichbar sind.</summary>
+    internal static JsonNode? ExpandEmbedded(JsonNode? node)
+    {
+        if (node is not JsonObject obj || obj["credentialSubject"]?["verifiableCredential"] is not JsonArray) return node;
+        var copy = (JsonObject)obj.DeepClone();
+        var arr = (JsonArray)copy["credentialSubject"]!["verifiableCredential"]!;
+        for (var i = 0; i < arr.Count; i++)
+            if (arr[i] is JsonValue v && v.TryGetValue<string>(out var jws)) arr[i] = BadgeSigner.CredentialFromJws(jws);
+        return copy;
+    }
+
+    /// <summary>Pseudonyme Subjekt-ID (<c>credentialSubject.id</c>, JWT-Claim <c>sub</c>): stabil je Benutzer, ohne die interne Benutzer-ID preiszugeben.</summary>
+    internal static string SubjectId(string userId)
+    {
+        var h = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("learny-subject:" + userId));
+        return "urn:uuid:" + new Guid(h.AsSpan(0, 16));
     }
 
     /// <summary>
@@ -265,7 +293,7 @@ public sealed partial class CertificateService
     // ─── Abruf ──────────────────────────────────────────────────────────────
 
     public async Task<List<Certificate>> ListForUserAsync(string userId) =>
-        (await _db.QueryAsync("SELECT * FROM certificates WHERE user_id = @u ORDER BY issued_at DESC", new[] { ("u", (object?)userId) })).Select(Map).ToList();
+        (await _db.QueryAsync("SELECT * FROM certificates WHERE user_id = @u AND is_test = 0 ORDER BY issued_at DESC", new[] { ("u", (object?)userId) })).Select(Map).ToList();
 
     public async Task<Certificate?> GetForUserAsync(string userId, string id)
     {
@@ -352,20 +380,33 @@ public sealed partial class CertificateService
             else jws = input;
         }
         catch (JsonException) { v.SignatureError = "Die Eingabe ist kein gültiges JSON."; return v; }
-        if (string.IsNullOrWhiteSpace(jws)) { v.SignatureError ??= "Es wurde keine Signatur (proof.jwt) gefunden."; return v; }
+        if (string.IsNullOrWhiteSpace(jws) && embedded is JsonObject plain && plain["id"]?.GetValue<string>() is { } credentialUrl
+            && System.Text.RegularExpressions.Regex.Match(credentialUrl, @"/verify/([0-9a-fA-F-]{36})(/clr)?$") is { Success: true } m && await GetRawAsync(m.Groups[1].Value) is { } known)
+        {
+            // JSON ohne Proof (neues Profil, OB 3.0 §8.2.2): Die Signatur wird an der bei Learny gespeicherten JWS geprüft; die eingereichten Inhalte müssen dem signierten Credential entsprechen.
+            jws = m.Groups[2].Success ? known.ClrJws : known.BadgeJws;
+        }
+        if (string.IsNullOrWhiteSpace(jws)) { v.SignatureError ??= "Es wurde keine Signatur (proof.jwt) gefunden. Bitte das JWT (badge.jwt / clr.jwt) einfügen."; return v; }
 
         var jv = _signer.Verify(jws);
         v.SignatureValid = jv.SignatureValid; v.SignatureError = jv.Error;
-        v.IssuerValid = jv.SignatureValid && (jv.Payload?["issuer"]?["id"]?.GetValue<string>() is { } iss && (iss == IssuerId || iss.EndsWith("/badges/issuer", StringComparison.Ordinal)));
+        var credPayload = jv.Payload is JsonObject po && po["vc"] is JsonObject vcClaim ? vcClaim : jv.Payload;   // Profil ADR 0038: Credential im Claim "vc"
+        v.IssuerValid = jv.SignatureValid && (credPayload?["issuer"]?["id"]?.GetValue<string>() is { } iss && (iss == IssuerId || iss.EndsWith("/badges/issuer", StringComparison.Ordinal)));
         // Maßgeblich ist die gültige Signatur mit dem Schlüssel dieser Installation; die Aussteller-URL darf sich ändern (Test-/Entwicklungssystem, Umzug der Domain).
-        if (jv.SignatureValid && embedded is not null) v.ContentMatches = JsonNode.DeepEquals(embedded, jv.Payload);
-        v.BadgeHash = BadgeSigner.HashHex(jws);
-        if (jv.Payload is not null)
+        if (jv.SignatureValid && embedded is not null && credPayload is JsonObject pl)
         {
-            var subject = jv.Payload["credentialSubject"];
+            var cred = (JsonObject)pl.DeepClone();
+            if (ReferenceEquals(credPayload, jv.Payload) && !BadgeSigner.IsLegacyProfile(jws)) foreach (var k in new[] { "iss", "jti", "nbf", "sub" }) cred.Remove(k);   // früheres Zwischenformat (Credential auf oberster Ebene)
+            // Das CLR-JSON enthält die eingebetteten Credentials als Objekte, das signierte CLR als kompakte JWS: für den Vergleich beides in Objektform bringen
+            v.ContentMatches = JsonNode.DeepEquals(ExpandEmbedded(embedded), ExpandEmbedded(cred));
+        }
+        v.BadgeHash = BadgeSigner.HashHex(jws);
+        if (credPayload is not null)
+        {
+            var subject = credPayload["credentialSubject"];
             var firstAchievement = subject?["achievement"] is JsonArray achievements ? achievements.FirstOrDefault() : subject?["achievement"];   // Open Badge: ein Achievement; CLR: Liste (erstes = Thema)
             v.ModuleName = firstAchievement?["name"]?.GetValue<string>();
-            if (DateTime.TryParse(jv.Payload["validFrom"]?.GetValue<string>(), System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var from)) v.IssuedAt = from;
+            if (DateTime.TryParse(credPayload["validFrom"]?.GetValue<string>(), System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var from)) v.IssuedAt = from;
         }
         var rows = await _db.QueryAsync("SELECT * FROM certificates WHERE badge_hash = @h OR clr_hash = @h", new[] { ("h", (object?)v.BadgeHash) });   // Badge oder CLR (Themenabschluss)
         if (rows.Count > 0 && jv.SignatureValid)
@@ -414,9 +455,9 @@ public sealed partial class CertificateService
     public async Task<List<AdminCertificateRow>> ListForAdminAsync(string actorId, string? filter = null, int limit = 200)
     {
         await _users.RequireRoleAsync(actorId, Roles.Admin);
-        var sql = "SELECT * FROM certificates";
-        if (filter == "revoked") sql += " WHERE status = 'revoked'";
-        else if (filter is "pending" or "failed" or "cost_blocked" or "batched" or "anchoring" or "confirmed") sql += $" WHERE chain_status = '{filter}'";
+        var sql = "SELECT * FROM certificates WHERE is_test = 0";
+        if (filter == "revoked") sql += " AND status = 'revoked'";
+        else if (filter is "pending" or "failed" or "cost_blocked" or "batched" or "anchoring" or "confirmed") sql += $" AND chain_status = '{filter}'";
         var rows = await _db.QueryAsync(sql + $" ORDER BY issued_at DESC LIMIT {Math.Clamp(limit, 1, 1000)}");
         return rows.Select(Map).Select(c => new AdminCertificateRow(c.Id, c.Number, c.ModuleScope == "global" ? c.ModuleName : "(privates Modul)", c.ModuleVersion, c.ModuleScope, c.IssuedAt,
             c.Status, c.ChainStatus, c.ChainNetwork, c.ModuleScope == "global" ? c.LearnerName : null)).ToList();
@@ -467,17 +508,20 @@ public sealed partial class CertificateService
 
     // ─── Persistenz ─────────────────────────────────────────────────────────
 
-    private Task InsertAsync(Certificate c) => _db.ExecuteAsync("""
+    internal Task InsertAsync(Certificate c) => _db.ExecuteAsync("""
         INSERT INTO certificates (id, number, user_id, module_id, module_name, module_version, module_scope, result_id, learner_name, score_percent, pass_percent, issued_at,
-                                  badge_jws, badge_hash, leaf_hash, status, chain_status, chain_network, chain_id, chain_updated_at, snapshot_id, snapshot_hash, kind, clr_jws, clr_hash, completed_at)
+                                  badge_jws, badge_hash, leaf_hash, status, chain_status, chain_network, chain_id, chain_updated_at, snapshot_id, snapshot_hash, kind, clr_jws, clr_hash, completed_at,
+                                  is_test, issued_by, issued_by_name, issue_source, parent_id)
         VALUES (@id, @number, @user_id, @module_id, @module_name, @module_version, @module_scope, @result_id, @learner_name, @score_percent, @pass_percent, @issued_at,
-                @badge_jws, @badge_hash, @leaf_hash, 'active', @chain_status, @chain_network, @chain_id, @now, @snapshot_id, @snapshot_hash, @kind, @clr_jws, @clr_hash, @completed_at)
+                @badge_jws, @badge_hash, @leaf_hash, 'active', @chain_status, @chain_network, @chain_id, @now, @snapshot_id, @snapshot_hash, @kind, @clr_jws, @clr_hash, @completed_at,
+                @is_test, @issued_by, @issued_by_name, @issue_source, @parent_id)
         """, new (string, object?)[]
     {
         ("id", c.Id), ("number", c.Number), ("user_id", c.UserId), ("module_id", c.ModuleId), ("module_name", c.ModuleName), ("module_version", c.ModuleVersion), ("module_scope", c.ModuleScope),
         ("result_id", c.ResultId), ("learner_name", c.LearnerName), ("score_percent", c.ScorePercent), ("pass_percent", c.PassPercent), ("issued_at", c.IssuedAt),
         ("badge_jws", c.BadgeJws), ("badge_hash", c.BadgeHash), ("leaf_hash", c.LeafHash), ("chain_status", c.ChainStatus), ("chain_network", c.ChainNetwork), ("chain_id", c.ChainId), ("now", DateTime.UtcNow), ("snapshot_id", c.SnapshotId), ("snapshot_hash", c.SnapshotHash),
         ("kind", c.Kind), ("clr_jws", c.ClrJws), ("clr_hash", c.ClrHash), ("completed_at", c.CompletedAt),
+        ("is_test", c.IsTest ? 1 : 0), ("issued_by", c.IssuedBy), ("issued_by_name", c.IssuedByName), ("issue_source", c.IssueSource), ("parent_id", c.ParentId),
     });
 
     public static Certificate Map(Dictionary<string, string?> r) => new()
@@ -492,5 +536,7 @@ public sealed partial class CertificateService
         SnapshotId = r.GetValueOrDefault("snapshot_id") is { Length: > 0 } sid ? sid : null, SnapshotHash = r.GetValueOrDefault("snapshot_hash") ?? "",
         Kind = r.GetValueOrDefault("kind") is { Length: > 0 } kd ? kd : "module", ClrJws = r.GetValueOrDefault("clr_jws") is { Length: > 0 } cj ? cj : null, ClrHash = r.GetValueOrDefault("clr_hash") ?? "",
         CompletedAt = r.GetValueOrDefault("completed_at") is { Length: > 0 } ca ? DbValue.ToDateTime(ca) : null,
+        IsTest = DbValue.ToInt(r.GetValueOrDefault("is_test")) == 1, IssuedBy = r.GetValueOrDefault("issued_by") is { Length: > 0 } ib ? ib : null, IssuedByName = r.GetValueOrDefault("issued_by_name") ?? "",
+        IssueSource = r.GetValueOrDefault("issue_source") is { Length: > 0 } isrc ? isrc : "unknown", ParentId = r.GetValueOrDefault("parent_id") is { Length: > 0 } pid ? pid : null,
     };
 }

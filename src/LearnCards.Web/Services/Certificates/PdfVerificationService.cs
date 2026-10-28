@@ -114,6 +114,7 @@ public sealed class PdfVerificationService
             var node = TryParse(f.Data);
             var v = await _certs.VerifyAsync(text);
             var jws = S(node, "proof.jwt");
+            if (jws.Length == 0 && files.TryGetValue(Path.ChangeExtension(file, ".jwt"), out var jf)) jws = Encoding.ASCII.GetString(jf.Data).Trim();   // neues Profil: die JWS liegt als .jwt-Datei bei
             var offline = jws.Length > 0 && jwk is not null ? BadgeSigner.VerifyWithJwk(jws, jwk) : null;
             var hashOk = jws.Length > 0 && (expectedJwsHash is null || string.Equals(BadgeSigner.HashHex(jws), expectedJwsHash, StringComparison.OrdinalIgnoreCase));
             return new JsonObject
@@ -135,17 +136,25 @@ public sealed class PdfVerificationService
             var mods = new JsonArray();
             var modBundle = files.TryGetValue("module-credentials.json", out var mf) ? TryParse(mf.Data) : null;
             var expectedMods = (vNode?["hashes"]?["referenced_credentials"]?.AsArray() ?? new JsonArray()).ToDictionary(r => S(r, "id"), r => S(r, "jws_sha256"));
-            var embeddedInClr = (TryParse(files.TryGetValue("clr-credential.json", out var cf) ? cf.Data : null)?["credentialSubject"]?["verifiableCredential"]?.AsArray() ?? new JsonArray()).ToList();
+            // Eingebettete Credentials: neues Profil = kompakte JWS (Zeichenkette), älteres Profil = Objekt mit Hülle
+            var embeddedRaw = (TryParse(files.TryGetValue("clr-credential.json", out var cf) ? cf.Data : null)?["credentialSubject"]?["verifiableCredential"]?.AsArray() ?? new JsonArray()).ToList();
+            var embeddedJwsById = new Dictionary<string, string>();
+            var embeddedInClr = embeddedRaw.Select(e =>
+            {
+                if (e is JsonValue ev && ev.TryGetValue<string>(out var ej)) { var o = BadgeSigner.CredentialFromJws(ej); embeddedJwsById[S(o, "id")] = ej; return (JsonNode?)o; }
+                return e;
+            }).ToList();
             foreach (var c in modBundle?["credentials"]?.AsArray() ?? new JsonArray())
             {
                 var text = c!.ToJsonString();
                 var v = await _certs.VerifyAsync(text);
-                var jws = S(c, "proof.jwt");
                 var id = S(c, "id");
+                var jws = S(c, "proof.jwt");
+                if (jws.Length == 0 && embeddedJwsById.TryGetValue(id, out var ejws)) jws = ejws;
                 mods.Add(new JsonObject
                 {
                     ["id"] = id, ["name"] = S(c, "credentialSubject.achievement.name"), ["version"] = S(c, "credentialSubject.achievement.version"), ["valid"] = v.Valid, ["signature_valid"] = v.SignatureValid, ["content_matches"] = v.ContentMatches, ["known"] = v.Known, ["revoked"] = v.Revoked,
-                    ["jws_hash_matches"] = expectedMods.TryGetValue(id, out var h) && string.Equals(h, BadgeSigner.HashHex(jws), StringComparison.OrdinalIgnoreCase),
+                    ["jws_hash_matches"] = expectedMods.TryGetValue(id, out var h) && string.Equals(h, jws.Length > 0 ? BadgeSigner.HashHex(jws) : v.BadgeHash, StringComparison.OrdinalIgnoreCase),   // ohne Hülle: Hash der bei Learny gespeicherten, signierten JWS (Treffer über die Credential-ID)
                     ["identical_to_clr_copy"] = embeddedInClr.Any(e => JsonNode.DeepEquals(e, c)),
                 });
                 if (v.Revoked) anyRevoked = true;
@@ -167,7 +176,7 @@ public sealed class PdfVerificationService
             var ids = (vNode?["credentials"]?["module_credential_ids"]?.AsArray() ?? new JsonArray()).Select(i => i!.GetValue<string>()).ToList();
             Ref("Kennungen in verification.json stimmen mit den Credentials überein", ids.Count == mods.Count && ids.All(i => embeddedIds.Contains(i)) && S(vNode, "credentials.master_badge_id") == S(masterNode, "id") && S(vNode, "credentials.clr_credential_id") == S(clrNode, "id"));
             var snapText = files.TryGetValue("competence-snapshot.json", out var sf) ? sf.Sha256 : "";
-            Ref("Hash des Kompetenzsnapshots entspricht verification.json", snapText.Length > 0 && string.Equals(snapText, S(vNode, "hashes.competence_snapshot_sha256"), StringComparison.Ordinal));
+            Ref("Hash des Kompetenzsnapshots entspricht verification.json", S(vNode, "hashes.competence_snapshot_sha256").Length == 0 ? snapText.Length == 0 : snapText.Length > 0 && string.Equals(snapText, S(vNode, "hashes.competence_snapshot_sha256"), StringComparison.Ordinal));   // Testnachweise haben keinen Snapshot
             Ref("Aussteller von CLR und Badge stimmt überein", S(clrNode, "issuer.id") == S(masterNode, "issuer.id") && S(clrNode, "issuer.id") == S(vNode, "issuer.id"));
 
             // ─── 9: Versionen ───

@@ -224,21 +224,32 @@ public static class BlockchainUnitTests
         var c = await e.IssueAsync(e.LearnerId);
         check(c.Number.StartsWith("LC-") && c.BadgeJws.Split('.').Length == 3 && c.BadgeHash.Length == 64 && c.LeafHash.Length == 64 && c.ChainStatus == ChainStatus.Pending && c.ChainNetwork == ChainNetworks.Amoy && c.ChainId == 80002,
             "B5 Badge-Ausstellung: signiertes Badge mit Nummer, Prüf-Hash, Merkle-Blatt; Verankerung ausstehend im Netzwerk Amoy (Chain-ID gespeichert)");
-        var payload = JsonNode.Parse(BadgeSigner.PayloadText(c.BadgeJws))!;
+        var payload = BadgeSigner.CredentialFromJws(c.BadgeJws);
         check(payload["type"]!.AsArray().Select(x => x!.GetValue<string>()).SequenceEqual(new[] { "VerifiableCredential", "OpenBadgeCredential" }) && payload["credentialSubject"]!["type"]![0]!.GetValue<string>() == "AchievementSubject"
               && payload["issuer"]!["id"]!.GetValue<string>() == "https://learny.test/badges/issuer" && payload["@context"]!.AsArray().Count == 3 && payload["credentialStatus"]!["type"]!.GetValue<string>() == "1EdTechRevocationList",
             "B5 Open Badge 3.0: Kontexte, Typen (OpenBadgeCredential, AchievementSubject), Aussteller und Widerrufsliste");
-        check(JsonNode.Parse(await Task.FromResult(BadgeSigner.PayloadText(c.BadgeJws)))!["credentialSubject"]!["achievement"]!["name"]!.GetValue<string>() == "Testmodul" && c.BadgeHash == BadgeSigner.HashHex(c.BadgeJws), "B5 Badge-Hash: SHA-256 der JWS, reproduzierbar");
+        check(BadgeSigner.CredentialFromJws(c.BadgeJws)["credentialSubject"]!["achievement"]!["name"]!.GetValue<string>() == "Testmodul" && c.BadgeHash == BadgeSigner.HashHex(c.BadgeJws), "B5 Badge-Hash: SHA-256 der JWS, reproduzierbar");
         var signed = e.Certs.SignedBadgeJson(c).ToJsonString();
         var v = await e.Certs.VerifyAsync(signed);
         check(v.Valid && v.SignatureValid && v.IssuerValid && v.ContentMatches == true && v.Known && !v.Revoked && v.Number == c.Number, "B5 Badge-Prüfung: Signatur, Aussteller, Integrität und Registrierung gültig");
         check((await e.Certs.VerifyAsync(c.BadgeJws)).Valid, "B5 Badge-Prüfung: auch die kompakte JWS allein wird geprüft");
 
+        // Altbestand (Profil vc+jwt mit proof.jwt-Hülle) bleibt prüfbar; das neue Profil ist daran erkennbar (ADR 0038)
+        var legacyCred = e.Certs.BuildCredential(c);
+        var legacyJws = e.Signer.Sign(legacyCred, e.Certs.KeyId);
+        var legacyJson = (JsonObject)legacyCred.DeepClone();
+        legacyJson["proof"] = new JsonObject { ["type"] = "JwtProof2020", ["proofPurpose"] = "assertionMethod", ["verificationMethod"] = e.Certs.KeyId, ["created"] = "2026-01-01T00:00:00Z", ["jwt"] = legacyJws };
+        var lvJws = await e.Certs.VerifyAsync(legacyJws); var lvJson = await e.Certs.VerifyAsync(legacyJson.ToJsonString());
+        check(BadgeSigner.IsLegacyProfile(legacyJws) && !BadgeSigner.IsLegacyProfile(c.BadgeJws) && lvJws.SignatureValid && lvJson.SignatureValid && lvJson.ContentMatches == true && BadgeSigner.HeaderInfo(c.BadgeJws) is ("ES256", _, "ob3-jwt") && BadgeSigner.HeaderInfo(legacyJws).Profile == "legacy-vc+jwt",
+            "B5 Altbestand: Credentials im älteren Profil (vc+jwt, proof.jwt) bleiben signatur- und inhaltsprüfbar; das neue Profil (typ JWT) wird davon unterschieden");
+        legacyJson["name"] = "Manipuliert";
+        check((await e.Certs.VerifyAsync(legacyJson.ToJsonString())).ContentMatches == false, "B5 Altbestand: Manipulation des JSON mit proof.jwt wird weiterhin erkannt");
+
         var tampered = JsonNode.Parse(signed)!; tampered["name"] = "Manipuliert";
         var vt = await e.Certs.VerifyAsync(tampered.ToJsonString());
         check(!vt.Valid && vt.ContentMatches == false && vt.SignatureValid, "B6 Manipulation: geänderter Badge-Inhalt bei unveränderter Signatur wird erkannt (Inhalt ≠ signierter Inhalt)");
         var parts = c.BadgeJws.Split('.');
-        var forgedPayload = BadgeSigner.PayloadText(c.BadgeJws).Replace("Testmodul", "Gefälscht");
+        var forgedPayload = BadgeSigner.PayloadText(c.BadgeJws).Replace("Testmodul", "Gefälscht");   // Nutzlast mit vc-Claim: die Ersetzung trifft den signierten Namen
         var forged = parts[0] + "." + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(forgedPayload)).TrimEnd('=').Replace('+', '-').Replace('/', '_') + "." + parts[2];
         check(!(await e.Certs.VerifyAsync(forged)).SignatureValid, "B6 Manipulation: veränderte Nutzlast → Signatur ungültig");
         var noneAlg = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("{\"alg\":\"none\",\"kid\":\"x\"}")).TrimEnd('=') + "." + parts[1] + ".";

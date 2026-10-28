@@ -73,3 +73,9 @@ Upload-Prüfung `/verify` (ADR 0033/0035) weist getrennt aus: kryptografisch gü
 ## Nicht umgesetzt
 
 OCSP (kein Responder, keine OCSP-URL in den Zertifikaten), automatische Root-/Issuing-Rotation, Delta-CRLs, CA-Zertifikate für Dritte, Schlüsselimport/-export, LTV/PAdES-B-LT, Eintrag in Vertrauenslisten (AATL, EUTL, Betriebssysteme).
+
+## Nachtrag (ADR 0037/0038)
+
+Administratoren sehen ausgestellte Nachweise im Register (`/admin/credentials`) und können einzelne Nachweise gezielt widerrufen; das Widerrufen eines Signaturzertifikats geschieht weiterhin nur hier in der PKI (`PkiService.RevokeAsync`). Der PKI-Status des PDF-Signaturzertifikats wird im Register-Detail angezeigt (Suche über den Thumbprint).
+
+Abgrenzung im Ausstellungsregister (ADR 0037): Der **X.509-Thumbprint** identifiziert das Signaturzertifikat eines PDFs und kann viele Nachweise treffen; ein **Credential-Widerruf** lässt das Zertifikat und alle anderen damit signierten PDFs unberührt (getestet). Wird ein PKI-Signaturzertifikat über `PkiService.RevokeAsync` widerrufen, melden die PDF-Prüfung (`signer_revoked`) und die Registerdetails (PKI-Status) die Folge für alle damit signierten PDFs; die Credentials selbst (Badge/CLR) werden dadurch nicht widerrufen.

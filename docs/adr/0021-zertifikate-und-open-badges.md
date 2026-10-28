@@ -26,3 +26,7 @@ Nach bestandenem Modulquiz soll ein prüfbarer Abschlussnachweis entstehen. Der 
 
 - Umgesetzt sind Dienste, API und Tests. **Noch nicht umgesetzt:** rollenabhängige Seitenleiste, Dashboards, Zertifikats-/Badge-Seiten, QR-Code, Druckansicht, Prüfseite, Auditor- und Admin-Oberfläche, Hilfeseiten-Abschnitte (Folgearbeit).
 - Mehrschlüssel-Prüfung nach Schlüsselrotation; Schlüsselspeicherung im Key Vault ist dokumentiert, nicht automatisiert.
+
+## Nachtrag (ADR 0038)
+
+Signaturprofil und `kid` neu ausgestellter Credentials: siehe [0038](0038-jwt-profil-fuer-open-badges-und-clr.md) (Credential im JWT-Claim `vc`, `kid` = URL eines einzelnen JWK). Die Aussagen zu `proof.jwt`/`JwtProof2020` in diesem ADR gelten nur noch für Altbestand.

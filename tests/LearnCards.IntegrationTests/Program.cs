@@ -2085,6 +2085,7 @@ try
     await TopicViewTests.RunAsync(LoginAsync, Check);   // Themenseite: Entwurf nur bei Abweichung
     await CompetencyTests.RunAsync(LoginAsync, () => NewClient(false), Check);   // Kompetenzen, Prüfungssnapshot, Badge (ADR 0031)
     await TopicCredentialTests.RunAsync(LoginAsync, () => NewClient(false), admin, Check);   // Themenabschluss: Master-Badge + CLR (ADR 0032)
+    await CredentialRegisterTests.RunAsync(LoginAsync, () => NewClient(false), admin, Check);   // Register, Testausstellung, Widerruf, JWT-Profil (ADR 0037/0038)
     await ModuleVersionTests.RunAsync(LoginAsync, Check);   // Modulversionen, feste Modulversionen im Thema (ADR 0030)
     await CardToolsTests.RunAsync(LoginAsync, () => NewClient(false), admin, mcpUrl, McpKey, PngLike, Check);   // get_card, update_card, export_cards
     await TopicGovernanceTests.RunAsync(LoginAsync, () => NewClient(false), admin, mcpUrl, Check);   // Themenfreigaben, Pflicht, Themen-Admin, Lernstatus (ADR 0029)

@@ -104,17 +104,20 @@ public static class PdfTests
         if (Environment.GetEnvironmentVariable("TEST_DUMP_DIR") is { Length: > 0 } dump) { Directory.CreateDirectory(dump); File.WriteAllBytes(Path.Combine(dump, "topic.pdf"), pdf1); }   // nur für die manuelle Sichtprüfung
         var insp = PdfInspector.Inspect(pdf1);
         var names = insp.Attachments.Select(a => a.Name).ToHashSet();
+        // Neues Profil (ADR 0038): die JWS liegt als .jwt-Datei bei; die .json-Dateien sind das reine Credential (identisch mit dem Download)
+        var clrJws = Encoding.ASCII.GetString(insp.Attachments.First(a => a.Name == "clr-credential.jwt").Data).Trim();
+        var masterJws = Encoding.ASCII.GetString(insp.Attachments.First(a => a.Name == "master-badge.jwt").Data).Trim();
         check(insp.SignaturePresent && insp.ByteRangeCoversFile && insp.DigestMatches && insp.Cms!.SignatureValid
               && new[] { "clr-credential.json", "clr-credential.jwt", "master-badge.json", "master-badge.jwt", "module-credentials.json", "module-competence-snapshots.json", "verification.json", "public-key.jwk", "competence-snapshot.json" }.All(names.Contains),
             "PDF9 Themen-PDF: signiert, enthält CLR, Master-Badge (JSON-LD und JWT), Modulnachweise, Verifikationsdaten, öffentlichen Schlüssel und Snapshots als Anhänge");
         var embeddedClr = JsonNode.Parse(insp.Attachments.First(a => a.Name == "clr-credential.json").Data);
         var embeddedMaster = JsonNode.Parse(insp.Attachments.First(a => a.Name == "master-badge.json").Data);
         check(JsonNode.DeepEquals(embeddedClr, clr) && JsonNode.DeepEquals(embeddedMaster, master)
-              && Encoding.ASCII.GetString(insp.Attachments.First(a => a.Name == "clr-credential.jwt").Data) == S(clr, "proof.jwt"),
+              && S(BadgeSigner.CredentialFromJws(clrJws), "id") == S(clr, "id") && BadgeSigner.CredentialFromJws(clrJws)["credentialSubject"]!["verifiableCredential"]!.AsArray().Count == clr!["credentialSubject"]!["verifiableCredential"]!.AsArray().Count && JsonNode.DeepEquals(BadgeSigner.CredentialFromJws(masterJws), master),
             "PDF10 das eingebettete CLR ist das vollständige, unveränderte signierte Original (identisch mit dem Download); ebenso das Master-Badge");
         var verification = JsonNode.Parse(insp.Attachments.First(a => a.Name == "verification.json").Data)!;
-        check(S(verification, "signature.algorithm") == "ES256" && S(verification, "signature.key_id").Length > 0 && S(verification, "hashes.clr_jws_sha256") == BadgeSigner.HashHex(S(clr, "proof.jwt"))
-              && S(verification, "hashes.master_badge_jws_sha256") == BadgeSigner.HashHex(S(master, "proof.jwt")) && S(verification, "topic.version") == "1" && S(verification, "certificate_id") == topicCertId
+        check(S(verification, "signature.algorithm") == "ES256" && S(verification, "signature.key_id").Length > 0 && S(verification, "hashes.clr_jws_sha256") == BadgeSigner.HashHex(clrJws)
+              && S(verification, "hashes.master_badge_jws_sha256") == BadgeSigner.HashHex(masterJws) && S(verification, "topic.version") == "1" && S(verification, "certificate_id") == topicCertId
               && verification["hashes"]!["embedded_files"]!.AsArray().Count == insp.Attachments.Count - 1 && verification["standards"]!.ToJsonString().Contains("CLR Standard 2.0"),
             "PDF11 verification.json: Kennungen, Algorithmus, Schlüssel-ID, Version, Hashes von CLR/Badge/Snapshot und aller übrigen Anhänge stimmen mit den Originalen überein");
         var jwkText = Encoding.UTF8.GetString(insp.Attachments.First(a => a.Name == "public-key.jwk").Data);
@@ -184,7 +187,7 @@ public static class PdfTests
         check(S(vFixed, "overall.valid") == "false" && S(vFixed, "attachments.hashes_match") == "true" && S(vFixed, "credentials.clr.valid") == "false" && S(vFixed, "credentials.clr.content_matches") == "false",
             "V5 Hashes nachgerechnet, aber CLR-Inhalt verändert: die CLR-Signatur ist ungültig — eine gültige PDF-Signatur legitimiert kein ungültiges CLR");
         var offlineJwk = JsonNode.Parse(jwkText);
-        check(BadgeSigner.VerifyWithJwk(S(clr, "proof.jwt"), offlineJwk).SignatureValid && !BadgeSigner.VerifyWithJwk(S(clr, "proof.jwt").Replace('A', 'B'), offlineJwk).SignatureValid,
+        check(BadgeSigner.VerifyWithJwk(clrJws, offlineJwk).SignatureValid && !BadgeSigner.VerifyWithJwk(clrJws.Replace('A', 'B'), offlineJwk).SignatureValid,
             "V6 Offline-Prüfung: die CLR-Signatur lässt sich mit dem im PDF mitgelieferten öffentlichen Schlüssel prüfen (Manipulation wird erkannt)");
     }
 

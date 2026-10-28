@@ -10,6 +10,17 @@ namespace LearnCards.Web.Api;
 /// <summary>Zertifikate, Open Badges, öffentliche Prüfung, Auditor- und Blockchain-Verwaltung (ADR 0021/0022). Für MCP-Tokens nicht erreichbar (kein Präfix in <c>TokenAllowedPrefixes</c>).</summary>
 public static partial class ApiEndpoints
 {
+    /// <summary>
+    /// Kennzeichnet die JSON-Darstellung eines Credentials im neuen Profil als <b>unsignierte Datendarstellung</b> (ohne Proof): maßgeblich ist das signierte JWT (Header <c>X-Credential-Signed-Form</c>).
+    /// Ältere Credentials (mit Hülle <c>proof.jwt</c>) werden nicht gekennzeichnet.
+    /// </summary>
+    private static void MarkUnsignedRepresentation(HttpContext http, string id, string what, string jws)
+    {
+        if (BadgeSigner.IsLegacyProfile(jws)) return;
+        http.Response.Headers["X-Credential-Representation"] = "unsigned-json";
+        http.Response.Headers["X-Credential-Signed-Form"] = $"/api/certificates/{id}/{what}.jwt";
+    }
+
     private static readonly ConcurrentDictionary<string, (int Count, DateTime Window)> PublicHits = new();
 
     /// <summary>Einfache Missbrauchsbremse für anonyme Prüf-Endpunkte (je Adresse und Minute).</summary>
@@ -37,6 +48,14 @@ public static partial class ApiEndpoints
     {
         // ─── Öffentlich (ohne Anmeldung, datensparsam: keine Lernendendaten) ───
         app.MapGet("/.well-known/jwks.json", (BadgeSigner signer) => Results.Json(new { keys = new[] { signer.PublicJwk() } })).AllowAnonymous();
+
+        // Ein einzelnes JWK (kein JWKS) – Ziel der kid neuer Credentials; Validatoren lesen die Antwort direkt als Schlüssel.
+        app.MapGet("/badges/keys/{keyId}", (string keyId, BadgeSigner signer, HttpContext http) =>
+        {
+            if (!string.Equals(keyId, signer.KeyId, StringComparison.Ordinal)) return Results.Json(new { detail = "Unbekannte Schlüssel-ID." }, statusCode: 404);
+            http.Response.Headers.CacheControl = "public, max-age=300";
+            return Results.Text(signer.PublicJwk().ToJsonString(), "application/jwk+json");
+        }).AllowAnonymous();
 
         app.MapGet("/badges/issuer", (CertificateService certs, BadgeSigner signer, AppConfig cfg) => Results.Json(new
         {
@@ -131,6 +150,7 @@ public static partial class ApiEndpoints
         {
             if (await certs.GetForUserAsync(Uid(http), id) is not { } c) return Results.Json(new { detail = "Certificate not found" }, statusCode: 404);
             http.Response.Headers.ContentDisposition = $"attachment; filename=\"badge-{c.Number}.json\"";
+            MarkUnsignedRepresentation(http, c.Id, "badge", c.BadgeJws);
             return Results.Text(certs.SignedBadgeJson(c).ToJsonString(new() { WriteIndented = true }), "application/ld+json");
         });
         // Druckbares Zertifikat (HTML; im Browser als PDF speichern). ?view=1 zeigt es im Browser, sonst Download.
@@ -169,6 +189,7 @@ public static partial class ApiEndpoints
         {
             if (await certs.GetForUserAsync(Uid(http), id) is not { } c || certs.SignedClrJson(c) is not { } clr) return Results.Json(new { detail = "Kein CLR vorhanden." }, statusCode: 404);
             http.Response.Headers.ContentDisposition = $"attachment; filename=\"clr-{c.Number}.json\"";
+            MarkUnsignedRepresentation(http, c.Id, "clr", c.ClrJws ?? "");
             return Results.Text(clr.ToJsonString(new() { WriteIndented = true }), "application/ld+json");
         });
         mine.MapGet("/{id}/clr.jwt", async (string id, CertificateService certs, HttpContext http) =>
@@ -234,6 +255,25 @@ public static partial class ApiEndpoints
         admin.MapGet("/certificates", (CertificateService certs, HttpContext http, string? filter) => Guard(async () => Results.Ok(await certs.ListForAdminAsync(Uid(http), filter))));
         admin.MapPost("/certificates/{id}/revoke", (string id, RevokeRequest req, CertificateService certs, HttpContext http) =>
             Guard(async () => { await certs.RevokeAsync(Uid(http), id, req.Reason); return Results.NoContent(); }));
+
+        // ─── Ausstellungsregister, Testausstellung, gezielter Widerruf (ADR 0037) ───
+        // Nur Browser-Anmeldung als Administrator (Filter oben); Rolle zusätzlich im Dienst gegen die Datenbank. Der Aussteller kommt nie aus dem Request.
+        admin.MapGet("/credentials", (CredentialRegisterService reg, HttpContext http) =>
+            Guard(async () => Results.Ok(await reg.SearchAsync(Uid(http), CredentialQuery.From(http.Request.Query)))));
+        admin.MapGet("/credentials/{id}", (string id, CredentialRegisterService reg, HttpContext http) =>
+            Guard(async () => await reg.GetDetailAsync(Uid(http), id) is { } d ? Results.Ok(d) : Results.Json(new { detail = "Nachweis nicht gefunden." }, statusCode: 404)));
+        admin.MapPost("/credentials/test", (CredentialTestRequest req, CertificateService certs, HttpContext http) =>
+            Guard(async () =>
+            {
+                var c = await certs.IssueTestAsync(Uid(http), req.Type ?? "", Guid.NewGuid().ToString("N"));
+                return Results.Ok(new { id = c.Id, number = c.Number, kind = c.Kind, is_test = c.IsTest, issued_at = c.IssuedAt });
+            }));
+        admin.MapPost("/credentials/{id}/revoke", (string id, CredentialRevokeRequest req, CredentialRegisterService reg, HttpContext http) =>
+            Guard(async () =>
+            {
+                var o = await reg.RevokeAsync(Uid(http), id, req.Reason ?? "", req.ConfirmNumber ?? "", Guid.NewGuid().ToString("N"));
+                return Results.Ok(new { id = o.Id, number = o.Number, status = o.Status, changed = o.Changed });
+            }));
 
         admin.MapGet("/blockchain", async (ChainSettingsStore settings, AnchorService anchors, AppConfig cfg, HttpContext http) =>
         {
@@ -317,3 +357,26 @@ public class BlockchainSettingsRequest
 }
 public class BlockchainProcessRequest { public bool Force { get; set; } }
 public class MainnetApprovalRequest { public string? Confirm { get; set; } }
+
+public class CredentialTestRequest { public string? Type { get; set; } }
+public class CredentialRevokeRequest
+{
+    public string? Reason { get; set; }
+    [System.Text.Json.Serialization.JsonPropertyName("confirm_number")] public string? ConfirmNumber { get; set; }
+}
+
+/// <summary>Abfrageparameter der Registersuche (Namen wie in der API: snake_case); ungültige Werte werden ignoriert.</summary>
+public static class CredentialQuery
+{
+    public static CredentialRegisterService.Query From(IQueryCollection q)
+    {
+        string? S(string k) => q.TryGetValue(k, out var v) && v.Count > 0 && !string.IsNullOrWhiteSpace(v[0]) ? v[0]!.Trim()[..Math.Min(v[0]!.Trim().Length, 200)] : null;
+        DateTime? D(string k) => DateTime.TryParse(S(k), System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var d) ? d : null;
+        int I(string k, int def) => int.TryParse(S(k), out var i) ? i : def;
+        return new CredentialRegisterService.Query
+        {
+            Text = S("q"), Id = S("id"), Fingerprint = S("fingerprint"), Thumbprint = S("thumbprint"), Number = S("number"), Recipient = S("recipient"), Issuer = S("issuer"), Module = S("module"),
+            Status = S("status"), Test = S("test"), Kind = S("kind"), From = D("from"), To = D("to"), Sort = S("sort"), Page = I("page", 1), PageSize = I("page_size", 25),
+        };
+    }
+}

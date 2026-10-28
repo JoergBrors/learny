@@ -41,13 +41,14 @@ public sealed partial class CertificateService
             Id = certificateId, Kind = "topic", Number = NewNumber(), UserId = inp.UserId, ModuleId = inp.TopicId, ModuleName = inp.TopicName, ModuleVersion = inp.TopicVersion, ModuleScope = "topic",
             ResultId = inp.ResultId, LearnerName = learner, ScorePercent = Math.Round(inp.ScorePercent, 1), PassPercent = inp.PassPercent, IssuedAt = DateTime.UtcNow, CompletedAt = inp.CompletedAt,
             SnapshotId = snapshot.Id, SnapshotHash = snapshot.Hash,
+            IssueSource = "exam", IssuedByName = "Prüfsystem",
         };
         var master = BuildMasterBadge(cert, inp, snapshot);
-        cert.BadgeJws = _signer.Sign(master, KeyId);
+        cert.BadgeJws = _signer.SignCredential(master, JwtKeyId);
         cert.BadgeHash = BadgeSigner.HashHex(cert.BadgeJws);
         cert.LeafHash = MerkleTree.Hex(MerkleTree.Leaf(MerkleTree.FromHex(cert.BadgeHash)));
         var clr = BuildClr(cert, inp);
-        cert.ClrJws = _signer.Sign(clr, KeyId);
+        cert.ClrJws = _signer.SignCredential(clr, JwtKeyId);
         cert.ClrHash = BadgeSigner.HashHex(cert.ClrJws);
         if (settings.Enabled) { cert.ChainStatus = Domain.ChainStatus.Pending; cert.ChainNetwork = settings.Network; cert.ChainId = settings.ChainId; }
         try { await InsertAsync(cert); }
@@ -118,7 +119,7 @@ public sealed partial class CertificateService
             ["issuer"] = IssuerProfile(), ["validFrom"] = Iso(c.IssuedAt), ["name"] = $"{c.ModuleName} — Themenabschluss",
             ["credentialSubject"] = new JsonObject
             {
-                ["type"] = new JsonArray("AchievementSubject"), ["identifier"] = new JsonArray(Identity(c.LearnerName, true)), ["activityEndDate"] = Iso(c.CompletedAt ?? c.IssuedAt),
+                ["id"] = SubjectId(c.UserId), ["type"] = new JsonArray("AchievementSubject"), ["identifier"] = new JsonArray(Identity(c.LearnerName, true)), ["activityEndDate"] = Iso(c.CompletedAt ?? c.IssuedAt),
                 ["achievement"] = TopicAchievement(c, i),
                 ["result"] = new JsonArray(new JsonObject
                 {
@@ -137,16 +138,14 @@ public sealed partial class CertificateService
     /// </summary>
     public JsonObject BuildClr(Certificate c, TopicCompletionInput i)
     {
-        var masterSigned = SignedBadgeJson(c);   // Master-Badge samt Signatur (proof.jwt)
         var topicAch = TopicAchievement(c, i);
         var achievements = new JsonArray(topicAch.DeepClone());
-        var credentials = new JsonArray(masterSigned);
+        var credentials = new JsonArray(EmbeddedCredential(c));   // Master-Badge samt Signatur
         var associations = new JsonArray();
         foreach (var m in i.ModuleCertificates)
         {
-            var signed = SignedBadgeJson(m);
-            credentials.Add(signed);
-            var ach = (JsonObject)signed["credentialSubject"]!["achievement"]!.DeepClone();
+            credentials.Add(EmbeddedCredential(m));
+            var ach = (JsonObject)BadgeSigner.CredentialFromJws(m.BadgeJws)["credentialSubject"]!["achievement"]!.DeepClone();
             achievements.Add(ach);
             associations.Add(new JsonObject { ["type"] = "Association", ["associationType"] = "isChildOf", ["sourceId"] = ach["id"]!.GetValue<string>(), ["targetId"] = topicAch["id"]!.GetValue<string>() });
         }
@@ -156,19 +155,27 @@ public sealed partial class CertificateService
             ["issuer"] = IssuerProfile(), ["validFrom"] = Iso(c.IssuedAt), ["name"] = $"{c.ModuleName} — Comprehensive Learner Record",
             ["credentialSubject"] = new JsonObject
             {
-                ["type"] = new JsonArray("ClrSubject"), ["identifier"] = new JsonArray(Identity(c.LearnerName, true)),
+                ["id"] = SubjectId(c.UserId), ["type"] = new JsonArray("ClrSubject"), ["identifier"] = new JsonArray(Identity(c.LearnerName, true)),
                 ["achievement"] = achievements, ["verifiableCredential"] = credentials, ["association"] = associations,
             },
             ["credentialStatus"] = new JsonObject { ["id"] = BaseUrl + "/api/public/revocation-list", ["type"] = "1EdTechRevocationList" },
         };
     }
 
+    /// <summary>Eingebettetes Credential im CLR: Altbestand als Objekt mit Hülle, neue Credentials als kompakte JWS (das JWT ist der Proof) — nie ein Objekt ohne prüfbare Signatur.</summary>
+    private JsonNode EmbeddedCredential(Certificate c) => BadgeSigner.IsLegacyProfile(c.BadgeJws) ? SignedBadgeJson(c) : JsonValue.Create(c.BadgeJws)!;
+
     /// <summary>Signiertes CLR als JSON-LD: ClrCredential plus eingebettete Signatur (<c>proof.jwt</c>, VC-JWT) — unverändert aus der gespeicherten Signatur.</summary>
     public JsonObject? SignedClrJson(Certificate c)
     {
         if (string.IsNullOrEmpty(c.ClrJws)) return null;
-        var credential = (JsonObject)JsonNode.Parse(BadgeSigner.PayloadText(c.ClrJws))!;
-        credential["proof"] = ProofEnvelope(c.ClrJws, c.IssuedAt);
+        var credential = BadgeSigner.CredentialFromJws(c.ClrJws);
+        // JSON-Darstellung nach dem CLR-2.0-JSON-Schema: ClrSubject.verifiableCredential enthält Credential-<b>Objekte</b> (kompakte JWS erlaubt nur das JWT-Payload-Schema).
+        // Die Objekte sind die unveränderten signierten Inhalte der eingebetteten JWS; es wird kein Proof erfunden. Maßgeblich bleibt das CLR-JWT mit den eingebetteten JWS.
+        if (credential["credentialSubject"]?["verifiableCredential"] is JsonArray list)
+            for (var i = 0; i < list.Count; i++)
+                if (list[i] is JsonValue v && v.TryGetValue<string>(out var jws)) list[i] = BadgeSigner.CredentialFromJws(jws);
+        if (BadgeSigner.IsLegacyProfile(c.ClrJws)) credential["proof"] = ProofEnvelope(c.ClrJws, c.IssuedAt);
         return credential;
     }
 }

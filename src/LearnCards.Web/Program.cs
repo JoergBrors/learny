@@ -67,6 +67,7 @@ builder.Services.AddSingleton<IAnchorSigner>(sp =>
         : new UnavailableAnchorSigner(b.WalletAddress);
 });
 builder.Services.AddSingleton<CertificateService>();
+builder.Services.AddSingleton<CredentialRegisterService>();   // Ausstellungsregister (ADR 0037)
 builder.Services.AddSingleton<AnchorService>();
 builder.Services.AddHostedService<AnchorWorker>();
 

@@ -444,4 +444,46 @@ Hier sind meine Folien / Notizen:
         <h3>MCP</h3>
         <p class="muted">Dein MCP-Client sieht standardmäßig nur deine eigenen Module. Mit <code>list_modules</code> und <code>scope</code> = <code>shared</code>, <code>global</code> oder <code>all</code> listest du auch freigegebene und globale Module (nur lesend). Freigeben und Veröffentlichen sind über MCP nicht möglich.</p>
     </section>
+
+    <section class="card panel" id="credentials">
+        <h2 class="panel-title">Nachweise: Open Badges, CLR, Prüfung und Testnachweise</h2>
+        <p class="muted">Wer ein Modul oder Thema abschließt, erhält signierte digitale Nachweise (unter <a href="/achievements">Meine Abschlüsse und Nachweise</a>). Diese Hinweise beschreiben nur, was Learny tatsächlich umsetzt.</p>
+        <div class="help-grid">
+            <div class="help-block">
+                <h3>Open Badge 3.0 und Master-Badge</h3>
+                <p class="muted">Ein <strong>Modulabschluss</strong> ist ein eigenständiges Open Badge 3.0. Ein <strong>Themenabschluss</strong> besteht aus dem <strong>Master-Badge</strong> („Erfolgreicher Themenabschluss“) und dem CLR; die Modulabschlüsse bleiben einzeln gültig.</p>
+            </div>
+            <div class="help-block">
+                <h3>CLR 2.0</h3>
+                <p class="muted">Das Comprehensive Learner Record bündelt Thema, Module (als eingebettete signierte Credentials) und das Master-Badge.</p>
+            </div>
+            <div class="help-block">
+                <h3>JSON und JWT</h3>
+                <p class="muted">Die <strong>JWT-Datei</strong> (ES256) ist die signierte Fassung und der maßgebliche Nachweis. Die <strong>JSON-Datei</strong> enthält denselben Inhalt ohne eigene Signatur — sie beweist allein nichts; ob sie zum signierten Nachweis passt, prüft die Seite „Prüfen“. Beim CLR enthält die JSON-Datei die eingebetteten Nachweise als Objekte (Schema), das JWT als signierte Kompaktform. Ältere Nachweise tragen die Signatur zusätzlich im JSON (<code>proof.jwt</code>).</p>
+            </div>
+        </div>
+        <h3>Credential-ID, Fingerprint und Thumbprint</h3>
+        <ul>
+            <li><strong>Credential-ID</strong>: die eindeutige Kennung eines Nachweises (Teil der Prüfadresse <code>/verify/&lt;ID&gt;</code>).</li>
+            <li><strong>Credential-Fingerprint</strong>: SHA-256 der signierten JWT-Datei; er identifiziert genau einen Nachweis (bei Themenabschlüssen getrennt für Master-Badge und CLR).</li>
+            <li><strong>X.509-Thumbprint</strong>: Kennung des Zertifikats, mit dem ein <em>PDF</em> signiert wurde. Viele PDFs teilen dasselbe Zertifikat — er ist <strong>keine</strong> Kennung eines Nachweises.</li>
+        </ul>
+        <h3>Öffentliche Prüfung und Widerruf</h3>
+        <p class="muted">Jeder kann einen Nachweis unter <a href="/verify">Prüfen</a> prüfen (JWT einfügen oder PDF hochladen). Die Prüfung meldet Signatur, Aussteller und den <strong>aktuellen Widerrufsstatus</strong>; eine gültige Signatur allein ist kein Beweis für einen weiterhin gültigen Nachweis. Ein widerrufener Nachweis bleibt unverändert gespeichert, wird aber als widerrufen gemeldet.</p>
+        <h3>Für Administratoren</h3>
+        <ul>
+            <li><strong>Testnachweise</strong> (Administration → Zertifikate &amp; Nachweise): gekennzeichnet mit <strong>TEST</strong>, ohne Prüfung, ohne Ergebnis und Kompetenz, nicht in Listen oder Statistiken regulärer Abschlüsse. Sie dienen der technischen Prüfung (z. B. mit externen Validatoren).</li>
+            <li><strong>Register</strong>: Suche nach Credential-ID, Fingerprint, X.509-Thumbprint, Nummer, Empfänger, Aussteller und Modul/Thema; Filter nach Status, Test/Regulär, Typ und Zeitraum.</li>
+            <li><strong>Widerruf</strong>: genau ein Nachweis, mit Grund und Bestätigung der Nachweisnummer; kein automatischer Widerruf abhängiger Nachweise. Ein X.509-Zertifikat wird nur in der PKI widerrufen.</li>
+        </ul>
+        <h3>Begriffe der Prüfung</h3>
+        <ul>
+            <li><strong>Signiertes Badge-JWT</strong>: die Kompaktform (Header.Nutzlast.Signatur) mit ES256; Prüfer holen den öffentlichen Schlüssel über die <code>kid</code>-Adresse (ein einzelnes JWK) oder die JWKS-Liste (<code>/.well-known/jwks.json</code>).</li>
+            <li><strong>JSON-Darstellung</strong>: derselbe Inhalt ohne Signatur (HTTP-Kennzeichnung „unsigned-json“). Ein externer Validator meldet dafür „missing a proof“ — das ist erwartet.</li>
+            <li><strong>Embedded Proof / DataIntegrityProof</strong>: eine Signatur <em>im</em> JSON-LD-Dokument. Learny bietet das nicht an; der Nachweis ist das signierte JWT.</li>
+            <li><strong>Lokale Adresse</strong>: Ein Test mit <code>localhost</code> ist für externe Prüfer nicht abrufbar (Schlüssel und Widerrufsliste). Das ist kein Signaturfehler.</li>
+        </ul>
+        <h3>Externe Validierung und Zertifizierung</h3>
+        <p class="muted">Die Nachweise folgen den offenen Spezifikationen von Open Badges 3.0 und CLR 2.0 (JWT-Profil mit ES256). Eine <strong>Zertifizierung durch 1EdTech oder LinkedIn besteht nicht</strong>. Ob der 1EdTech-Validator (vc.1ed.tech) ES256 akzeptiert, ist noch nicht bestätigt (<code>docs/credential-validation.md</code>). Für eine externe Prüfung müssen Aussteller- und Statusadresse öffentlich erreichbar sein; mit <code>localhost</code> meldet der Validator sie als nicht erreichbar.</p>
+    </section>
 </div>

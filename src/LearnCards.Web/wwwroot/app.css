@@ -848,3 +848,10 @@ a.user-chip { text-decoration: none; }
 .seal-link { display: inline-grid; place-items: center; margin-left: .4rem; opacity: .9; }
 .seal-link:hover, .seal-link:focus-visible { opacity: 1; }
 .seal-link img { display: block; }
+
+/* Zertifikate & Nachweise (ADR 0037): Kennzeichnung von Testnachweisen */
+.badge-test { display: inline-block; padding: .05rem .5rem; border-radius: .75rem; border: 2px solid var(--warn, #b45309); color: var(--warn, #b45309); font-weight: 700; font-size: .78rem; letter-spacing: .06em; }
+.row-revoked { opacity: .75; }
+.filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: .6rem; margin-bottom: .6rem; }
+.filter-grid label { display: flex; flex-direction: column; font-size: .85rem; gap: .2rem; }
+.table-wrap { overflow-x: auto; }

@@ -138,3 +138,15 @@ Im Block „Beispiele, Templates, Schema, MCP, Hilfe“ werden zusätzlich `modu
 ### OIDC-Ablauf und Docker-Laufzeitprüfung (ADR 0036)
 
 `OidcFlowTests` startet die Anwendung zusätzlich im OIDC-Modus (Development, SQLite) gegen einen lokalen Test-IdP (`HttpListener`, RS256, eigene JWKS) und prüft den vollständigen Ablauf samt Negativfällen. `DockerConfigTests` prüft `publish-docker.yml` und führt `tools/docker/RuntimeCheck.cs` mit gültigen und zu alten Laufzeitlisten aus (benötigt `dotnet run <Datei>`, .NET-10-SDK). Nicht automatisiert: echte Entra-Anmeldung unter IIS, Lauf des Workflows auf einem GitHub-Runner.
+
+## Ausstellungsregister, Testausstellung, JWT-Profil (ADR 0037/0038)
+
+`CredentialRegisterTests` prüft: das JWT-Profil unabhängig vom Learny-Verifier (Header, Claims, ES256 mit dem JWKS), Testausstellung (nur Admin, TEST-Kennzeichnung, kein Ergebnis/Kompetenz, nicht in „Meine Abschlüsse“), Register (Akteur, UTC, Suche nach ID/Fingerprint/Nummer/Name, Filter, Pagination, keine JWS in Listen), Widerruf (Bestätigung, Idempotenz, genau ein Auditeintrag, Originalbytes unverändert, öffentliche Prüfung, Teilwiderruf des Themenabschlusses) und das signierte Test-PDF. Die öffentlichen Prüf-Endpunkte teilen eine Missbrauchsbremse je Client-Adresse und Minute; der Test nutzt dafür per `X-Forwarded-For` eine eigene Testadresse (keine Wartezeit, produktive Bremse unverändert) und prüft zusätzlich, dass sie weiterhin abweist. Ergänzt: Altbestand-Profil (`B5 Altbestand`), JSON↔JWT-Identität, fremde Downloads (404), parallele Ausstellung/Widerruf, SQL-/Längenbegrenzung der Suche, X.509-Thumbprint ≠ Fingerprint, Unveränderlichkeit von Aussteller/Zeitpunkt, kein JWS im Audit. Die Suite läuft vollständig gegen SQLite und PostgreSQL (1362 Prüfungen). Nicht automatisiert: der externe 1EdTech-Validator ([credential-validation.md](credential-validation.md)).
+
+### CLR-Schema und JWT-Payload (ADR 0038)
+
+`CredentialRegisterTests` prüft eine lokale Strukturprüfung nach dem CLR-2.0-JSON-Schema (`ClrJsonSchemaProblems`, inklusive Reproduktion des früheren Fehlers mit JWS-Strings), das JWT-Payload-Profil (Claim `vc`, `iss`/`jti`/`nbf`/`sub`, ES256 unabhängig geprüft) und die Gleichheit von JSON-Objekten und eingebetteten JWS. Nicht automatisiert: der Lauf des 1EdTech-Validators.
+
+### Open-Badges-Validierung (ADR 0038)
+
+`CredentialRegisterTests` prüft zusätzlich: die `kid`-URL liefert genau ein JWK (kein JWKS/Profil) und entspricht dem JWKS-Eintrag, keine privaten Schlüsselteile, Ablehnung manipulierter Signatur/Header/Nutzlast, Kennzeichnung des JSON-Downloads als unsigniert, stabiler Fingerprint, Struktur von Modul- und Master-Badge, Prüfstatus der Admin-Detailansicht (Schlüssel „nicht erreichbar“ ≠ ungültige Signatur; externe Prüfung „nicht geprüft“). Nicht automatisiert: der Lauf des 1EdTech-Validators.

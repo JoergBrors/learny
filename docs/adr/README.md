@@ -44,6 +44,8 @@ Referenz dafür, *wie das System funktioniert und warum* — für Menschen und f
 | [0034](0034-nachweisuebersicht-pruefsiegel-und-linkedin.md) | Nachweisübersicht, Prüfsiegel „Learny Verified“ und LinkedIn-Angaben | Akzeptiert |
 | [0035](0035-learny-pki-und-zertifikatsverwaltung.md) | Learny-PKI und Zertifikatsverwaltung (Root/Issuing CA, Register, Widerruf, CRL) | Akzeptiert |
 | [0036](0036-oidc-form-post-und-https-callbacks.md) | OIDC form_post und sichere HTTPS-Callbacks | Akzeptiert |
+| [0037](0037-testausstellung-ausstellungsregister-und-credential-widerruf.md) | Administrative Testausstellung, Ausstellungsregister und gezielter Credential-Widerruf | Akzeptiert |
+| [0038](0038-jwt-profil-fuer-open-badges-und-clr.md) | JWT-Profil für Open Badges 3.0 und CLR 2.0 (ersetzt 0021/0032 teilweise) | Akzeptiert |
 | [0025](0025-sichere-speicherung-von-mcp-tokens.md) | Sichere Speicherung von MCP-Tokens, Codes und OAuth-Clients (Schutz bei Datenbankzugriff) | Akzeptiert und umgesetzt |
 
 Prüfberichte, die Anlass für ADRs sind, liegen unter [docs/reviews/](../reviews/) (aktuell: [Mehrbenutzer-Prüfbericht](../reviews/2026-10-24-mehrbenutzer-pruefbericht.md)).

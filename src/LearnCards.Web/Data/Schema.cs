@@ -393,7 +393,12 @@ public static class Schema
                 kind               TEXT NOT NULL DEFAULT 'module',
                 clr_jws            TEXT NULL,
                 clr_hash           TEXT NOT NULL DEFAULT '',
-                completed_at       TEXT NULL
+                completed_at       TEXT NULL,
+                is_test            INTEGER NOT NULL DEFAULT 0,
+                issued_by          TEXT NULL,
+                issued_by_name     TEXT NOT NULL DEFAULT '',
+                issue_source       TEXT NOT NULL DEFAULT 'unknown',
+                parent_id          TEXT NULL
             )
             """;
 
@@ -402,6 +407,9 @@ public static class Schema
         yield return "CREATE INDEX IF NOT EXISTS ix_certificates_chain ON certificates(chain_status, chain_network)";
         yield return "CREATE INDEX IF NOT EXISTS ix_certificates_user ON certificates(user_id, issued_at)";
         yield return "CREATE INDEX IF NOT EXISTS ix_certificates_batch ON certificates(batch_id)";
+        yield return "CREATE INDEX IF NOT EXISTS ix_certificates_issued ON certificates(issued_at)";   // Ausstellungsregister (ADR 0037): Sortierung/Zeitfilter
+        yield return "CREATE INDEX IF NOT EXISTS ix_certificates_badge_hash ON certificates(badge_hash)";   // Suche nach Fingerprint
+        yield return "CREATE INDEX IF NOT EXISTS ix_certificates_clr_hash ON certificates(clr_hash)";
 
         // Administrativ änderbare Betriebseinstellungen (Blockchain). Nie Geheimnisse; nur Werte, die zusätzlich zur Umgebungskonfiguration gelten dürfen.
         yield return """

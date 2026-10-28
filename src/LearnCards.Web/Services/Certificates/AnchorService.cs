@@ -401,8 +401,8 @@ public sealed class AnchorService
         }
         return new JsonObject
         {
-            ["issued_certificates"] = await Count("SELECT COUNT(*) AS n FROM certificates"),
-            ["revoked_certificates"] = await Count("SELECT COUNT(*) AS n FROM certificates WHERE status = 'revoked'"),
+            ["issued_certificates"] = await Count("SELECT COUNT(*) AS n FROM certificates WHERE is_test = 0"),
+            ["revoked_certificates"] = await Count("SELECT COUNT(*) AS n FROM certificates WHERE status = 'revoked' AND is_test = 0"),
             ["waiting"] = await Count("SELECT COUNT(*) AS n FROM certificates WHERE chain_status IN ('pending','batched','cost_blocked') AND status = 'active'"),
             ["cost_blocked"] = await Count("SELECT COUNT(*) AS n FROM certificates WHERE chain_status = 'cost_blocked'"),
             ["anchoring"] = await Count("SELECT COUNT(*) AS n FROM certificates WHERE chain_status = 'anchoring'"),

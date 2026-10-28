@@ -23,6 +23,7 @@
             }
         </div>
         <div class="page-head-actions">
+            @if (_isAdmin) { <a class="btn btn-ghost" href="/admin/credentials">Zertifikate &amp; Nachweise</a> }
             <a class="btn btn-ghost" href="/admin/pki">PKI</a>
             <a class="btn btn-ghost" href="/profile">← Mein Profil</a>
         </div>

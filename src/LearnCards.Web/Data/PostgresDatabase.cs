@@ -157,6 +157,12 @@ public sealed class PostgresDatabase : IDatabase
         await EnsureTableColumnAsync("certificates", "clr_jws", "TEXT NULL", ct);
         await EnsureTableColumnAsync("certificates", "clr_hash", "TEXT NOT NULL DEFAULT ''", ct);
         await EnsureTableColumnAsync("certificates", "completed_at", "TEXT NULL", ct);
+        await EnsureTableColumnAsync("certificates", "is_test", "INTEGER NOT NULL DEFAULT 0", ct);   // ADR 0037: Ausstellungsregister
+        await EnsureTableColumnAsync("certificates", "issued_by", "TEXT NULL", ct);
+        await EnsureTableColumnAsync("certificates", "issued_by_name", "TEXT NOT NULL DEFAULT ''", ct);
+        await EnsureTableColumnAsync("certificates", "issue_source", "TEXT NOT NULL DEFAULT 'unknown'", ct);
+        await EnsureTableColumnAsync("certificates", "parent_id", "TEXT NULL", ct);
+        await ExecCoreAsync("CREATE INDEX IF NOT EXISTS ix_certificates_test ON certificates(is_test, status)", null, ct);   // erst nach dem Ergänzen der Spalte (Altdatenbanken)
         await EnsureTableColumnAsync("exam_snapshots", "kind", "TEXT NOT NULL DEFAULT 'module'", ct);
         await EnsureCardColumnAsync("images_json", "TEXT NOT NULL DEFAULT '[]'", ct);   // ADR 0016 (seit ADR 0017 nur noch Altbestand)
         await EnsureCardColumnAsync("images_migrated", "INTEGER NOT NULL DEFAULT 0", ct);   // ADR 0017: 1 = Bilder liegen in card_images

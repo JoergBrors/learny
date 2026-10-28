@@ -45,6 +45,11 @@ public sealed class SqliteDatabase : IDatabase
             EnsureColumn("certificates", "clr_jws", "TEXT NULL");
             EnsureColumn("certificates", "clr_hash", "TEXT NOT NULL DEFAULT ''");
             EnsureColumn("certificates", "completed_at", "TEXT NULL");
+            EnsureColumn("certificates", "is_test", "INTEGER NOT NULL DEFAULT 0");   // ADR 0037: Ausstellungsregister
+            EnsureColumn("certificates", "issued_by", "TEXT NULL");
+            EnsureColumn("certificates", "issued_by_name", "TEXT NOT NULL DEFAULT ''");
+            EnsureColumn("certificates", "issue_source", "TEXT NOT NULL DEFAULT 'unknown'");
+            EnsureColumn("certificates", "parent_id", "TEXT NULL");
             EnsureColumn("exam_snapshots", "kind", "TEXT NOT NULL DEFAULT 'module'");
             EnsureColumn("cards", "images_json", "TEXT NOT NULL DEFAULT '[]'");   // ADR 0016 (seit ADR 0017 nur noch Altbestand)
             EnsureColumn("cards", "images_migrated", "INTEGER NOT NULL DEFAULT 0");   // ADR 0017: 1 = Bilder liegen in card_images
@@ -63,6 +68,7 @@ public sealed class SqliteDatabase : IDatabase
             EnsureColumn("topic_modules", "module_version", "INTEGER NULL");   // ADR 0030: festgelegte Modulversion im Themenentwurf (NULL = Altbestand, wird beim ersten Zugriff festgeschrieben)
             EnsureColumn("modules", "reference_id", "TEXT NULL");   // ADR 0028: stabile Modulreferenz für portable JSON-Definitionen
             ExecRaw("CREATE UNIQUE INDEX IF NOT EXISTS ux_modules_owner_reference ON modules(owner_user_id, reference_id)");
+            ExecRaw("CREATE INDEX IF NOT EXISTS ix_certificates_test ON certificates(is_test, status)");   // erst nach dem Ergänzen der Spalte (Altdatenbanken)
             EnsureColumn("topic_assignments", "topic_version", "INTEGER NULL");   // ADR 0029: Zuweisung an eine konkrete Themenversion (NULL = Altbestand: neueste veröffentlichte)
             EnsureColumn("topic_assignments", "mandatory", "INTEGER NOT NULL DEFAULT 1");   // 1 = verpflichtend (Altbestand = Lernaufgabe)
             EnsureColumn("topic_assignments", "due_at", "TEXT NULL");

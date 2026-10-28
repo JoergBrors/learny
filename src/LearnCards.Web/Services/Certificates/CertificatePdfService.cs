@@ -69,7 +69,7 @@ public sealed class CertificatePdfService
         var verifyUrl = $"{_certs.BaseUrl}/verify/{cert.Id}";
         var doc = new PdfBuilder
         {
-            Title = $"{(cert.IsTopic ? "Themenabschluss" : "Modulzertifikat")} {cert.ModuleName} – {cert.Number}", Author = "LearnCards (Learny Verified)",
+            Title = $"{(cert.IsTest ? "TESTNACHWEIS – " : "")}{(cert.IsTopic ? "Themenabschluss" : "Modulzertifikat")} {cert.ModuleName} – {cert.Number}", Author = "LearnCards (Learny Verified)",
             Subject = cert.IsTopic ? "Comprehensive Learner Record (CLR 2.0) und Open Badge 3.0" : "Open Badge 3.0", Keywords = $"Open Badges 3.0; {(cert.IsTopic ? "CLR 2.0; " : "")}Learny Verified; {cert.Number}",
             CreationDate = options.SigningTime,
         };
@@ -81,7 +81,7 @@ public sealed class CertificatePdfService
         {
             p.Rect(0, PdfPage.Height - 8, PdfPage.Width, 8, PdfColor.Teal);
             p.Text(PdfFlow.Left, PdfPage.Height - 30, "LearnCards", 9, true, PdfColor.Teal);
-            p.TextRight(PdfFlow.Right, PdfPage.Height - 30, cert.IsTopic ? "Themenabschluss – Comprehensive Learner Record" : "Modulzertifikat", 9, false, PdfColor.Grey);
+            p.TextRight(PdfFlow.Right, PdfPage.Height - 30, (cert.IsTest ? "TESTNACHWEIS – " : "") + (cert.IsTopic ? "Themenabschluss – Comprehensive Learner Record" : "Modulzertifikat"), 9, cert.IsTest, cert.IsTest ? PdfColor.Teal : PdfColor.Grey);
         }
         var flow = new PdfFlow(doc, Chrome);
         var files = new List<PdfEmbeddedFile>();
@@ -208,13 +208,15 @@ public sealed class CertificatePdfService
         var master = _certs.SignedBadgeJson(c);
         foreach (var vc in clr["credentialSubject"]!["verifiableCredential"]!.AsArray())
         {
-            var id = vc!["id"]!.GetValue<string>();
+            // Neues Profil: eingebettete Credentials sind kompakte JWS (das JWT ist der Proof); ältere sind Objekte mit Hülle
+            var vcObj = vc is JsonValue jv && jv.TryGetValue<string>(out var jws) ? BadgeSigner.CredentialFromJws(jws) : vc!.AsObject();
+            var id = vcObj["id"]!.GetValue<string>();
             if (id.EndsWith("/verify/" + c.Id, StringComparison.Ordinal)) continue;   // Master-Badge
             var mc = await _certs.GetRawAsync(id[(id.LastIndexOf('/') + 1)..]);
             if (mc is null) continue;
             JsonNode? ms = null;
             if (mc.SnapshotId is { } sid && await _competencies.GetAsync(sid) is { } s) ms = JsonNode.Parse(s.Json);
-            moduleInfos.Add(new ModuleCredentialInfo(mc, (JsonObject)vc.DeepClone(), ms));
+            moduleInfos.Add(new ModuleCredentialInfo(mc, (JsonObject)vcObj.DeepClone(), ms));
         }
         var done = S(snapshot, "completed_at");
         var moduleLines = (snapshot?["modules"]?.AsArray() ?? new JsonArray());
@@ -313,7 +315,7 @@ public sealed class CertificatePdfService
         flow.Y -= 108;
         flow.Heading("Kryptografische Prüfung");
         flow.Paragraph("1. PDF-Signatur: Das gesamte Dokument einschließlich aller eingebetteten Dateien ist digital signiert (CMS/CAdES). Jede Änderung nach der Signierung macht die Signatur ungültig.", 9);
-        flow.Paragraph("2. Eingebettete Credentials: clr-credential.json, master-badge.json und module-credentials.json enthalten die signierten Original-Credentials (eingebetteter VC-JWT in proof.jwt). Sie lassen sich unabhängig aus dem PDF extrahieren und prüfen.", 9);
+        flow.Paragraph("2. Eingebettete Credentials: clr-credential.json, master-badge.json und module-credentials.json enthalten die signierten Original-Credentials (die zugehörigen VC-JWTs liegen als .jwt-Dateien bei). Sie lassen sich unabhängig aus dem PDF extrahieren und prüfen.", 9);
         flow.Paragraph("3. Hashes: verification.json nennt SHA-256-Prüfsummen aller eingebetteten Dateien und der referenzierten Credentials.", 9);
         flow.Paragraph("4. Widerruf: Der aktuelle Widerrufsstatus ist nur online prüfbar (Verifikationsadresse oder Upload dieses PDFs unter /verify). Offline lassen sich Signaturen und Hashes prüfen, soweit der Schlüssel des Ausstellers bekannt ist.", 9);
         flow.Paragraph("Das Siegel „Learny Verified“ bestätigt die von Learny durchgeführte Prüfung. Es handelt sich nicht um eine Zertifizierung durch 1EdTech oder LinkedIn; Open Badges 3.0 und CLR 2.0 werden gemäß den offenen Spezifikationen verwendet.", 8.5, false, PdfColor.Grey);
@@ -352,7 +354,7 @@ public sealed class CertificatePdfService
             },
             ["signature"] = new JsonObject
             {
-                ["algorithm"] = "ES256", ["key_id"] = _certs.Signer.KeyId, ["kid"] = _certs.KeyId, ["proof_format"] = "VC-JWT (compact JWS, typ vc+jwt) – im JSON-LD als proof { type: JwtProof2020, jwt }",
+                ["algorithm"] = "ES256", ["key_id"] = _certs.Signer.KeyId, ["kid"] = _certs.KeyId, ["proof_format"] = "VC-JWT nach OB 3.0 §8.2 (compact JWS, typ JWT, ES256); die zugehörige JWS liegt als .jwt-Datei bei (ältere Pakete tragen sie zusätzlich in proof.jwt)",
                 ["jwks_url"] = baseUrl + "/.well-known/jwks.json", ["public_key_file"] = "public-key.jwk",
             },
             ["standards"] = new JsonArray("1EdTech Open Badges 3.0 (JSON-LD context 3.0.3)", "1EdTech CLR Standard 2.0 (JSON-LD context 2.0.1)", "W3C Verifiable Credentials Data Model 2.0"),

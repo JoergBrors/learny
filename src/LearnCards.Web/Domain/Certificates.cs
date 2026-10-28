@@ -89,6 +89,16 @@ public class Certificate
     /// <summary>Tatsächlicher Abschlusszeitpunkt (nicht Ausstellung, nicht letzte Lernaktivität); null bei Altzertifikaten (dann gilt <c>IssuedAt</c>).</summary>
     public DateTime? CompletedAt { get; set; }
     public bool IsTopic => Kind == "topic";
+    /// <summary>Testnachweis (ADR 0037): administrativ ausgestellt, kein Prüfungsergebnis, nie in Listen/Statistiken regulärer Abschlüsse.</summary>
+    public bool IsTest { get; set; }
+    /// <summary>Aussteller-Benutzer (Administrator) – null bei Systemprozessen und Altbestand.</summary>
+    public string? IssuedBy { get; set; }
+    /// <summary>Name des Ausstellers zum Ausstellungszeitpunkt (Momentaufnahme).</summary>
+    public string IssuedByName { get; set; } = "";
+    /// <summary><c>exam</c> (reguläre Prüfung, Systemprozess) | <c>admin</c> (Administrator) | <c>unknown</c> (Altbestand, nicht rekonstruierbar).</summary>
+    public string IssueSource { get; set; } = "unknown";
+    /// <summary>Übergeordneter Nachweis (Test-Modulnachweis → Test-Themenabschluss).</summary>
+    public string? ParentId { get; set; }
 
     public bool IsRevoked => Status == "revoked";
     /// <summary>Note nach deutscher Skala (1–6), berechnet aus dem Ergebnis in Prozent.</summary>

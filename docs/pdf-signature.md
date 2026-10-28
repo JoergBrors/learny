@@ -58,3 +58,7 @@ openssl pkcs12 -export -inkey key.pem -in cert.pem -out pdf-signing.pfx
 - Per API: `POST /api/public/verify/pdf` (multipart-Feld `file` oder rohe PDF-Bytes, höchstens 25 MB).
 - In PDF-Programmen: Signaturbereich bzw. Anhänge (Büroklammer-Ansicht): `clr-credential.json`, `master-badge.json`, `module-credentials.json`, `verification.json`, `public-key.jwk`, `competence-snapshot.json`.
 - Unabhängig: Die Signaturen wurden während der Entwicklung mit pyHanko (Python) validiert (intakt, gültig, gesamte Datei abgedeckt).
+
+## Nachtrag (ADR 0037/0038)
+
+PDF-Pakete zu Credentials im neuen JWT-Profil tragen die JWS als `.jwt`-Dateien (die `.json`-Dateien sind das reine Credential, identisch mit dem Download); `PdfVerificationService` liest sie von dort, ältere PDFs weiter aus `proof.jwt`. Test-PDFs tragen „TESTNACHWEIS“ in Titel und Kopfzeile und werden mit der regulären PDF-Signatur signiert.

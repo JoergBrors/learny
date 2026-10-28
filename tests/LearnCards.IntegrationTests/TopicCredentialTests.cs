@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using LearnCards.Web.Services.Certificates;
 
 /// <summary>
 /// ADR 0032: Themenabschluss — Modulzertifikate in Themen, Abschlussbedingungen, Master-Open-Badge (Open Badges 3.0) und signiertes CLR 2.0 (Struktur gegen die aus den
@@ -38,8 +39,12 @@ public static class TopicCredentialTests
             var sub = vc["credentialSubject"]!;
             if (!(sub["type"]?.ToJsonString().Contains("ClrSubject") ?? false)) errors.Add("clr: credentialSubject.type ClrSubject fehlt");
             if (sub["verifiableCredential"] is not JsonArray { Count: > 0 } vcs) errors.Add("clr: verifiableCredential (mindestens 1) fehlt");
-            else foreach (var inner in vcs)
+            else foreach (var innerRaw in vcs)
+            {
+                // Neues Profil (ADR 0038): eingebettete Credentials sind kompakte JWS; ihr Inhalt wird wie ein Objekt geprüft
+                var inner = innerRaw is JsonValue jv && jv.TryGetValue<string>(out var jws) ? BadgeSigner.CredentialFromJws(jws) : innerRaw;
                 foreach (var req in new[] { "@context", "type", "issuer", "validFrom", "credentialSubject" }) if (inner![req] is null) errors.Add($"clr: eingebettetes Credential ohne {req}");
+            }
             foreach (var ach in sub["achievement"]?.AsArray() ?? new JsonArray())
                 foreach (var req in new[] { "id", "type", "criteria", "description", "name" }) if (ach![req] is null) errors.Add($"clr: Achievement ohne {req}");
             foreach (var a in sub["association"]?.AsArray() ?? new JsonArray())
@@ -141,7 +146,8 @@ public static class TopicCredentialTests
         check(moduleCertIds.All(id => evidenceIds.Any(e => e.EndsWith("/verify/" + id))) && evidenceIds.Any(e => e.EndsWith($"/api/public/certificates/{certId}/evidence")) && !master.ToJsonString().Contains("/clr"),
             "B3 Master-Badge verweist auf die Modulnachweise und den Snapshot (Evidence) — nicht auf das CLR (keine Zirkelverweise)");
         check(clrErr.Count == 0, "C1 CLR entspricht den Pflichtfeldern von CLR 2.0 (Kontexte, ClrCredential, ClrSubject, verifiableCredential, Achievements, Associations)" + (clrErr.Count > 0 ? " — " + string.Join("; ", clrErr) : ""));
-        var embedded = clr!["credentialSubject"]!["verifiableCredential"]!.AsArray();
+        // Neues Profil (ADR 0038): eingebettete Credentials sind kompakte JWS; für die inhaltlichen Prüfungen wird ihre Nutzlast gelesen
+        var embedded = new JsonArray(clr!["credentialSubject"]!["verifiableCredential"]!.AsArray().Select(v => v is JsonValue jv && jv.TryGetValue<string>(out var j) ? (JsonNode)BadgeSigner.CredentialFromJws(j) : v!.DeepClone()).ToArray());
         var embeddedIds = embedded.Select(v => S(v, "id")).ToList();
         check(embedded.Count == 3 && embeddedIds.Any(i => i.EndsWith("/verify/" + certId)) && moduleCertIds.All(id => embeddedIds.Any(e => e.EndsWith("/verify/" + id))) && S(clr, "id").EndsWith($"/verify/{certId}/clr")
               && clr["credentialSubject"]!["achievement"]!.AsArray().Count == 3 && clr["credentialSubject"]!["association"]!.AsArray().Count == 2 && S(clr, "credentialSubject.association.0.associationType") == "isChildOf",
@@ -158,7 +164,7 @@ public static class TopicCredentialTests
         foreach (var inner in embedded) if (S(await VerifyAsync(inner!), "valid") != "true") allInnerValid = false;
         check(allInnerValid, "D2 alle eingebetteten Credentials (Module, Master) sind einzeln signaturgültig");
         var tampered = JsonNode.Parse(clr.ToJsonString())!; tampered["name"] = "Manipuliert";
-        var tamperedInner = JsonNode.Parse(clr.ToJsonString())!; tamperedInner["credentialSubject"]!["verifiableCredential"]![1]!["name"] = "Manipuliert";
+        var tamperedInner = JsonNode.Parse(clr.ToJsonString())!; var forgedInner = (JsonObject)embedded[1]!.DeepClone(); forgedInner["name"] = "Manipuliert"; tamperedInner["credentialSubject"]!["verifiableCredential"]![1] = forgedInner;
         var vT = await VerifyAsync(tampered); var vTI = await VerifyAsync(tamperedInner);
         check(S(vT, "valid") == "false" && S(vT, "content_matches") == "false" && S(vTI, "valid") == "false", "D3 Manipulation des CLR (auch eines eingebetteten Credentials) wird erkannt");
 

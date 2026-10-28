@@ -222,3 +222,7 @@ Thema veröffentlicht ─► Version (unveränderlich) ─► eingefrorene Modul
 ```
 
 Das private Ursprungsmodul bleibt geschützt; Widerruf entfernt nur das abgeleitete Recht. Das IIS-Deployment stoppt den MCP-HTTP-Server (geplante Aufgabe bzw. Windows-Dienst) vor dem Dateiaustausch, startet ihn danach, prüft Prozess und Health-URL und bricht bei Fehlstart ab.
+
+## Zertifikate, Register und Testnachweise (ADR 0037/0038)
+
+`CertificateService` (Ausstellung, Signatur, Test: `CertificateService.Test.cs`), `CredentialRegisterService` (Suche, Detail, gezielter Widerruf, nur Administratoren), `BadgeSigner.SignCredential` (VC-JWT-Profil). Oberfläche: `/admin/credentials`; API `/api/admin/credentials*` (nie per MCP-Token). Siehe [credential-validation.md](credential-validation.md).

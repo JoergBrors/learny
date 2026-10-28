@@ -244,7 +244,7 @@ public sealed class BadgeSigner : IDisposable
             if (sig.Length != 64) return new(false, "Signaturlänge ungültig.", payload, kid);
             var ok = _key.VerifyData(Encoding.ASCII.GetBytes(parts[0] + "." + parts[1]), sig, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
             if (!ok) return new(false, "Die Signatur stimmt nicht mit dem Inhalt überein (manipuliert oder fremder Aussteller).", payload, kid);
-            if (kid is null || !kid.EndsWith("#" + _keyId, StringComparison.Ordinal)) return new(false, "Die Schlüssel-ID gehört nicht zu diesem Aussteller.", payload, kid);
+            if (kid is null || !(kid.EndsWith("#" + _keyId, StringComparison.Ordinal) || kid.EndsWith("/badges/keys/" + _keyId, StringComparison.Ordinal))) return new(false, "Die Schlüssel-ID gehört nicht zu diesem Aussteller.", payload, kid);
             return new(true, null, payload, kid);
         }
         catch (Exception e) when (e is FormatException or JsonException or CryptographicException or ArgumentException)
@@ -283,6 +283,60 @@ public sealed class BadgeSigner : IDisposable
 
     /// <summary>Nutzlast (Teil 2) einer kompakten JWS als JSON-Text — ohne Signaturprüfung (nur für bereits geprüfte, gespeicherte Badges).</summary>
     public static string PayloadText(string jws) => FromB64(jws.Split('.')[1]);
+
+    /// <summary>JWT-Registered-Claims, die das Profil neben dem Credential in die Nutzlast schreibt (OB 3.0 §8.2.4.1) und beim Rekonstruieren des Credentials wieder entfernt.</summary>
+    private static readonly string[] RegisteredClaims = { "iss", "jti", "nbf", "sub" };
+
+    /// <summary>
+    /// Signiert ein Credential im Profil „VC-JWT nach Open Badges 3.0 / CLR 2.0 §JSON Web Token Proof Format“ (ADR 0037): JOSE-Header nur <c>alg</c>, <c>kid</c>, <c>typ: JWT</c> (keine weiteren Header),
+    /// Nutzlast = <c>iss</c> (issuer.id), <c>jti</c> (id), <c>nbf</c> (validFrom), <c>sub</c> (credentialSubject.id) und das Credential im Claim <c>vc</c>. ES256 bleibt der Algorithmus (die Spezifikation fordert RS256 als Minimum;
+    /// siehe docs/credential-validation.md). Das ältere Profil (<see cref="Sign"/>, <c>typ: vc+jwt</c>) bleibt für bereits ausgestellte Credentials prüfbar.
+    /// </summary>
+    public string SignCredential(JsonObject credential, string kidUrl)
+    {
+        var validFrom = DateTimeOffset.Parse(credential["validFrom"]!.GetValue<string>(), System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal);
+        // Nutzlast wie in den 1EdTech-Referenzbeispielen (CLR 2.0 simple.jwt): Registered Claims plus das Credential im Claim "vc".
+        // Der CLR-Validator liest das Credential ausschließlich aus "vc" (er setzt JWT_CREDENTIAL_ALLOW_WHOLE_PAYLOAD nicht).
+        var payload = new JsonObject
+        {
+            ["iss"] = credential["issuer"]?["id"]?.GetValue<string>() ?? throw new InvalidOperationException("Credential ohne issuer.id."),
+            ["jti"] = credential["id"]?.GetValue<string>() ?? throw new InvalidOperationException("Credential ohne id."),
+            ["nbf"] = validFrom.ToUnixTimeSeconds(),
+            ["sub"] = credential["credentialSubject"]?["id"]?.GetValue<string>() ?? throw new InvalidOperationException("Credential ohne credentialSubject.id."),
+            ["vc"] = credential.DeepClone(),
+        };
+        var header = new JsonObject { ["alg"] = "ES256", ["kid"] = kidUrl, ["typ"] = "JWT" };
+        var signingInput = B64(Encoding.UTF8.GetBytes(header.ToJsonString())) + "." + B64(Encoding.UTF8.GetBytes(payload.ToJsonString()));
+        var sig = _key.SignData(Encoding.ASCII.GetBytes(signingInput), HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+        return signingInput + "." + B64(sig);
+    }
+
+    /// <summary>Das Credential aus der Nutzlast (ohne die vom Profil ergänzten Registered Claims) — ohne Signaturprüfung; nur für gespeicherte, bereits geprüfte Credentials.</summary>
+    public static JsonObject CredentialFromJws(string jws)
+    {
+        var obj = (JsonObject)JsonNode.Parse(PayloadText(jws))!;
+        if (obj["vc"] is JsonObject vc) return (JsonObject)vc.DeepClone();   // Profil ADR 0038: Credential im Claim "vc"
+        if (!IsLegacyProfile(jws)) foreach (var c in RegisteredClaims) obj.Remove(c);
+        return obj;
+    }
+
+    /// <summary>Wahr bei dem älteren Profil (<c>typ: vc+jwt</c>, <c>cty: vc</c>, Hülle <c>JwtProof2020</c>), das nicht dem OB-3.0-JWT-Profil entspricht und nur noch für Altbestand gilt.</summary>
+    public static bool IsLegacyProfile(string jws)
+    {
+        try { return JsonNode.Parse(FromB64(jws.Split('.')[0]))?["typ"]?.GetValue<string>() == "vc+jwt"; }
+        catch (Exception e) when (e is FormatException or JsonException or IndexOutOfRangeException) { return true; }
+    }
+
+    /// <summary>Algorithmus, Schlüssel-ID und Profil aus dem JOSE-Header (nur Anzeige im Register; keine Prüfung).</summary>
+    public static (string? Alg, string? Kid, string Profile) HeaderInfo(string jws)
+    {
+        try
+        {
+            var h = JsonNode.Parse(FromB64(jws.Split('.')[0]));
+            return (h?["alg"]?.GetValue<string>(), h?["kid"]?.GetValue<string>(), h?["typ"]?.GetValue<string>() == "vc+jwt" ? "legacy-vc+jwt" : "ob3-jwt");
+        }
+        catch (Exception e) when (e is FormatException or JsonException or IndexOutOfRangeException) { return (null, null, "unknown"); }
+    }
 
     public static string HashHex(string text) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text))).ToLowerInvariant();
 
