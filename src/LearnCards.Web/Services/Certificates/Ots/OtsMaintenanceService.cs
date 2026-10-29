@@ -105,31 +105,59 @@ public sealed class OtsMaintenanceService
     {
         var all = (await _db.QueryAsync("SELECT * FROM integrity_proofs ORDER BY certificate_id, proof_version")).Select(Map).GroupBy(r => r.CertificateId).Select(g => g.Last()).ToList();
         var changed = 0;
-        foreach (var row in all.Where(r => r.Ots is not null && r.AnchorStatus is OtsState.Pending or OtsState.Anchored or OtsState.Unverifiable))
+        foreach (var row in all.Where(NeedsCheck))
         {
             ct.ThrowIfCancellationRequested();
-            var ots = row.Ots!; var upgradeError = "";
-            if (_s.Problem() is null)
-            {
-                try { ots = await _client.UpgradeAsync(row.Ots!, ct); }
-                catch (OtsClientException e) { upgradeError = e.Message; }
-                catch (Exception e) when (e is IOException or OperationCanceledException) { upgradeError = "Upgrade nicht möglich: " + e.GetType().Name; }
-            }
-            if (OtsFile.Parse(ots) is not { Valid: true }) { ots = row.Ots!; upgradeError = "Aktualisierte Receipt ungültig, bisherige bleibt maßgeblich."; }
-            var eval = await OtsEvaluator.EvaluateAsync(Encoding.ASCII.GetBytes(row.Jws), ots, _headers, _s.Confirmations, row.BlockHash, ct);
-            var otsChanged = !ots.AsSpan().SequenceEqual(row.Ots);
-            // „unverifiable“ ist keine Aussage über den Nachweis: den bisherigen belegten Stand nicht überschreiben
-            var newState = eval.State == OtsState.Unverifiable && row.AnchorStatus is OtsState.Pending or OtsState.Anchored ? row.AnchorStatus : eval.State;
-            if (otsChanged || newState != row.AnchorStatus || eval.BlockHash != row.BlockHash || eval.Confirmations != row.Confirmations && eval.State is OtsState.Anchored or OtsState.Confirmed)
-            {
-                await InsertAsync(row.CertificateId, row.ProofVersion + 1, row.ManifestSha256, row.JwsSha256, row.Jws, ots, otsChanged ? "upgraded" : row.CalendarStatus, newState, eval.Height ?? row.BitcoinHeight,
-                    eval.BlockHash ?? row.BlockHash, eval.BlockTime ?? row.BlockTime, eval.Confirmations, eval.Error ?? upgradeError, row.ClientVersion, row.PdfSha256,
-                    eval.State is OtsState.Anchored or OtsState.Confirmed ? _now() : row.LastVerifiedAt);
-                changed++;
-            }
-            else
-                await _db.ExecuteAsync("UPDATE integrity_proofs SET last_checked_at = @t WHERE certificate_id = @c AND proof_version = @v", new (string, object?)[] { ("t", _now()), ("c", row.CertificateId), ("v", row.ProofVersion) });
+            if ((await ProcessRowAsync(row, ct)).Changed) changed++;
         }
         return changed;
+    }
+
+    private static bool NeedsCheck(IntegrityProofRow r) => r.Ots is not null && r.AnchorStatus is OtsState.Pending or OtsState.Anchored or OtsState.Unverifiable;
+
+    public sealed record RowCheck(bool Changed, string UpgradeError, OtsEvaluation Eval);
+
+    /// <summary>Upgrade (soweit konfiguriert) und Bewertung einer Proof-Zeile; fügt bei geändertem Stand eine neue Proof-Version an. Die Logik gilt für Wartungslauf und Einzelprüfung gleichermaßen.</summary>
+    private async Task<RowCheck> ProcessRowAsync(IntegrityProofRow row, CancellationToken ct)
+    {
+        var ots = row.Ots!; var upgradeError = "";
+        if (_s.Problem() is null)
+        {
+            try { ots = await _client.UpgradeAsync(row.Ots!, ct); }
+            catch (OtsClientException e) { upgradeError = e.Message; }
+            catch (Exception e) when (e is IOException or OperationCanceledException) { upgradeError = "Upgrade nicht möglich: " + e.GetType().Name; }
+        }
+        if (OtsFile.Parse(ots) is not { Valid: true }) { ots = row.Ots!; upgradeError = "Aktualisierte Receipt ungültig, bisherige bleibt maßgeblich."; }
+        var eval = await OtsEvaluator.EvaluateAsync(Encoding.ASCII.GetBytes(row.Jws), ots, _headers, _s.Confirmations, row.BlockHash, ct);
+        var otsChanged = !ots.AsSpan().SequenceEqual(row.Ots);
+        // „unverifiable“ ist keine Aussage über den Nachweis: den bisherigen belegten Stand nicht überschreiben
+        var newState = eval.State == OtsState.Unverifiable && row.AnchorStatus is OtsState.Pending or OtsState.Anchored ? row.AnchorStatus : eval.State;
+        if (otsChanged || newState != row.AnchorStatus || eval.BlockHash != row.BlockHash || eval.Confirmations != row.Confirmations && eval.State is OtsState.Anchored or OtsState.Confirmed)
+        {
+            await InsertAsync(row.CertificateId, row.ProofVersion + 1, row.ManifestSha256, row.JwsSha256, row.Jws, ots, otsChanged ? "upgraded" : row.CalendarStatus, newState, eval.Height ?? row.BitcoinHeight,
+                eval.BlockHash ?? row.BlockHash, eval.BlockTime ?? row.BlockTime, eval.Confirmations, eval.Error ?? upgradeError, row.ClientVersion, row.PdfSha256,
+                eval.State is OtsState.Anchored or OtsState.Confirmed ? _now() : row.LastVerifiedAt);
+            return new(true, upgradeError, eval);
+        }
+        await _db.ExecuteAsync("UPDATE integrity_proofs SET last_checked_at = @t WHERE certificate_id = @c AND proof_version = @v", new (string, object?)[] { ("t", _now()), ("c", row.CertificateId), ("v", row.ProofVersion) });
+        return new(false, upgradeError, eval);
+    }
+
+    public enum CheckKind { NoReceipt, NotNeeded, NotConfigured, Throttled, Checked }
+    public sealed record SingleCheck(CheckKind Kind, IntegrityProofRow? Row, RowCheck? Result);
+
+    /// <summary>
+    /// Einzelprüfung der jüngsten Receipt eines Zertifikats (Live-Anzeige auf der Prüfseite): dieselbe Logik wie der Wartungslauf, aber höchstens alle <paramref name="minInterval"/>
+    /// (Drosselung über <c>last_checked_at</c>, damit Besucher keine Calendar-Abfragen erzwingen können). Bereits bestätigte Nachweise werden nicht erneut abgefragt.
+    /// </summary>
+    public async Task<SingleCheck> CheckLatestAsync(string certificateId, TimeSpan minInterval, CancellationToken ct)
+    {
+        var row = await GetLatestAsync(certificateId);
+        if (row?.Ots is null) return new(CheckKind.NoReceipt, row, null);
+        if (!NeedsCheck(row)) return new(CheckKind.NotNeeded, row, null);
+        if (_s.Problem() is not null) return new(CheckKind.NotConfigured, row, null);
+        if (row.LastCheckedAt is { } last && _now() - last < minInterval) return new(CheckKind.Throttled, row, null);
+        var result = await ProcessRowAsync(row, ct);
+        return new(CheckKind.Checked, await GetLatestAsync(certificateId), result);
     }
 }

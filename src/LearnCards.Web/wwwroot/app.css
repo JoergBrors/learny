@@ -855,3 +855,32 @@ a.user-chip { text-decoration: none; }
 .filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: .6rem; margin-bottom: .6rem; }
 .filter-grid label { display: flex; flex-direction: column; font-size: .85rem; gap: .2rem; }
 .table-wrap { overflow-x: auto; }
+
+/* ── Live-Verifikation (ADR 0039/0040): nur der tatsächlich laufende Schritt ist animiert ── */
+.lv { margin: 1.25rem 0; padding: 1rem 1.1rem; border: 1px solid var(--border); border-radius: .75rem; background: var(--surface-2); }
+.lv-steps { list-style: none; margin: .5rem 0; padding: 0; }
+.lv-step { display: flex; align-items: flex-start; gap: .65rem; padding: .35rem 0; line-height: 1.35; }
+.lv-icon { flex: 0 0 1.5rem; width: 1.5rem; height: 1.5rem; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; border: 1.5px solid var(--border); font-size: .85rem; font-weight: 700; color: var(--text-muted, #6b7280); background: var(--surface); }
+.lv-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.lv-detail { font-size: .82rem; color: var(--text-muted, #6b7280); overflow-wrap: anywhere; }
+.lv-tag { flex: 0 0 auto; font-size: .72rem; text-transform: uppercase; letter-spacing: .03em; padding: .1rem .45rem; border-radius: 999px; border: 1px solid var(--border); color: var(--text-muted, #6b7280); white-space: nowrap; }
+.lv-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.lv-ok .lv-icon { border-color: var(--ok); background: var(--ok-bg); color: var(--ok); }
+.lv-failed .lv-icon { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 14%, var(--surface)); color: var(--danger); }
+.lv-failed .lv-tag { border-color: var(--danger); color: var(--danger); font-weight: 700; }
+.lv-unverifiable .lv-icon, .lv-waiting .lv-icon { border-color: var(--warn); background: var(--warn-bg); color: var(--warn); }
+.lv-skipped { opacity: .65; }
+.lv-pending .lv-icon { opacity: .6; }
+.lv-running .lv-icon { border-color: var(--brand-500); color: var(--brand-600); border-top-color: transparent; }
+.lv-spin { animation: lv-rotate 1s linear infinite; }
+@keyframes lv-rotate { to { transform: rotate(360deg); } }
+.lv-status { margin: .6rem 0 .25rem; font-weight: 600; }
+.lv-notice { margin: .4rem 0; padding: .55rem .75rem; border-left: 4px solid var(--warn); background: var(--warn-bg); border-radius: .4rem; }
+.lv-notice-failed { border-left-color: var(--danger); }
+.lv-facts { display: grid; grid-template-columns: max-content 1fr; gap: .2rem .9rem; margin: .6rem 0; }
+.lv-facts dt { font-weight: 600; }
+.lv-facts dd { margin: 0; overflow-wrap: anywhere; }
+.lv-downloads { display: flex; flex-wrap: wrap; gap: .5rem; margin: .6rem 0 .3rem; }
+.lv-hint { font-size: .82rem; }
+@media (max-width: 34rem) { .lv-tag { display: none; } .lv-facts { grid-template-columns: 1fr; } .lv-facts dt { margin-top: .4rem; } }
+@media (prefers-reduced-motion: reduce) { .lv-spin { animation: none; } .lv-running .lv-icon { border-top-color: var(--brand-500); } }

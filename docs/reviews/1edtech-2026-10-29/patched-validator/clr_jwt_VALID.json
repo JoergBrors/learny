@@ -1,0 +1,31 @@
+{
+  "id" : "ac63e11b-4f5e-427c-8cef-81056283ca4b",
+  "generated" : "2026-10-29T23:32:54",
+  "generator" : "CLR20Inspector",
+  "input" : {
+    "name" : "clr-credential.jwt",
+    "type" : "JWT"
+  },
+  "summary" : {
+    "outcome" : "VALID",
+    "fatals" : 0,
+    "errors" : 0,
+    "warnings" : 0,
+    "exceptions" : 0,
+    "notRun" : 0,
+    "totalRun" : 37,
+    "valid" : 0
+  },
+  "specification" : {
+    "pid" : "clr20.pid",
+    "shortName" : "clr",
+    "version" : "2.0",
+    "title" : "Comprehensive Learner Record 2.0"
+  },
+  "exceptions" : [ ],
+  "warnings" : [ ],
+  "valids" : [ ],
+  "fatals" : [ ],
+  "notRun" : [ ],
+  "errors" : [ ]
+}

@@ -128,6 +128,16 @@ public static partial class ApiEndpoints
             return Results.File(v.Ots!, "application/vnd.opentimestamps.ots");
         }).AllowAnonymous();
 
+        // Aktuelles Integritätsmanifest (Manifest-JWS) — nur die bereits gespeicherte Datei, keine neue Erzeugung oder Stempelung
+        app.MapGet("/api/public/certificates/{id}/integrity-manifest.jws", async (string id, LearnCards.Web.Services.Certificates.Ots.OtsMaintenanceService ots, HttpContext http) =>
+        {
+            if (!PublicAllowed(http, 120)) return Results.StatusCode(429);
+            var v = (await ots.GetVersionsAsync(id)).LastOrDefault();
+            if (v is null) return Results.Json(new { detail = "Kein Integritätsmanifest vorhanden." }, statusCode: 404);
+            http.Response.Headers.ContentDisposition = "attachment; filename=\"integrity-manifest.jws\"";
+            return Results.File(System.Text.Encoding.ASCII.GetBytes(v.Jws), "application/jose");
+        }).AllowAnonymous();
+
         app.MapGet("/api/public/revocation-list", async (CertificateService certs) => Results.Json(await certs.RevocationListAsync())).AllowAnonymous();
 
         // Prüft ein Badge (JSON mit proof.jwt oder kompakte JWS). Eingabe begrenzt; Antwort ohne Lernendendaten.

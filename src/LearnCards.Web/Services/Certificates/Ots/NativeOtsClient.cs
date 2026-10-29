@@ -106,13 +106,15 @@ public sealed class NativeOtsClient : IOtsClient
             {
                 var url = new Uri(new Uri(p.Uri.TrimEnd('/') + "/"), "timestamp/" + Convert.ToHexString(p.Node.Msg).ToLowerInvariant());
                 using var req = Request(HttpMethod.Get, url);
-                var body = await SendAsync(req, true, ct);
-                return (p.Node, Upgraded: body is null ? null : OtsFile.ParseTimestamp(body, p.Node.Msg));
+                var body = await SendAsync(req, true, ct);   // null = 404 (noch nicht bestätigt) — der Calendar hat aber geantwortet
+                return (p.Node, Upgraded: body is null ? null : OtsFile.ParseTimestamp(body, p.Node.Msg), Answered: true);
             }
-            catch (Exception e) when (e is OtsClientException or FormatException or NotSupportedException) { return (p.Node, Upgraded: (OtsNode?)null); }   // ausstehend/Ausfall ist kein Fehler
+            catch (Exception e) when (e is OtsClientException or FormatException or NotSupportedException) { return (p.Node, Upgraded: (OtsNode?)null, Answered: false); }   // Ausfall eines Calendars ist kein Fehler; Totalausfall wird unten gemeldet
             finally { gate.Release(); }
         }).ToList();
-        foreach (var f in await Task.WhenAll(fetches))
+        var results = await Task.WhenAll(fetches);
+        if (pending.Count > 0 && results.All(r => !r.Answered)) throw new OtsClientException("Kein Calendar-Server hat geantwortet (Netzwerk oder Calendar nicht erreichbar).");
+        foreach (var f in results)
         {
             if (f.Upgraded is null) continue;
             var before = OtsFile.Serialize(parsed.DigestTag, parsed.FileDigest, parsed.Root);

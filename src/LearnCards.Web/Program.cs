@@ -45,7 +45,8 @@ builder.Services.AddSingleton<SharingService>();
 builder.Services.AddSingleton<PdfVerificationService>();   // Upload-Prüfung signierter Zertifikats-PDFs (ADR 0033)
 builder.Services.AddSingleton<LearnCards.Web.Services.Certificates.Ots.IOtsClient, LearnCards.Web.Services.Certificates.Ots.NativeOtsClient>();   // nativer OpenTimestamps-Client (ADR 0040)
 builder.Services.AddSingleton<LearnCards.Web.Services.Certificates.Ots.OtsMaintenanceService>();
-builder.Services.AddSingleton<CertificatePdfService>();   // signierte Zertifikats-PDFs (ADR 0033)
+builder.Services.AddSingleton<CertificatePdfService>();
+builder.Services.AddSingleton<LiveVerificationService>();   // geteilte Live-Prüfaufträge der Seite /verify/{id}   // signierte Zertifikats-PDFs (ADR 0033)
 builder.Services.AddSingleton<PdfSigningProvider>();   // PDF-Signaturzertifikat (ADR 0033)
 builder.Services.AddSingleton<PkiKeyStore>();   // Learny-PKI (ADR 0035)
 builder.Services.AddSingleton<PkiService>();

@@ -1,0 +1,103 @@
+--- a/inspector-clr/src/main/java/org/oneedtech/inspect/clr/CLR20Inspector.java
++++ b/inspector-clr/src/main/java/org/oneedtech/inspect/clr/CLR20Inspector.java
+@@ -63,6 +63,9 @@
+ 
+ import com.fasterxml.jackson.databind.JsonNode;
+ import com.fasterxml.jackson.databind.ObjectMapper;
++import com.fasterxml.jackson.databind.node.ArrayNode;
++import com.fasterxml.jackson.databind.node.JsonNodeFactory;
++import com.fasterxml.jackson.databind.node.ObjectNode;
+ import com.google.common.collect.ImmutableList;
+ import com.google.common.io.CharSource;
+ 
+@@ -153,7 +156,11 @@
+ 			//canonical schema
+ 			SchemaKey schema = clr.getSchemaKey().orElseThrow();
+ 			probeCount++;
+-			accumulator.add(new JsonSchemasProbe(schema).run(clr, ctx));
++			// CLR 2.0 B.2.2 (ClrSubjectJwtPayload): in the JWT form the embedded credentials are Compact JWS strings, which the
++			// JSON (object) schema does not allow. Validate the schema against a copy in which each embedded JWS is replaced by a
++			// stub credential object; the embedded JWS themselves are verified as signed credentials further below.
++			VerifiableCredential schemaSubject = clr.getProofType() == EXTERNAL ? withEmbeddedJwsStubs(clr, credentialBuilder, resource) : clr;
++			accumulator.add(new JsonSchemasProbe(schema).run(schemaSubject, ctx));
+ 			if(broken(accumulator)) return abort(ctx, accumulator, probeCount);
+ 
+ 			// inline schema
+@@ -234,8 +241,30 @@
+ 				JsonNode node = vcs.get(i);
+ 				String systemId = new StringBuilder().append(resource.getID()).append('/')
+ 						.append(path).append('[').append(i).append(']').toString();
+-				Resource vcr = new StringResource(CharSource.wrap(node.toString()), systemId, ResourceType.JSON);
+-				VerifiableCredential vc = credentialBuilder.resource(vcr).jsonData(node).build();
++				Resource vcr;
++				VerifiableCredential vc;
++				if (node.isTextual()) {
++					// Compact JWS (CLR 2.0 B.2.2): decode like any VC-JWT and verify its signature as an external proof.
++					String jwt = node.asText();
++					JsonNode vcNode = null;
++					RuntimeException decodeError = null;
++					try {
++						vcNode = fromJwt(jwt, ctx);
++					} catch (RuntimeException e) {
++						decodeError = e;
++					}
++					if (vcNode == null) {
++						accumulator.add(onProbeException(Probe.ID.NO_UNCAUGHT_EXCEPTIONS, resource,
++								"Embedded verifiableCredential " + systemId + " is not a decodable VC-JWT",
++								decodeError != null ? decodeError : new IllegalArgumentException("missing vc claim")));
++						continue;
++					}
++					vcr = new StringResource(CharSource.wrap(jwt), systemId, ResourceType.JWT);
++					vc = credentialBuilder.resource(vcr).jsonData(vcNode).jwt(jwt).build();
++				} else {
++					vcr = new StringResource(CharSource.wrap(node.toString()), systemId, ResourceType.JSON);
++					vc = credentialBuilder.resource(vcr).jsonData(node).build();
++				}
+ 
+ 				if(vc.getCredentialType() == Type.AchievementCredential) {
+ 					Report report = obInspector.run(vcr, Map.of(CREDENTIAL_KEY, vc));
+@@ -264,6 +293,34 @@
+ 
+ 
+ 
++	/** Copy of the CLR with each embedded Compact JWS replaced by a minimal stub credential, for the JSON schema step only. */
++	private static VerifiableCredential withEmbeddedJwsStubs(VerifiableCredential clr, VerifiableCredential.Builder builder, Resource resource) {
++		JsonNode copy = clr.getJson().deepCopy();
++		JsonNode subject = copy.path("credentialSubject");
++		if (subject instanceof ObjectNode) {
++			JsonNode vcs = subject.path("verifiableCredential");
++			if (vcs.isTextual()) {
++				((ObjectNode) subject).set("verifiableCredential", stubCredential());
++			} else if (vcs.isArray()) {
++				ArrayNode array = (ArrayNode) vcs;
++				for (int i = 0; i < array.size(); i++) {
++					if (array.get(i).isTextual()) array.set(i, stubCredential());
++				}
++			}
++		}
++		return builder.resource(resource).jsonData(copy).jwt(clr.getJwt().orElse(null)).build();
++	}
++
++	private static ObjectNode stubCredential() {
++		ObjectNode stub = JsonNodeFactory.instance.objectNode();
++		stub.putArray("@context").add("https://www.w3.org/ns/credentials/v2").add("https://purl.imsglobal.org/spec/ob/v3p0/context-3.0.3.json");
++		stub.putArray("type").add("VerifiableCredential").add("OpenBadgeCredential");
++		stub.putObject("issuer").put("id", "urn:learny:embedded-jws-stub");
++		stub.put("validFrom", "2000-01-01T00:00:00Z");
++		stub.putObject("credentialSubject").put("id", "urn:learny:embedded-jws-stub");
++		return stub;
++	}
++
+ 	public static class Builder extends VCInspector.Builder<CLR20Inspector.Builder> {
+ 		@SuppressWarnings("unchecked")
+ 		@Override
+--- a/inspector-vc/src/main/java/org/oneedtech/inspect/vc/VerifiableCredential.java
++++ b/inspector-vc/src/main/java/org/oneedtech/inspect/vc/VerifiableCredential.java
+@@ -256,6 +256,7 @@
+     }
+ 
+     public static VCVersion of(JsonNode context) {
++      if (context == null) return VCDMv1p1; // e.g. a Compact JWS string node has no @context
+       if (JsonNodeUtil.asNodeList(context).stream()
+           .anyMatch(
+               node -> node.isTextual() && node.asText().equals(JSONLD_CONTEXT_W3C_CREDENTIALS_V2)))

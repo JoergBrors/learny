@@ -178,3 +178,23 @@ Test 2026-10-29 unter Windows: Anwendung mit **ausschließlich** `C:\Program Fil
 | eigener Bitcoin-Core (`OTS_BITCOIN_RPC_URL`, optional extern erreichbar, kein Knoten auf dem IIS-Server nötig) | über den Knoten | eigene Hand | `header_verified` bzw. `independently_confirmed` (Tiefe ≥ `OTS_CONFIRMATIONS`) |
 
 Öffentlicher Statusvertrag unverändert: `none | pending | anchored | confirmed | failed | unverifiable`; zusätzlich liefert die Prüfung intern `detail` (`receipt_valid`, `pending`, `bitcoin_attestation_present`, `header_verified`, `explorer_verified`, `independently_confirmed`, `not_verifiable`, `failed`) und `independent`. Der RPC-Pfad ist gegen einen RPC-Double getestet, **nicht** gegen einen echten Knoten.
+
+## Live-Verifikation auf `/verify/{id}`
+
+Beim Öffnen eines Zertifikats zeigt die Seite unter den Zertifikatsangaben den Bereich „Verifikation des digitalen Nachweises“ (Komponente `LiveVerification`). Er stellt den **tatsächlichen** Ablauf eines serverseitigen Prüfauftrags dar (`LiveVerificationService`); die Prüfung selbst nutzt die vorhandenen Dienste (`CertificateService.VerifyAsync`, `IntegrityManifest.Verify`, `OtsMaintenanceService`, `OtsEvaluator`) — es gibt keine zweite Verifikationslogik.
+
+**Schritte** (in dieser Reihenfolge): Zertifikat geladen · Credential-Signaturen geprüft · Ausstellerschlüssel überprüft · Integritätsmanifest und Manifest-JWS geprüft (aus dem gespeicherten PDF; nichts wird neu erzeugt) · OpenTimestamps-Nachweis eingelesen · Bindung an die Manifest-JWS geprüft · Calendar-Server abgefragt · Bitcoin-Attestierung überprüft · Bestätigungstiefe kontrolliert · Prüfergebnis abgeschlossen. Nicht zutreffende Schritte (kein PDF, älteres Paket ohne Manifest, kein Zeitnachweis, bereits bestätigt, OTS nicht aktiv, Abfrage gedrosselt) erscheinen als **übersprungen**, nie als ausgeführt.
+
+**Schrittzustände und Darstellung:** wartet (neutraler Kreis) · wird geprüft (drehendes Symbol, nur dieser eine Schritt) · erfolgreich (✓) · fehlgeschlagen (✕) · ausstehend (◷, z. B. Bitcoin-Bestätigung) · nicht überprüfbar (⚠) · übersprungen (–). Jeder Zustand hat zusätzlich einen Text (nicht nur Farbe/Symbol); keine Prozentangaben, keine künstlichen Wartezeiten, keine Wiederholung nach Abschluss. Bei `prefers-reduced-motion: reduce` entfällt die Drehung, die Statuswechsel bleiben sichtbar. Ein Screenreader-Status (`role="status"`, `aria-live="polite"`) meldet die Phase.
+
+**Phasen des Auftrags:** `queued → loading → verifying_signature → verifying_manifest → verifying_ots → contacting_calendars → verifying_bitcoin → completed`; Ergebnis: `valid` · `pending` · `unavailable` · `failed` · `notfound`. Ein fehlgeschlagener Schritt wird nie durch erfolgreiche andere überdeckt.
+
+**Pending:** Ist die Receipt gebunden und gültig, aber nicht auf Bitcoin bestätigt, endet die Animation mit „Bitcoin-Bestätigung ausstehend“ und dem Hinweis: „Der kryptografische Nachweis ist vorhanden. Die Verankerung in der Bitcoin-Blockchain steht noch aus. Learny prüft den Status bei späteren Wartungsläufen erneut.“ Pending ist ein Endzustand der Anzeige, kein laufender Vorgang.
+
+**Bestätigt:** zeigt nur Nachgewiesenes — Blockhöhe, Blockzeit, Bestätigungen (mit der erforderlichen Zahl), Proof-Version, Zeitpunkt der letzten Verifikation und das **Vertrauensmodell** (Explorer-basiert wird ausdrücklich als Zusatzannahme gekennzeichnet; „unabhängig“ nur beim eigenen Bitcoin-Knoten).
+
+**Nicht überprüfbar:** Bei Calendar-Ausfall oder fehlender Bitcoin-Datenquelle steht „Die aktuelle Blockchain-Prüfung konnte nicht abgeschlossen werden.“ Der zuletzt **gespeicherte** Stand (Proof-Version, Status, letzte Bestätigung) wird getrennt als „nicht Teil der aktuellen Prüfung“ angezeigt.
+
+**Mehrere Besucher, keine redundanten Abfragen:** Es gibt je Zertifikat höchstens einen laufenden Auftrag; weitere Besucher beobachten ihn. Abgeschlossene Aufträge werden 60 s wiederverwendet. Calendar-Abfragen sind zusätzlich über `last_checked_at` auf höchstens eine alle 5 Minuten gedrosselt (bereits bestätigte Nachweise werden gar nicht abgefragt). Der Auftrag gehört dem Dienst: Verlässt ein Besucher die Seite, endet nur die Beobachtung (Abmeldung vom Ereignis), nicht die Prüfung. Aktualisierung über die bestehende Blazor-Server-Verbindung (Ereignis `Changed` → `StateHasChanged`), kein Polling.
+
+**Downloads:** `GET /api/public/certificates/{id}/integrity.ots` (aktuelle Proof-Version, `?version=N` für ältere) und `GET /api/public/certificates/{id}/integrity-manifest.jws` liefern nur bereits gespeicherte Artefakte; ein Download löst weder Stempelung noch Prüfung aus.

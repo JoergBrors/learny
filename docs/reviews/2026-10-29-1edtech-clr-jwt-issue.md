@@ -15,7 +15,11 @@ Ein CLR-2.0-Credential in der JWT-Form (VC-JWT, Claim `vc`), dessen `credentialS
 
 ## Minimalfall
 
-Äußeres CLR-JWT (`alg ES256`, `typ JWT`, Claim `vc` mit `type: [VerifiableCredential, ClrCredential]`, `@context` VC v2 + CLR 2.0.1, `credentialSubject.verifiableCredential: ["<compact JWS eines OpenBadgeCredential>"]`) mit `CLR20Inspector` prüfen. `CLR20Tests` enthält keinen JWT-Fall; die Referenzdatei `clr20/simple.jwt` enthält selbst eine eingebettete kompakte JWS.
+Äußeres CLR-JWT (`alg ES256`, `typ JWT`, Claim `vc` mit `type: [VerifiableCredential, ClrCredential]`, `@context` VC v2 + CLR 2.0.1, `credentialSubject.verifiableCredential: ["<compact JWS eines OpenBadgeCredential>"]`) mit `CLR20Inspector` prüfen. Der einzige JWT-Test des Validators, `CLR20Tests.testSimpleJWTValid` (Datei `clr20/simple.jwt`), ist mit `@Disabled` markiert; die Referenzdatei enthält selbst eine eingebettete kompakte JWS.
+
+## Getesteter Patch
+
+Anhang: [1edtech-clr-jwt-validator-fix.patch](1edtech-clr-jwt-validator-fix.patch) (gegen `67532ac`, zwei Dateien, ca. 60 Zeilen). Er (a) prüft das JSON-Schema bei externem Proof (JWT) gegen eine Kopie, in der Compact-JWS-Strings durch Stub-Credentials ersetzt sind, (b) liest eingebettete Strings als VC-JWT und prüft sie mit dem `OB30Inspector` samt externer Signaturprüfung, (c) macht `VCVersion.of(null)` null-sicher. Ergebnis mit dem gepatchten Validator: das bisher scheiternde CLR-JWT ist **VALID** (37 Prüfungen, 0 Fehler, 0 Exceptions); eine manipulierte Signatur ergibt FATAL „JWT Invalid signature“, ein beschädigter eingebetteter JWS wird als Exception gemeldet; das CLR-JSON liefert unverändert nur „missing a proof“. Berichte: `1edtech-2026-10-29/patched-validator/`.
 
 ## Vorschlag
 

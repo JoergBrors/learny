@@ -18,7 +18,7 @@ public static class IntegrityTests
         return cur?.ToString() ?? "";
     }
 
-    private sealed class FakeHeaders : IBitcoinHeaderSource
+    internal sealed class FakeHeaders : IBitcoinHeaderSource
     {
         public string Description => "Test-Datenquelle";
         public Func<long, BitcoinHeader>? Header; public bool Down; public bool Independent { get; set; }
@@ -26,7 +26,7 @@ public static class IntegrityTests
     }
 
     // Baut eine gültige OTS-Datei: Digest → append(0x01) → sha256 → Blatt (pending bzw. Bitcoin-Attestierung) — das Format des offiziellen Clients.
-    private static (byte[] Ots, byte[] Leaf) Ots(byte[] jws, string kind, long height = 800000)
+    internal static (byte[] Ots, byte[] Leaf) Ots(byte[] jws, string kind, long height = 800000)
     {
         var digest = SHA256.HashData(jws);
         var leaf = SHA256.HashData(digest.Concat(new byte[] { 1 }).ToArray());
@@ -107,6 +107,7 @@ public static class IntegrityTests
 
         await RealArtifactsAsync(check);
         await NativeAsync(check, tmp);
+        await LiveAsync(check, tmp);
 
         // ─── OpenTimestamps ───
         var (pendingOts, leaf) = Ots(jwsBytes, "pending");
@@ -406,12 +407,145 @@ public static class IntegrityTests
         throw new DirectoryNotFoundException("fixtures/ots");
     }
 
-    private sealed class FakeClient : IOtsClient
+    /// <summary>
+    /// Live-Verifikation (/verify/{id}): echte Zustandswechsel, geteilter Auftrag, Pending/Bestätigt/Ausfall/Fehler, Drosselung. Die Dienste sind die produktiven; Calendar-Client und
+    /// Bitcoin-Quelle sind Test-Doubles (echte Calendars: siehe Live-Tests der nativen OTS-Schicht).
+    /// </summary>
+    public static async Task LiveAsync(Action<bool, string> check, string tmp)
     {
-        public byte[] Stamp = Array.Empty<byte>(); public Func<byte[], byte[]>? Upgrade; public bool UpgradeThrows, StampThrows; public int StampCalls; public IReadOnlyList<string>? LastCalendars; public byte[]? LastBytes;
+        var dir = Path.Combine(tmp, "livever"); Directory.CreateDirectory(dir);
+        await using var db = new LearnCards.Web.Data.SqliteDatabase(Path.Combine(dir, "l.db")); await db.InitAsync();
+        var cfg = new AppConfig { Blockchain = new BlockchainSettings { BadgeKeyFile = Path.Combine(dir, "key.pem"), PublicBaseUrl = "https://learny.test" }, Ots = new OtsSettings { Enabled = true, Confirmations = 6, Calendars = { "https://cal-a.example", "https://cal-b.example" } } };
+        cfg.Ots.Operators["https://cal-a.example"] = "Alpha"; cfg.Ots.Operators["https://cal-b.example"] = "Beta";
+        var users = new LearnCards.Web.Services.UserService(db, cfg); var chain = new ChainSettingsStore(db, cfg);
+        using var signer = new BadgeSigner(cfg); var certs = new CertificateService(db, signer, chain, users, cfg);
+        var jwk = signer.PublicJwk(); var kid = certs.JwtKeyId;
+
+        async Task<(Certificate Cert, byte[] Jws)> MakeAsync(string ownOtsFor, bool withPdf = true)
+        {
+            var uid = Guid.NewGuid().ToString();
+            await db.ExecuteAsync("INSERT INTO users (id, display_name, email, status, legacy_migrated, created_at, last_login_at) VALUES (@id, @n, '', 'active', 1, @t, @t)", new (string, object?)[] { ("id", uid), ("n", "Lernende"), ("t", DateTime.UtcNow) });
+            await db.ExecuteAsync("INSERT INTO user_roles (user_id, role, granted_by, granted_at) VALUES (@id, 'user', NULL, @t)", new (string, object?)[] { ("id", uid), ("t", DateTime.UtcNow) });
+            var c = (await certs.TryIssueAsync(new QuizResultRecord { UserSub = uid, ModuleId = Guid.NewGuid().ToString(), Score = 90, MaxScore = 100, PassPercent = 60, Passed = true, SessionId = Guid.NewGuid().ToString() }, "Livemodul", "global", 1))!;
+            var files = new List<PdfEmbeddedFile>
+            {
+                new("module-credential.json", Encoding.UTF8.GetBytes("{}"), "application/json", "Data", "x"), new("module-credential.jwt", Encoding.ASCII.GetBytes(c.BadgeJws), "application/jwt", "Data", "x"),
+                new("public-key.jwk", Encoding.UTF8.GetBytes(jwk.ToJsonString()), "application/jwk+json", "Supplement", "x"), new("verification.json", Encoding.UTF8.GetBytes("{}"), "application/json", "Supplement", "x"),
+            };
+            var manifest = IntegrityManifest.Build(c, "https://learny.test/verify/" + c.Id, certs.IssuerId, c.IssuedAt, jwk, kid, "https://learny.test/.well-known/jwks.json", files);
+            var jws = signer.SignBytes(manifest, IntegrityManifest.JwsTyp, IntegrityManifest.JwsCty, kid);
+            files.Add(new(IntegrityManifest.ManifestName, manifest, "application/json", "Supplement", "x")); files.Add(new(IntegrityManifest.JwsName, Encoding.ASCII.GetBytes(jws), "application/jose", "Supplement", "x"));
+            if (withPdf)
+            {
+                var pdf = new PdfBuilder { Title = "t" }; pdf.AddPage().Text(50, 780, "x", 12); foreach (var f in files) pdf.Files.Add(f);
+                await db.ExecuteAsync("INSERT INTO certificate_pdfs (certificate_id, pdf_base64, pdf_sha256, size_bytes, signed, signer_thumbprint, signer_subject, signed_at, created_at) VALUES (@id, @b, 'h', 1, 1, '', '', @t, @t)",
+                    new (string, object?)[] { ("id", c.Id), ("b", Convert.ToBase64String(pdf.Build())), ("t", DateTime.UtcNow) });
+            }
+            return (c, Encoding.ASCII.GetBytes(jws));
+        }
+        var skew = TimeSpan.Zero;
+        OtsMaintenanceService NewOts(FakeClient client, FakeHeaders? headers) { var o = new OtsMaintenanceService(db, cfg, client, headers); o.UseClock(() => DateTime.UtcNow + skew); return o; }
+        // Ablage zur „Ausstellungszeit“, danach „eine Stunde später“: Die Drosselung der Calendar-Abfrage ist dann abgelaufen
+        async Task Seed(OtsMaintenanceService o, string certId, byte[] manifest, string jws, StampResult stamp, string pdf) { skew = TimeSpan.Zero; await o.RecordInitialAsync(certId, manifest, jws, stamp, pdf); skew = TimeSpan.FromHours(1); }
+        async Task<LiveSnapshot> Run(LiveVerificationService svc, string id, List<string>? log = null)
+        {
+            var run = svc.GetOrStart(id); var running = 0;
+            if (log is not null) { run.Changed += () => { var s = run.Snapshot(); running = Math.Max(running, s.Steps.Count(x => x.State == StepState.Running)); log.Add(string.Join(",", s.Steps.Select(x => x.State[0]))); }; }
+            for (var i = 0; i < 400 && !run.Done; i++) await Task.Delay(25);
+            if (log is not null) log.Add("maxRunning=" + running);
+            return run.Snapshot();
+        }
+
+        // 1) Pending: Receipt gebunden, Calendars antworten ohne Bestätigung → Animation endet, Bitcoin „ausstehend“
+        var (c1, jws1) = await MakeAsync("pending");
+        var client1 = new FakeClient { Stamp = Ots(jws1, "pending").Ots, Upgrade = o => o };
+        var ots1 = NewOts(client1, null);
+        await Seed(ots1, c1.Id, Encoding.UTF8.GetBytes("m"), Encoding.ASCII.GetString(jws1), await ots1.TryStampAsync(jws1, default), "pdf");
+        using var live1 = new LiveVerificationService(db, certs, ots1);
+        var log1 = new List<string>(); var s1 = await Run(live1, c1.Id, log1);
+        var order = s1.Steps.Select(x => x.Key).SequenceEqual(LiveRun.Definition.Select(d => d.Key));
+        check(s1.Done && s1.Outcome == "pending" && order && s1.Steps.All(x => x.State != StepState.Running && x.State != StepState.Pending),
+            "Live: Pending → Prüfung abgeschlossen (Endzustand), Reihenfolge der Schritte unverändert, kein Schritt bleibt laufend");
+        string St(string k) => s1.Steps.First(x => x.Key == k).State;
+        check(St("load") == StepState.Ok && St("signature") == StepState.Ok && St("issuer") == StepState.Ok && St("manifest") == StepState.Ok && St("ots_read") == StepState.Ok && St("ots_bind") == StepState.Ok && St("calendars") == StepState.Ok && St("bitcoin") == StepState.Waiting && St("depth") == StepState.Skipped && St("done") == StepState.Ok,
+            "Live: Pending zeigt Signatur/Manifest/OTS/Calendar als erfolgreich, Bitcoin als ausstehend (nicht bestätigt), Tiefe übersprungen");
+        check((s1.Notice ?? "").Contains("Verankerung in der Bitcoin-Blockchain steht noch aus") && s1.Ots is { State: "pending" } && s1.Ots.Height is null && s1.Ots.BlockHash is null, "Live: Pending-Hinweis wörtlich, keine erfundenen Blockangaben");
+        check(log1.Count > 8 && log1.Last().StartsWith("maxRunning=1") || log1.Last() == "maxRunning=1", "Live: höchstens ein Schritt gleichzeitig „in Bearbeitung“ (Animation wandert weiter)");
+        check(log1.Where(l => !l.StartsWith("maxRunning")).Select(l => l.Count(ch => ch == 'p')).Zip(log1.Where(l => !l.StartsWith("maxRunning")).Select(l => l.Count(ch => ch == 'p')).Skip(1)).All(t => t.Second <= t.First || t.Second - t.First <= 0), "Live: es werden nur echte Zustandswechsel gemeldet (Anzahl wartender Schritte steigt nie)");
+
+        // 2) Mehrfachaufrufe: ein Auftrag, genau eine Calendar-Abfrage
+        var (c2, jws2) = await MakeAsync("pending");
+        var client2 = new FakeClient { Stamp = Ots(jws2, "pending").Ots, Upgrade = o => o };
+        var ots2 = NewOts(client2, null); await Seed(ots2, c2.Id, Encoding.UTF8.GetBytes("m"), Encoding.ASCII.GetString(jws2), await ots2.TryStampAsync(jws2, default), "pdf");
+        using var live2 = new LiveVerificationService(db, certs, ots2);
+        var runs = Enumerable.Range(0, 12).AsParallel().Select(_ => live2.GetOrStart(c2.Id)).ToList();
+        for (var i = 0; i < 400 && !runs[0].Done; i++) await Task.Delay(25);
+        check(runs.Distinct().Count() == 1 && live2.StartedRuns == 1 && client2.UpgradeCalls == 1, "Live: zwölf gleichzeitige Besucher teilen einen Auftrag — genau eine Calendar-Abfrage");
+        var again = live2.GetOrStart(c2.Id);
+        check(ReferenceEquals(again, runs[0]) && live2.StartedRuns == 1 && client2.UpgradeCalls == 1, "Live: ein weiterer Besucher kurz danach erzwingt keine zweite Prüfung");
+        var throttled = await ots2.CheckLatestAsync(c2.Id, TimeSpan.FromHours(3), default);
+        check(throttled.Kind == OtsMaintenanceService.CheckKind.Throttled && client2.UpgradeCalls == 1, "Live: Calendar-Abfragen sind gedrosselt (last_checked_at), Besucher können sie nicht erzwingen");
+
+        // 3) Calendar-Ausfall: nicht überprüfbar, gespeicherter Stand getrennt, kein Erfolg simuliert
+        var (c3, jws3) = await MakeAsync("pending");
+        var client3 = new FakeClient { Stamp = Ots(jws3, "pending").Ots, Upgrade = o => o, UpgradeThrows = true };
+        var ots3 = NewOts(client3, null); await Seed(ots3, c3.Id, Encoding.UTF8.GetBytes("m"), Encoding.ASCII.GetString(jws3), await ots3.TryStampAsync(jws3, default), "pdf");
+        using var live3 = new LiveVerificationService(db, certs, ots3);
+        var s3 = await Run(live3, c3.Id);
+        check(s3.Done && s3.Outcome == "unavailable" && s3.Steps.First(x => x.Key == "calendars").State == StepState.Unverifiable && s3.Stored is { AnchorStatus: "pending", ProofVersion: 1 } && (s3.Notice ?? "").Contains("konnte nicht abgeschlossen werden") && s3.Steps.First(x => x.Key == "done").State == StepState.Unverifiable,
+            "Live: Calendar-Ausfall → „nicht überprüfbar“, letzter gespeicherter Stand getrennt, kein simulierter Erfolg");
+
+        // 4) Bestätigt: Upgrade liefert Bitcoin-Attestierung, Header stimmen → Blockangaben, Vertrauensmodell, neue Proof-Version, Download = aktuelle Version
+        string Hex(byte[] internalOrder) => Convert.ToHexString(internalOrder.Reverse().ToArray()).ToLowerInvariant();
+        var (c4, jws4) = await MakeAsync("pending");
+        var (btc4, leaf4) = Ots(jws4, "bitcoin", 800000);
+        var client4 = new FakeClient { Stamp = Ots(jws4, "pending").Ots, Upgrade = _ => btc4 };
+        FakeHeaders Hdr(bool independent) => new() { Independent = independent, Header = h => new BitcoinHeader("00000000000000000001abc", Hex(leaf4), new DateTime(2026, 10, 30, 12, 0, 0, DateTimeKind.Utc), 800009) };
+        var ots4 = NewOts(client4, Hdr(false)); await Seed(ots4, c4.Id, Encoding.UTF8.GetBytes("m"), Encoding.ASCII.GetString(jws4), await ots4.TryStampAsync(jws4, default), "pdf");
+        using var live4 = new LiveVerificationService(db, certs, ots4);
+        var s4 = await Run(live4, c4.Id);
+        var latest4 = await ots4.GetLatestAsync(c4.Id); var versions4 = await ots4.GetVersionsAsync(c4.Id);
+        check(s4.Outcome == "valid" && s4.Steps.First(x => x.Key == "bitcoin").State == StepState.Ok && s4.Steps.First(x => x.Key == "depth").State == StepState.Ok && s4.Ots is { State: "confirmed", Height: 800000, BlockHash: "00000000000000000001abc", Confirmations: 10, Independent: false } && s4.Ots.Detail == "explorer_verified",
+            "Live: bestätigter Nachweis zeigt Blockhöhe, Blockhash, Tiefe; Explorer-Prüfung ist als solche gekennzeichnet (nicht unabhängig)");
+        check(versions4.Count == 2 && latest4!.Ots!.SequenceEqual(btc4) && versions4[0].Ots!.SequenceEqual(client4.Stamp) && s4.Ots.ProofVersion == 2, "Live: Upgrade legt Proof-Version 2 an, das Original (Version 1) bleibt erhalten, der Download-Stand ist die aktuelle Version");
+        var ots4n = NewOts(client4, Hdr(true)); using var live4n = new LiveVerificationService(db, certs, ots4n);
+        var s4n = await Run(live4n, c4.Id);
+        check(s4n.Ots is { Independent: true, Detail: "independently_confirmed" } && s4n.Steps.First(x => x.Key == "calendars").State == StepState.Skipped, "Live: bereits bestätigter Nachweis wird nicht erneut bei Calendars abgefragt; eigener Knoten = unabhängig");
+
+        // 5) Fehlgeschlagen: Receipt gehört zu einer anderen Datei
+        var (c5, jws5) = await MakeAsync("pending");
+        var wrong = Ots(Encoding.ASCII.GetBytes("andere"), "pending").Ots;
+        var client5 = new FakeClient { Stamp = wrong, Upgrade = o => o };
+        var ots5 = NewOts(client5, null); await Seed(ots5, c5.Id, Encoding.UTF8.GetBytes("m"), Encoding.ASCII.GetString(jws5), new StampResult(wrong, "submitted", "", "t"), "pdf");
+        using var live5 = new LiveVerificationService(db, certs, ots5);
+        var s5 = await Run(live5, c5.Id);
+        check(s5.Outcome == "failed" && s5.Steps.First(x => x.Key == "ots_bind").State == StepState.Failed && s5.Steps.First(x => x.Key == "calendars").State == StepState.Skipped && s5.Steps.First(x => x.Key == "signature").State == StepState.Ok && client5.UpgradeCalls == 0,
+            "Live: falsch zugeordnete Receipt → genau dieser Schritt ist fehlgeschlagen, spätere Schritte übersprungen, erfolgreiche Schritte überdecken ihn nicht");
+
+        // 6) Ohne Zeitnachweis / unbekannt
+        var (c6, _) = await MakeAsync("none");
+        var ots6 = NewOts(new FakeClient(), null); await Seed(ots6, c6.Id, Encoding.UTF8.GetBytes("m"), "x.y.z", new StampResult(null, "none", "OTS aus", ""), "pdf");
+        using var live6 = new LiveVerificationService(db, certs, ots6);
+        var s6 = await Run(live6, c6.Id);
+        check(s6.Steps.Where(x => x.Key is "ots_read" or "ots_bind" or "calendars" or "bitcoin" or "depth").All(x => x.State == StepState.Skipped) && s6.Ots is { HasReceipt: false },
+            "Live: ohne Zeitnachweis werden die OTS-Schritte als übersprungen dargestellt, nicht als ausgeführt");
+        var sNf = await Run(live6, Guid.NewGuid().ToString());
+        var sBad = await Run(live6, "kein-guid");
+        check(sNf.Outcome == "notfound" && sBad.Outcome == "notfound" && sNf.Steps.First(x => x.Key == "load").State == StepState.Failed, "Live: unbekannte Kennung → „nicht gefunden“, kein Prüfergebnis");
+
+        // 7) Oberfläche: keine Pakete, reduzierte Bewegung, nur laufender Schritt animiert, keine Prozentangaben
+        var root = FixtureDir(); for (var i = 0; i < 4; i++) root = Path.GetDirectoryName(root)!;
+        var razor = File.ReadAllText(Path.Combine(root, "src", "LearnCards.Web", "Components", "Shared", "LiveVerification.razor")); var css = File.ReadAllText(Path.Combine(root, "src", "LearnCards.Web", "wwwroot", "app.css"));
+        check(razor.Contains("st.State == StepState.Running ? \"lv-spin\"") && css.Contains("@media (prefers-reduced-motion: reduce) { .lv-spin { animation: none; }") && razor.Contains("aria-live=\"polite\"") && razor.Contains("lv-sr") && !razor.Contains("%\"") && !razor.Contains("Task.Delay") && !css.Contains("@import"),
+            "Live-UI: nur der laufende Schritt animiert, reduzierte Bewegung deaktiviert die Animation, Screenreader-Statusmeldung, keine Prozentwerte/künstlichen Verzögerungen/externen Ressourcen");
+    }
+
+    internal sealed class FakeClient : IOtsClient
+    {
+        public byte[] Stamp = Array.Empty<byte>(); public Func<byte[], byte[]>? Upgrade; public bool UpgradeThrows, StampThrows; public int StampCalls, UpgradeCalls; public IReadOnlyList<string>? LastCalendars; public byte[]? LastBytes;
         public Task<string?> VersionAsync(CancellationToken ct) => Task.FromResult<string?>("ots-fake 0.0");
         public Task<byte[]> StampAsync(byte[] fileBytes, IReadOnlyList<string> calendars, CancellationToken ct) { StampCalls++; LastCalendars = calendars; LastBytes = fileBytes; return StampThrows ? throw new OtsClientException("Calendars nicht erreichbar") : Task.FromResult(Stamp); }
-        public Task<byte[]> UpgradeAsync(byte[] ots, CancellationToken ct) => UpgradeThrows ? throw new OtsClientException("Calendar nicht erreichbar") : Task.FromResult(Upgrade!(ots));
+        public Task<byte[]> UpgradeAsync(byte[] ots, CancellationToken ct) { Interlocked.Increment(ref UpgradeCalls); return UpgradeThrows ? throw new OtsClientException("Calendar nicht erreichbar") : Task.FromResult(Upgrade!(ots)); }
     }
 
     /// <summary>PDF-Ebene: das echte, ausgestellte Themen-PDF enthält Manifest und JWS; ein fremd signiertes Paket mit manipulierten/zusätzlichen Anhängen wird auf Manifest-Ebene abgewiesen.</summary>

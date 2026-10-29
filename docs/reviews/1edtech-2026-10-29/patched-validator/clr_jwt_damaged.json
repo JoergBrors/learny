@@ -1,0 +1,47 @@
+{
+  "id" : "2292c650-d19f-406e-8881-b3a1ceda9a70",
+  "generated" : "2026-10-29T23:32:56",
+  "generator" : "CLR20Inspector",
+  "input" : {
+    "name" : "clr_damaged.jwt",
+    "type" : "JWT"
+  },
+  "summary" : {
+    "outcome" : "EXCEPTION",
+    "fatals" : 1,
+    "errors" : 0,
+    "warnings" : 0,
+    "exceptions" : 1,
+    "notRun" : 0,
+    "totalRun" : 24,
+    "valid" : 0
+  },
+  "specification" : {
+    "pid" : "clr20.pid",
+    "shortName" : "clr",
+    "version" : "2.0",
+    "title" : "Comprehensive Learner Record 2.0"
+  },
+  "exceptions" : [ {
+    "title" : "Embedded verifiableCredential clr_damaged.jwt/$.credentialSubject.verifiableCredential[0] is not a decodable VC-JWT",
+    "message" : "invalid jwt",
+    "location" : {
+      "resource" : "clr_damaged.jwt"
+    },
+    "generator" : ".Uncaught.Exception",
+    "detailsMessage" : null
+  } ],
+  "warnings" : [ ],
+  "valids" : [ ],
+  "fatals" : [ {
+    "title" : "Verification of external proof",
+    "message" : "Error verifying jwt signature: JWT Invalid signature. Reason: The Token's Signature resulted invalid when verified using the Algorithm: SHA256withECDSA",
+    "location" : {
+      "resource" : "clr_damaged.jwt"
+    },
+    "generator" : "ExternalProofProbe",
+    "detailsMessage" : null
+  } ],
+  "notRun" : [ ],
+  "errors" : [ ]
+}

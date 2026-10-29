@@ -1,0 +1,82 @@
+@implements IDisposable
+@inject LiveVerificationService Live
+
+@* Animierte Live-Anzeige der Prüfung (ADR 0039/0040). Zeigt ausschließlich echte Zustandswechsel des serverseitigen Prüfauftrags; keine Prozentangaben, keine künstlichen Wartezeiten.
+   Animiert wird nur der Schritt, der tatsächlich läuft; mit prefers-reduced-motion entfällt jede Bewegung (die Statuswechsel bleiben sichtbar). *@
+<section class="lv" aria-labelledby="lv-title">
+    <h2 id="lv-title" class="panel-title">Verifikation des digitalen Nachweises</h2>
+    @if (_snap is { } s)
+    {
+        <ol class="lv-steps">
+            @foreach (var st in s.Steps)
+            {
+                <li class="lv-step lv-@st.State" aria-current="@(st.State == StepState.Running ? "step" : null)">
+                    <span class="lv-icon @(st.State == StepState.Running ? "lv-spin" : "")" aria-hidden="true">@Icon(st.State)</span>
+                    <span class="lv-text">
+                        <span class="lv-label">@st.Label</span><span class="lv-sr"> — @StateText(st.State)</span>
+                        @if (!string.IsNullOrEmpty(st.Detail)) { <span class="lv-detail">@st.Detail</span> }
+                    </span>
+                    <span class="lv-tag" aria-hidden="true">@StateText(st.State)</span>
+                </li>
+            }
+        </ol>
+        <p class="lv-status" role="status" aria-live="polite">@Headline(s)</p>
+        @if (s.Notice is { Length: > 0 } n) { <p class="lv-notice lv-notice-@s.Outcome">@n</p> }
+
+        @if (s.Stored is { } st0 && (!s.Done || s.Outcome is "unavailable" or "pending"))
+        {
+            <p class="muted lv-stored">Zuletzt gespeicherter Stand (nicht Teil der aktuellen Prüfung): Proof-Version @st0.ProofVersion, Status „@AnchorText(st0.AnchorStatus)“@(st0.BitcoinHeight is { } h0 ? $", Block {h0}" : "")@(st0.LastVerifiedAt is { } lv0 ? $", zuletzt bestätigt {lv0:dd.MM.yyyy HH:mm} UTC" : "").</p>
+        }
+
+        @if (s.Done && s.Ots is { HasReceipt: true } o && o.State is "anchored" or "confirmed")
+        {
+            <dl class="lv-facts">
+                <dt>Bitcoin-Blockhöhe</dt><dd>@o.Height</dd>
+                @if (o.BlockTime is { } bt) { <dt>Blockzeit (UTC)</dt><dd>@bt.ToString("dd.MM.yyyy HH:mm:ss")</dd> }
+                <dt>Bestätigungen</dt><dd>@o.Confirmations (erforderlich: @o.RequiredConfirmations)</dd>
+                <dt>Proof-Version</dt><dd>@o.ProofVersion</dd>
+                @if (o.LastVerifiedAt is { } lv) { <dt>Zuletzt verifiziert</dt><dd>@lv.ToString("dd.MM.yyyy HH:mm") UTC</dd> }
+                <dt>Vertrauensmodell</dt><dd>@(o.Independent ? "Eigener Bitcoin-Knoten (unabhängig geprüft)" : "Explorer-basiert — Kettenzugehörigkeit und Tiefe beruhen auf dem Betreiber der Datenquelle (" + o.Source + "); die Header-Echtheit wurde selbst geprüft.")</dd>
+                @if (o.BlockHash is { Length: > 0 } bh) { <dt>Blockhash</dt><dd style="word-break:break-all"><code>@bh</code></dd> }
+            </dl>
+        }
+
+        @if (s.Ots is { HasReceipt: true } || s.Ots is { HasManifestJws: true })
+        {
+            <p class="lv-downloads">
+                @if (s.Ots!.HasReceipt) { <a class="btn btn-ghost btn-sm" href="/api/public/certificates/@CertId/integrity.ots" download>Aktuellen OpenTimestamps-Nachweis (.ots) herunterladen</a> }
+                @if (s.Ots.HasManifestJws) { <a class="btn btn-ghost btn-sm" href="/api/public/certificates/@CertId/integrity-manifest.jws" download>Integritätsmanifest (.jws) herunterladen</a> }
+            </p>
+            <p class="muted lv-hint">Der Blockchain-Zeitnachweis bestätigt die Existenz der kryptografisch gebundenen Daten spätestens zum nachgewiesenen Bitcoin-Zeitpunkt. Er bestätigt weder die Identität des Ausstellers noch die inhaltliche Richtigkeit des Lernnachweises.</p>
+        }
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public string CertId { get; set; } = "";
+    private LiveRun? _run; private LiveSnapshot? _snap; private bool _disposed;
+
+    protected override void OnInitialized()
+    {
+        // Besucher beobachten einen geteilten Auftrag; die Anzeige startet keine zweite Prüfung
+        _run = Live.GetOrStart(CertId);
+        _snap = _run.Snapshot();
+        if (!_snap.Done) _run.Changed += OnChanged;
+    }
+
+    private void OnChanged()
+    {
+        if (_disposed || _run is null) return;
+        var snap = _run.Snapshot();
+        _ = InvokeAsync(() => { if (_disposed) return; _snap = snap; if (snap.Done && _run is not null) _run.Changed -= OnChanged; StateHasChanged(); });
+    }
+
+    public void Dispose() { _disposed = true; if (_run is not null) _run.Changed -= OnChanged; }   // beendet nur die Beobachtung, nicht den Prüfauftrag
+
+    private static string Icon(string state) => state switch { StepState.Ok => "✓", StepState.Failed => "✕", StepState.Running => "◉", StepState.Waiting => "◷", StepState.Unverifiable => "⚠", StepState.Skipped => "–", _ => "○" };
+    private static string StateText(string state) => state switch { StepState.Ok => "erfolgreich", StepState.Failed => "fehlgeschlagen", StepState.Running => "wird geprüft", StepState.Waiting => "ausstehend", StepState.Unverifiable => "nicht überprüfbar", StepState.Skipped => "übersprungen", _ => "wartet" };
+    private static string AnchorText(string s) => s switch { "pending" => "ausstehend", "anchored" => "verankert", "confirmed" => "bestätigt", "failed" => "ungültig", "unverifiable" => "nicht überprüfbar", _ => "kein Zeitnachweis" };
+    private static string Headline(LiveSnapshot s) => !s.Done
+        ? s.Phase switch { "queued" => "Prüfung wartet auf einen freien Platz …", "loading" => "Zertifikat wird geladen …", "verifying_signature" => "Signaturen werden geprüft …", "verifying_manifest" => "Integritätsmanifest wird geprüft …", "verifying_ots" => "Zeitnachweis wird eingelesen …", "contacting_calendars" => "Calendar-Server werden abgefragt …", "verifying_bitcoin" => "Bitcoin-Verankerung wird geprüft …", _ => "Prüfung läuft …" }
+        : s.Outcome switch { "valid" => "Prüfung abgeschlossen: alle durchgeführten Prüfungen bestanden.", "pending" => "Prüfung abgeschlossen: Bitcoin-Bestätigung ausstehend.", "unavailable" => "Prüfung abgeschlossen: nicht vollständig überprüfbar.", "notfound" => "Kein Zertifikat gefunden.", _ => "Prüfung abgeschlossen: fehlgeschlagen." };
+}

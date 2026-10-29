@@ -35,6 +35,7 @@
                 <dt>Prüfsumme (SHA-256)</dt><dd style="word-break:break-all"><code>@Str("badge_hash")</code></dd>
             </dl>
             <img src="/brand/learny-verified.svg" alt="Learny Verified – Digitally Signed Credential" height="40" />
+            <LiveVerification CertId="@Id" />
             @if (_evidence is { } ev)
             {
                 <h2 class="panel-title">Nachweise und Kompetenzen</h2>
