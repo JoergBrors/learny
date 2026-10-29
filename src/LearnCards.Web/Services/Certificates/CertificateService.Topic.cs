@@ -162,8 +162,12 @@ public sealed partial class CertificateService
         };
     }
 
-    /// <summary>Eingebettetes Credential im CLR: Altbestand als Objekt mit Hülle, neue Credentials als kompakte JWS (das JWT ist der Proof) — nie ein Objekt ohne prüfbare Signatur.</summary>
-    private JsonNode EmbeddedCredential(Certificate c) => BadgeSigner.IsLegacyProfile(c.BadgeJws) ? SignedBadgeJson(c) : JsonValue.Create(c.BadgeJws)!;
+    /// <summary>
+    /// Eingebettetes Credential im CLR: immer die gespeicherte kompakte JWS (CLR 2.0 B.2.2 <c>ClrSubjectJwtPayload.verifiableCredential</c> = CompactJws). Auch Altbestand (Profil <c>vc+jwt</c>) wird als
+    /// unveränderte JWS eingebettet und nicht neu signiert; früher wurde er als Objekt mit der undefinierten Hülle <c>JwtProof2020</c> eingebettet, was das CLR-JWT schema- und JSON-LD-widrig machte.
+    /// Bereits ausgestellte CLR bleiben unverändert.
+    /// </summary>
+    private JsonNode EmbeddedCredential(Certificate c) => JsonValue.Create(c.BadgeJws)!;
 
     /// <summary>Signiertes CLR als JSON-LD: ClrCredential plus eingebettete Signatur (<c>proof.jwt</c>, VC-JWT) — unverändert aus der gespeicherten Signatur.</summary>
     public JsonObject? SignedClrJson(Certificate c)

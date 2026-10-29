@@ -221,6 +221,9 @@ Pflicht: **PostgreSQL-Betrieb** → `POSTGRES_PASSWORD`; **OIDC-Betrieb** → `O
 | `PKI_TRUSTED_ROOT_SHA256` | web | nein | leer | Optionaler Vertrauensanker-Pin (SHA-256 der Root CA, kommagetrennt) für die Prüfung. |
 | `PDF_SIGNING_CERT_FILE` | web | nein | leer | PKCS#12-Datei (im Container eingebunden) mit dem eigenen PDF-Signaturzertifikat für signierte Zertifikats-PDFs (ADR 0033). Leer (und ohne Base64-Variante) = keine PDFs (503). Siehe `docs/pdf-signature.md`. |
 | `PDF_SIGNING_CERT_PASSWORD` | web | nein | leer | Passwort der PKCS#12-Datei bzw. -Base64-Variante. Streng geheim. |
+| `OTS_ENABLED` | web | nein | `true` | OpenTimestamps-Zeitnachweis für neue Zertifikats-PDFs (ADR 0039/0040, nativer Client). `false` schaltet ihn ab; Ausfälle der Calendars verhindern keine PDFs. |
+| `OTS_CALENDARS` | web | nein | OpenTimestamps (alice), Eternity Wall (finney), Catallaxy | Kommagetrennte Einträge `https://calendar\|Betreiber`; mindestens zwei benannte, verschiedene Betreiber. |
+| `OTS_BITCOIN_EXPLORER_URL` / `OTS_BITCOIN_RPC_URL` | web | nein | mempool.space / leer | Quelle der Bitcoin-Block-Header-Prüfung: Explorer (Zusatzannahme) oder eigener Bitcoin-Core-Knoten (RPC, mit `OTS_BITCOIN_RPC_USER`/`_PASSWORD`). |
 | `PDF_SIGNING_CERT_PFX_BASE64` | web | nein | leer | PKCS#12 als Base64-Text (Secret-Verwaltung); hat Vorrang vor `PDF_SIGNING_CERT_FILE`. |
 | `BLOCKCHAIN_ENABLED` | web | nein | `true` | Verankerung ein/aus (aus = nur signierte Badges). |
 | `BLOCKCHAIN_NETWORK` | web | nein | `polygon-amoy` | Netzwerk (Testnetz); Mainnet `polygon-mainnet` braucht zusätzlich Admin-Freigabe. |

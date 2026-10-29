@@ -440,7 +440,7 @@ public sealed partial class CertificateService
             if (jwsItems.Count > 0)
             {
                 v.EmbeddedCount = jwsItems.Count;
-                v.EmbeddedSignaturesValid = jwsItems.Count == items.Count && jwsItems.All(i => { var iv = _signer.Verify(i!.GetValue<string>()); return iv.SignatureValid && iv.Payload is JsonObject ip && ip["vc"] is JsonObject ivc && ivc["type"] is not null && ivc["credentialSubject"] is JsonObject; });   // gültige Signatur UND ein Credential mit type/credentialSubject (Profil ADR 0038)
+                v.EmbeddedSignaturesValid = jwsItems.Count == items.Count && jwsItems.All(i => { var iv = _signer.Verify(i!.GetValue<string>()); return iv.SignatureValid && iv.Payload is JsonObject ip && (ip["vc"] as JsonObject ?? ip) is { } ivc && ivc["type"] is not null && ivc["credentialSubject"] is JsonObject; });   // Profil ADR 0038 (Claim vc) oder Altbestand (Credential auf oberster Ebene)   // gültige Signatur UND ein Credential mit type/credentialSubject (Profil ADR 0038)
             }
         }
         v.BadgeHash = BadgeSigner.HashHex(jws);

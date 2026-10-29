@@ -43,7 +43,7 @@
                     <header style="display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;align-items:flex-start">
                         <div>
                             <h2 style="margin:0;font-size:1.15rem">@(c.IsTopic ? "🎓" : "📘") @c.ModuleName @(c.ModuleVersion > 0 ? $"(Version {c.ModuleVersion})" : "")</h2>
-                            <p class="muted" style="margin:.2rem 0">@(c.IsTopic ? "Themenabschluss · Master-Badge + CLR" : (c.ModuleScope == "topic" ? "Modulabschluss im Thema" : "Modulabschluss")) · Nr. <code>@c.Number</code></p>
+                            <p class="muted" style="margin:.2rem 0">@(c.IsTopic ? "Themenabschluss · Master-Badge + CLR" : (c.ModuleScope == "topic" ? "Modulabschluss im Thema" : "Modulabschluss")) · Nr. <code>@c.Number</code> · <span title="@CertificateFormat.Label(CertificateFormat.Of(c.BadgeJws))">Format @CertificateFormat.Of(c.BadgeJws)</span></p>
                         </div>
                         <div>
                             <span class="@(c.IsRevoked ? "badge" : "badge badge-pass")">@(c.IsRevoked ? "✖ widerrufen" : "✔ gültig")</span>

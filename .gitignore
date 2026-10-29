@@ -30,3 +30,4 @@ data/pki/
 **/data/pki/
 *.pfx
 *.p12
+tests/TESTFILES/*

@@ -40,7 +40,7 @@ public sealed class CredentialRegisterService
     }
 
     public sealed record Row(string Id, string Number, string Kind, string TypeLabel, bool IsTest, string Title, int Version, string Recipient, string? IssuerId, string IssuerName, string Source,
-        DateTime IssuedAt, string Fingerprint, string? ClrFingerprint, string? PdfSha256, string? Thumbprint, bool HasPdf, string Status, DateTime? RevokedAt, string? ParentId);
+        DateTime IssuedAt, string Fingerprint, string? ClrFingerprint, string? PdfSha256, string? Thumbprint, bool HasPdf, string Status, DateTime? RevokedAt, string? ParentId, int Format = 2);
 
     public sealed record Page(IReadOnlyList<Row> Items, int Total, int PageNumber, int PageSize);
 
@@ -57,7 +57,7 @@ public sealed class CredentialRegisterService
     public sealed record RevokeOutcome(bool Changed, string Id, string Number, string Status);
 
     private const string SelectRow = """
-        SELECT c.id, c.number, c.kind, c.is_test, c.module_name, c.module_version, c.learner_name, c.issued_by, c.issued_by_name, c.issue_source, c.issued_at,
+        SELECT SUBSTR(c.badge_jws, 1, 300) AS jws_head, c.id, c.number, c.kind, c.is_test, c.module_name, c.module_version, c.learner_name, c.issued_by, c.issued_by_name, c.issue_source, c.issued_at,
                c.badge_hash, c.clr_hash, c.status, c.revoked_at, c.parent_id, p.pdf_sha256, p.signer_thumbprint
         FROM certificates c LEFT JOIN certificate_pdfs p ON p.certificate_id = c.id
         """;
@@ -74,7 +74,8 @@ public sealed class CredentialRegisterService
             r.GetValueOrDefault("issued_by_name") is { Length: > 0 } inn ? inn : (r.GetValueOrDefault("issue_source") == "exam" ? "Prüfsystem" : "unbekannt (Altbestand)"),
             r.GetValueOrDefault("issue_source") is { Length: > 0 } src ? src : "unknown", DbValue.ToDateTime(r["issued_at"]), r["badge_hash"] ?? "",
             isTopic && r.GetValueOrDefault("clr_hash") is { Length: > 0 } ch ? ch : null, pdf, r.GetValueOrDefault("signer_thumbprint") is { Length: > 0 } tp ? tp : null, pdf is not null,
-            r["status"] ?? "active", r.GetValueOrDefault("revoked_at") is { Length: > 0 } ra ? DbValue.ToDateTime(ra) : null, r.GetValueOrDefault("parent_id") is { Length: > 0 } pid ? pid : null);
+            r["status"] ?? "active", r.GetValueOrDefault("revoked_at") is { Length: > 0 } ra ? DbValue.ToDateTime(ra) : null, r.GetValueOrDefault("parent_id") is { Length: > 0 } pid ? pid : null,
+            CertificateFormat.Of(r.GetValueOrDefault("jws_head")));
     }
 
     public async Task<Page> SearchAsync(string actorId, Query q)

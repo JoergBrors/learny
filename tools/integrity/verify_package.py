@@ -187,7 +187,7 @@ def main():
         if a.trusted_thumbprint: report("Ausstellerschlüssel (Vertrauensanker)", "BESTÄTIGT" if tp == a.trusted_thumbprint else "UNGÜLTIG", "Thumbprint stimmt mit dem vorgegebenen Anker überein" if tp == a.trusted_thumbprint else "weicht vom vorgegebenen Anker ab")
         elif a.jwks_url:
             try:
-                keys = json.loads(urllib.request.urlopen(a.jwks_url, timeout=20).read())["keys"]
+                keys = json.loads(urllib.request.urlopen(urllib.request.Request(a.jwks_url, headers={"User-Agent": "learny-verify"}), timeout=20).read())["keys"]   # manche Proxys (Cloudflare) sperren den Standard-User-Agent von urllib
                 hit = any(thumbprint(k) == tp for k in keys)
                 report("Ausstellerschlüssel (JWKS online)", "BESTÄTIGT" if hit else "UNGÜLTIG", "Zusatzannahme: TLS/DNS der Aussteller-Domain")
             except Exception as e:

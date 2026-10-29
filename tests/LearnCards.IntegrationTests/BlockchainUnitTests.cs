@@ -658,6 +658,11 @@ public static class BlockchainUnitTests
         check(vD.SignatureValid && vD.EmbeddedSignaturesValid == false && !vD.Valid, "CLR-JWT D: eingebettetes Credential ohne Pflichtfeld type gilt als ungültig (trotz gültiger Signatur)");
         var vE = await e.Certs.VerifyAsync(Sign(Clr("nicht.eine.jws")));
         check(vE.SignatureValid && vE.EmbeddedSignaturesValid == false && !vE.Valid, "CLR-JWT E: beschädigte eingebettete JWS gilt als ungültig");
+        // Regression (Produktion, v0.1.21): ein älteres Modul-Credential (typ vc+jwt, Credential auf oberster Ebene) im CLR darf die Einzelprüfung nicht fälschlich ungültig machen
+        var legacy = e.Signer.Sign(Badge("Modul Alt"), kid);
+        check(CertificateFormat.Of(legacy) == 1 && CertificateFormat.Of(good) == 2 && CertificateFormat.Of("") == 1 && CertificateFormat.Label(1).Contains("Altbestand") && CertificateFormat.Label(2).Contains("ADR 0038"), "Formatversion: Altbestand (vc+jwt) = Format 1, VC-JWT-Profil = Format 2 (Anzeige in Nachweisübersicht und Register)");
+        var vL = await e.Certs.VerifyAsync(Sign(Clr(legacy)));
+        check(vL.SignatureValid && vL.EmbeddedSignaturesValid == true && vL.Valid, "CLR-JWT: eingebettetes Altbestand-Credential (Profil vc+jwt) bleibt gültig");
         var vF = await e.Certs.VerifyAsync(Sign(Clr(good, FlipSignature(Sign(Badge("Modul F"))))));
         check(vF.EmbeddedSignaturesValid == false && !vF.Valid, "CLR-JWT: ein fehlerhaftes eingebettetes Credential unter mehreren macht das Gesamtergebnis ungültig (kein Überdecken durch gültige Teile)");
     }

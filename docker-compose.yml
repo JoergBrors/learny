@@ -72,6 +72,13 @@ services:
       PDF_SIGNING_CERT_FILE: ${PDF_SIGNING_CERT_FILE:-}
       PDF_SIGNING_CERT_PASSWORD: ${PDF_SIGNING_CERT_PASSWORD:-}
       PDF_SIGNING_CERT_PFX_BASE64: ${PDF_SIGNING_CERT_PFX_BASE64:-}
+      # OpenTimestamps-Zeitnachweis (ADR 0039/0040): nativer Client, standardmäßig aktiv; Calendars mit benanntem Betreiber (url|Betreiber)
+      OTS_ENABLED: ${OTS_ENABLED:-true}
+      OTS_CALENDARS: ${OTS_CALENDARS:-https://alice.btc.calendar.opentimestamps.org|OpenTimestamps,https://finney.calendar.eternitywall.com|Eternity Wall,https://btc.calendar.catallaxy.com|Catallaxy}
+      OTS_BITCOIN_EXPLORER_URL: ${OTS_BITCOIN_EXPLORER_URL:-https://mempool.space}
+      OTS_BITCOIN_RPC_URL: ${OTS_BITCOIN_RPC_URL:-}
+      OTS_BITCOIN_RPC_USER: ${OTS_BITCOIN_RPC_USER:-}
+      OTS_BITCOIN_RPC_PASSWORD: ${OTS_BITCOIN_RPC_PASSWORD:-}
       BLOCKCHAIN_ENABLED: ${BLOCKCHAIN_ENABLED:-true}
       BLOCKCHAIN_NETWORK: ${BLOCKCHAIN_NETWORK:-polygon-amoy}
       BLOCKCHAIN_AUTO_ANCHOR: ${BLOCKCHAIN_AUTO_ANCHOR:-true}
