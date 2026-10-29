@@ -1194,6 +1194,9 @@ jobs:
             else { Write-Host "Badge-Schlüssel-ID: $kid (unverändert zur Initialisierung)"; Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- Badge-Schlüssel-ID: ``$kid``" }
             $issuer = Invoke-WebRequest -Uri ($root + "/badges/issuer") -UseBasicParsing -TimeoutSec 20
             if ($issuer.StatusCode -ne 200) { $failures.Add("/badges/issuer nicht erreichbar.") }
+            # kid-URL neuer Credentials: genau ein öffentliches JWK (ein Request-Filtering-Segment „keys“ würde hier HTTP 404.8 liefern)
+            $kidJwk = Invoke-RestMethod -Uri ($root + "/badges/keys/" + $kid) -TimeoutSec 20
+            if ($kidJwk.kty -ne "EC" -or $kidJwk.crv -ne "P-256" -or $kidJwk.x -ne $jwks.keys[0].x -or $kidJwk.y -ne $jwks.keys[0].y -or $null -ne $kidJwk.d) { $failures.Add("/badges/keys/$kid liefert kein passendes öffentliches JWK.") }
           } catch { $failures.Add("Badge-Signierung nicht prüfbar: $($_.Exception.GetType().Name)") }
 
           if ($failures.Count -gt 0) {

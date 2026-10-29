@@ -1,0 +1,63 @@
+{
+  "id" : "ed0f4e58-ba29-48cb-8048-f44d558945f7",
+  "generated" : "2026-10-29T21:07:10",
+  "generator" : "CLR20Inspector",
+  "input" : {
+    "name" : "clr.json",
+    "type" : "JSON"
+  },
+  "summary" : {
+    "outcome" : "ERROR",
+    "fatals" : 0,
+    "errors" : 4,
+    "warnings" : 0,
+    "exceptions" : 0,
+    "notRun" : 0,
+    "totalRun" : 50,
+    "valid" : 0
+  },
+  "specification" : {
+    "pid" : "clr20.pid",
+    "shortName" : "clr",
+    "version" : "2.0",
+    "title" : "Comprehensive Learner Record 2.0"
+  },
+  "exceptions" : [ ],
+  "warnings" : [ ],
+  "valids" : [ ],
+  "errors" : [ {
+    "title" : "Embedded Proof Verification",
+    "message" : "The verifiable credential is missing a proof.",
+    "location" : {
+      "resource" : "clr.json"
+    },
+    "generator" : "EmbeddedProofProbe",
+    "detailsMessage" : null
+  }, {
+    "title" : "Embedded Proof Verification",
+    "message" : "The verifiable credential is missing a proof.",
+    "location" : {
+      "resource" : "clr.json/$.credentialSubject.verifiableCredential[0]"
+    },
+    "generator" : "EmbeddedProofProbe",
+    "detailsMessage" : null
+  }, {
+    "title" : "Embedded Proof Verification",
+    "message" : "The verifiable credential is missing a proof.",
+    "location" : {
+      "resource" : "clr.json/$.credentialSubject.verifiableCredential[1]"
+    },
+    "generator" : "EmbeddedProofProbe",
+    "detailsMessage" : null
+  }, {
+    "title" : "Embedded Proof Verification",
+    "message" : "The verifiable credential is missing a proof.",
+    "location" : {
+      "resource" : "clr.json/$.credentialSubject.verifiableCredential[2]"
+    },
+    "generator" : "EmbeddedProofProbe",
+    "detailsMessage" : null
+  } ],
+  "fatals" : [ ],
+  "notRun" : [ ]
+}

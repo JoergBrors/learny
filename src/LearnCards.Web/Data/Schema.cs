@@ -633,6 +633,31 @@ public static class Schema
             )
             """;
 
+        // Integritätsmanifest und OpenTimestamps-Nachweise (ADR 0039): je Zertifikat und Proof-Version eine unveränderliche Zeile (ältere Versionen bleiben erhalten)
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS integrity_proofs (
+                certificate_id    {id} NOT NULL,
+                proof_version     INTEGER NOT NULL,
+                manifest_sha256   TEXT NOT NULL,
+                jws_sha256        TEXT NOT NULL,
+                jws               TEXT NOT NULL,
+                ots_base64        TEXT NULL,
+                calendar_status   TEXT NOT NULL DEFAULT 'none',
+                anchor_status     TEXT NOT NULL DEFAULT 'none',
+                bitcoin_height    INTEGER NULL,
+                bitcoin_block_hash TEXT NULL,
+                bitcoin_block_time TEXT NULL,
+                confirmations     INTEGER NOT NULL DEFAULT 0,
+                last_checked_at   TEXT NULL,
+                last_verified_at  TEXT NULL,
+                error             TEXT NOT NULL DEFAULT '',
+                ots_client_version TEXT NOT NULL DEFAULT '',
+                pdf_sha256        TEXT NOT NULL DEFAULT '',
+                created_at        TEXT NOT NULL,
+                PRIMARY KEY (certificate_id, proof_version)
+            )
+            """;
+
         // Kompetenzmodell eines Moduls (ADR 0031): Lernziele und Kompetenzen; Teil der Modulversion (eingefrorene Kopien erhalten eine Kopie)
         yield return $"""
             CREATE TABLE IF NOT EXISTS module_competencies (

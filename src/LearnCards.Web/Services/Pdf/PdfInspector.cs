@@ -24,6 +24,8 @@ public sealed class PdfInspection
     public CmsVerification? Cms { get; set; }
     public DateTime? ClaimedSigningTime { get; set; }
     public List<PdfAttachment> Attachments { get; } = new();
+    /// <summary>Anzahl der Dateispezifikationen im PDF — größer als <see cref="Attachments"/>, wenn Anhänge nicht lesbar sind (nicht stillschweigend ignorieren, ADR 0039).</summary>
+    public int FilespecCount { get; set; }
     public List<string> Problems { get; } = new();
 }
 
@@ -97,6 +99,7 @@ public static class PdfInspector
         {
             var body = text.Substring(start, Math.Min(end - start, 1500));
             if (!Regex.IsMatch(body, @"/Type\s*/Filespec")) continue;
+            r.FilespecCount++;
             var ef = Regex.Match(body, @"/EF\s*<<\s*/F\s+(\d+)\s+0\s+R");
             var name = ReadName(body);
             if (!ef.Success || name is null || !objects.TryGetValue(int.Parse(ef.Groups[1].Value), out var so)) continue;
@@ -121,8 +124,10 @@ public static class PdfInspector
 
     private static byte[]? ReadStream(string text, byte[] pdf, int start, int end, PdfInspection r)
     {
-        var s = text.IndexOf("stream", start, end - start, StringComparison.Ordinal);
-        if (s < 0) return null;
+        // Das Schlüsselwort „stream“ steht direkt hinter dem Wörterbuch (">>"); Medientypen wie „application/octet-stream“ im Wörterbuch dürfen es nicht vortäuschen
+        var kw = Regex.Match(text.Substring(start, end - start), @">>\s*stream(?=\r?\n)");
+        if (!kw.Success) return null;
+        var s = start + kw.Index + kw.Length - 6;
         var dict = text.Substring(start, s - start);
         var len = Regex.Match(dict, @"/Length\s+(\d+)(?!\s+\d+\s+R)");
         if (!len.Success) { r.Problems.Add("Anhang mit nicht lesbarer Stream-Länge."); return null; }

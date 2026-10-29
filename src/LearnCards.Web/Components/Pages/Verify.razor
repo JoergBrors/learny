@@ -112,6 +112,36 @@
                 </tbody>
             </table>
         }
+        @if (r["integrity_manifest"] is { } im)
+        {
+            <table class="table" aria-label="Integritätsmanifest und Zeitnachweis">
+                <thead><tr><th scope="col">Integritätsmanifest (getrennt bewertet)</th><th scope="col">Ergebnis</th></tr></thead>
+                <tbody>
+                    <tr><td>Manifest vorhanden / gültig</td><td>@(Txt(im, "status") switch { "valid" => "✔ gültig", "absent" => "– nicht vorhanden (älteres Paket)", _ => "✖ ungültig" })</td></tr>
+                    <tr><td>Manifest-JWS (ES256) und Nutzlast = Manifestbytes</td><td>@(im["jws"] is { } mj ? Mark(Flag(mj, "signature_valid") && Flag(mj, "payload_matches_manifest")) : "–")</td></tr>
+                    <tr><td>Ausstellerschlüssel</td><td>@(Txt(im, "issuer_key.trust") switch { "installation" => "✔ entspricht dem Schlüssel dieser Installation", "unconfirmed" => "⚠ mathematisch gültig, Aussteller nicht bestätigt (fremder oder unbekannter Schlüssel)", "invalid" => "✖ ungültig", _ => "–" })</td></tr>
+                    <tr><td>Alle Nutzdateien geschützt, keine zusätzlichen Anhänge</td><td>@(Txt(im, "status") == "absent" ? "–" : Mark(Flag(im, "files.hashes_match") && (At(im, "files.unlisted_attachments") as JsonArray)?.Count == 0))</td></tr>
+                </tbody>
+            </table>
+            @if (At(im, "problems") is JsonArray ip && ip.Count > 0) { <ul class="muted">@foreach (var pr in ip) { <li>@pr?.ToString()</li> }</ul> }
+        }
+        @if (r["timestamp"] is { } ts)
+        {
+            <section aria-label="Unabhängiger Blockchain-Zeitnachweis">
+                <h3>Unabhängiger Blockchain-Zeitnachweis</h3>
+                <table class="table">
+                    <tbody>
+                        <tr><td>Protokoll / Blockchain / Hash</td><td>OpenTimestamps · Bitcoin · SHA-256</td></tr>
+                        <tr><td>SHA-256 des signierten Integritätsmanifests (integrity-manifest.jws)</td><td><code>@(Txt(ts, "jws_sha256").Length > 0 ? Txt(ts, "jws_sha256") : Txt(r, "integrity_manifest.jws.sha256"))</code></td></tr>
+                        <tr><td>Status</td><td>@(Txt(ts, "state") switch { "pending" => "Ausstehend", "anchored" => "Verankert", "confirmed" => "Bestätigt", "failed" => "Ungültig", "unverifiable" => "Nicht überprüfbar", _ => "Kein Zeitnachweis" }) – @Txt(ts, "note")</td></tr>
+                        @if (Txt(ts, "bitcoin_height").Length > 0) { <tr><td>Blockhöhe / Blockzeit / Bestätigungstiefe</td><td>@Txt(ts, "bitcoin_height") · @Txt(ts, "bitcoin_block_time") · @Txt(ts, "confirmations") (Quelle: @Txt(ts, "bitcoin_source")) – @(Flag(ts, "independent") ? "unabhängig geprüft (eigener Bitcoin-Knoten)" : "nicht vollständig unabhängig: Kettenzugehörigkeit/Tiefe beruhen auf der genannten Quelle")</td></tr> }
+                        <tr><td>OTS-Nachweisdatei</td><td>@(Flag(ts, "present") ? "integrity-manifest.jws.ots (eingebettet)" : "nicht eingebettet")</td></tr>
+                        <tr><td>Prüfanleitung</td><td><a href="https://github.com/opentimestamps/opentimestamps-client" rel="noopener noreferrer">OpenTimestamps-Client</a> · Anleitung: docs/pdf-signature.md, Abschnitt „Langzeitverifikation“</td></tr>
+                    </tbody>
+                </table>
+                <p class="muted">Der Blockchain-Zeitnachweis bestätigt die Existenz der kryptografisch gebundenen Daten spätestens zum nachgewiesenen Bitcoin-Zeitpunkt. Er bestätigt weder die Identität des Ausstellers noch die inhaltliche Richtigkeit des Lernnachweises.</p>
+            </section>
+        }
         @if (r["pdf"]?["signer"] is { } sg)
         {
             <p class="muted">Unterzeichner: @Txt(sg, "subject") · gültig @Txt(sg, "not_before")[..10] bis @Txt(sg, "not_after")[..10] · Fingerabdruck <code>@Txt(sg, "thumbprint")</code>@(Txt(r, "pdf.signing_time") is { Length: > 0 } st ? " · signiert " + st : "")</p>

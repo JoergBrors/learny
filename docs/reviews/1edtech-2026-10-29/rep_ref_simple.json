@@ -1,0 +1,100 @@
+{
+  "id" : "635f8ef1-5364-48d5-a519-3cf545efb2c2",
+  "generated" : "2026-10-29T21:07:22",
+  "generator" : "CLR20Inspector",
+  "input" : {
+    "name" : "ref_simple.jwt",
+    "type" : "JWT"
+  },
+  "summary" : {
+    "outcome" : "EXCEPTION",
+    "fatals" : 0,
+    "errors" : 7,
+    "warnings" : 0,
+    "exceptions" : 1,
+    "notRun" : 0,
+    "totalRun" : 11,
+    "valid" : 0
+  },
+  "specification" : {
+    "pid" : "clr20.pid",
+    "shortName" : "clr",
+    "version" : "2.0",
+    "title" : "Comprehensive Learner Record 2.0"
+  },
+  "exceptions" : [ {
+    "title" : "CLR20Inspector validation",
+    "message" : "Cannot invoke \"java.util.List.stream()\" because the return value of \"org.oneedtech.inspect.vc.util.JsonNodeUtil.asNodeList(com.fasterxml.jackson.databind.JsonNode)\" is null",
+    "location" : {
+      "resource" : "ref_simple.jwt"
+    },
+    "generator" : ".Uncaught.Exception",
+    "detailsMessage" : null
+  } ],
+  "warnings" : [ ],
+  "valids" : [ ],
+  "errors" : [ {
+    "title" : "Context Property Validation",
+    "message" : "missing required @context uri https://purl.imsglobal.org/spec/clr/v2p0/context-2.0.1.json at position 2",
+    "location" : {
+      "resource" : "ref_simple.jwt"
+    },
+    "generator" : "ContextPropertyProbe|ClrCredential|@context",
+    "detailsMessage" : null
+  }, {
+    "title" : "JSON Schema Validation",
+    "message" : "$.@context: muss für ein und nur ein Schema gültig sein, aber 0 sind gültig",
+    "location" : {
+      "path" : "$.@context",
+      "resource" : "ref_simple.jwt"
+    },
+    "generator" : "JsonSchemaProbe|https://purl.imsglobal.org/spec/clr/v2p0/schema/json/clr_v2p0_anyclrcredential_schema.json",
+    "detailsMessage" : null
+  }, {
+    "title" : "JSON Schema Validation",
+    "message" : "$.credentialSubject.verifiableCredential: muss für ein und nur ein Schema gültig sein, aber 0 sind gültig",
+    "location" : {
+      "path" : "$.credentialSubject.verifiableCredential",
+      "resource" : "ref_simple.jwt"
+    },
+    "generator" : "JsonSchemaProbe|https://purl.imsglobal.org/spec/clr/v2p0/schema/json/clr_v2p0_anyclrcredential_schema.json",
+    "detailsMessage" : null
+  }, {
+    "title" : "JSON Schema Validation",
+    "message" : "$.@context: muss für ein und nur ein Schema gültig sein, aber 0 sind gültig",
+    "location" : {
+      "path" : "$.@context",
+      "resource" : "ref_simple.jwt"
+    },
+    "generator" : "JsonSchemaProbe|https://purl.imsglobal.org/spec/clr/v2p0/schema/json/clr_v2p0_anyclrcredential_schema.json",
+    "detailsMessage" : null
+  }, {
+    "title" : "JSON Schema Validation",
+    "message" : "$.credentialSubject.verifiableCredential: muss für ein und nur ein Schema gültig sein, aber 0 sind gültig",
+    "location" : {
+      "path" : "$.credentialSubject.verifiableCredential",
+      "resource" : "ref_simple.jwt"
+    },
+    "generator" : "JsonSchemaProbe|https://purl.imsglobal.org/spec/clr/v2p0/schema/json/clr_v2p0_anyclrcredential_schema.json",
+    "detailsMessage" : null
+  }, {
+    "title" : "JSON Schema Validation",
+    "message" : "$: erforderliche Eigenschaft 'validFrom' nicht gefunden",
+    "location" : {
+      "path" : "$",
+      "resource" : "ref_simple.jwt"
+    },
+    "generator" : "JsonSchemaProbe|https://purl.imsglobal.org/spec/clr/v2p0/schema/json/clr_v2p0_anyclrcredential_schema.json",
+    "detailsMessage" : null
+  }, {
+    "title" : "Inline JSON Schema Validation",
+    "message" : "Could not read schema resource https://purl.imsglobal.org/AchievementCredential.json",
+    "location" : {
+      "resource" : "ref_simple.jwt"
+    },
+    "generator" : "InlineJsonSchemaProbe",
+    "detailsMessage" : null
+  } ],
+  "fatals" : [ ],
+  "notRun" : [ ]
+}

@@ -21,8 +21,9 @@ public sealed class PdfVerificationService
     private readonly PdfSigningProvider _signing;
     private readonly IDatabase _db;
     private readonly PkiVerifier _pki;
+    private readonly Ots.OtsMaintenanceService _ots;
 
-    public PdfVerificationService(CertificateService certs, PdfSigningProvider signing, IDatabase db, PkiVerifier pki) { _certs = certs; _signing = signing; _db = db; _pki = pki; }
+    public PdfVerificationService(CertificateService certs, PdfSigningProvider signing, IDatabase db, PkiVerifier pki, Ots.OtsMaintenanceService ots) { _certs = certs; _signing = signing; _db = db; _pki = pki; _ots = ots; }
 
     private static string Sha(byte[] b) => Convert.ToHexString(SHA256.HashData(b)).ToLowerInvariant();
     private static string S(JsonNode? n, string path)
@@ -94,7 +95,7 @@ public sealed class PdfVerificationService
         foreach (var (name, a) in files)
         {
             var exp = expected.GetValueOrDefault(name);
-            var ok = name == "verification.json" || (exp is not null && string.Equals(exp, a.Sha256, StringComparison.Ordinal));
+            var ok = name == "verification.json" || IntegrityManifest.ArtifactNames.Contains(name) || (exp is not null && string.Equals(exp, a.Sha256, StringComparison.Ordinal));
             if (!ok) filesOk = false;
             fileList.Add(new JsonObject { ["name"] = name, ["size"] = a.Data.Length, ["sha256"] = a.Sha256, ["expected_sha256"] = name == "verification.json" ? null : exp, ["matches"] = ok });
         }
@@ -103,6 +104,39 @@ public sealed class PdfVerificationService
 
         // ─── 3/4/5: Credentials ───
         var jwk = files.TryGetValue("public-key.jwk", out var kf) ? TryParse(kf.Data) : null;
+
+        // ─── Integritätsmanifest (ADR 0039): getrennt von Dokument- und Credential-Prüfung ───
+        var integrity = IntegrityManifest.Verify(files.ToDictionary(k => k.Key, k => k.Value.Data), jwk, _certs.Signer.PublicJwk());
+        var manifestStatus = S(integrity, "status");   // absent (älteres Paket) | valid | invalid
+        var unreadable = insp.FilespecCount - insp.Attachments.Count;   // Dateispezifikationen ohne lesbare Daten sind verdächtig (versteckt/beschädigt)
+        if (unreadable > 0 && integrity["problems"] is JsonArray ip) { ip.Add($"{unreadable} Dateianhang/-anhänge im PDF sind nicht lesbar und daher nicht durch das Manifest bestätigt."); integrity["status"] = "invalid"; manifestStatus = "invalid"; }
+        var manifestOk = manifestStatus != "invalid";
+        report["integrity_manifest"] = integrity;
+        var otsReport = new JsonObject { ["present"] = false, ["state"] = Ots.OtsState.None, ["note"] = "Kein Zeitnachweis eingebettet." };
+        if (files.TryGetValue(IntegrityManifest.OtsName, out var otsFile) )
+        {
+            otsReport["present"] = true; otsReport["file_sha256"] = otsFile.Sha256;
+            if (!files.TryGetValue(IntegrityManifest.JwsName, out var jwsFile)) { otsReport["state"] = Ots.OtsState.Failed; otsReport["error"] = "OTS-Datei ohne Manifest-JWS."; }
+            else
+            {
+                var ev = await _ots.EvaluateBytesAsync(jwsFile.Data, otsFile.Data, CancellationToken.None);
+                otsReport["state"] = ev.State; otsReport["receipt_valid"] = ev.State != Ots.OtsState.Failed || ev.BindingOk; otsReport["bound_to_manifest_jws"] = ev.BindingOk; otsReport["error"] = ev.Error;
+                otsReport["detail"] = ev.Detail; otsReport["independent"] = ev.Independent; otsReport["calendar"] = ev.Calendar; otsReport["bitcoin_height"] = ev.Height; otsReport["bitcoin_block_hash"] = ev.BlockHash; otsReport["bitcoin_block_time"] = ev.BlockTime; otsReport["confirmations"] = ev.Confirmations; otsReport["bitcoin_source"] = ev.Source;
+                otsReport["jws_sha256"] = jwsFile.Sha256;
+                otsReport["note"] = ev.State switch
+                {
+                    Ots.OtsState.Pending => "Ausstehend: Die Receipt liegt vor, ein Bitcoin-Einschluss ist nicht unabhängig bestätigt.",
+                    Ots.OtsState.Anchored => "Verankert: Bitcoin-Einschluss unabhängig geprüft, Bestätigungstiefe noch nicht erreicht.",
+                    Ots.OtsState.Confirmed => "Bestätigt: Bitcoin-Einschluss und Bestätigungstiefe unabhängig geprüft.",
+                    Ots.OtsState.Failed => "Ungültig: " + ev.Error,
+                    _ => "Nicht überprüfbar: " + ev.Error,
+                };
+            }
+        }
+        else if (jwsPresent(files)) otsReport["note"] = "Kein Zeitnachweis eingebettet (OpenTimestamps war bei der Ausstellung nicht aktiv oder nicht erreichbar).";
+        report["timestamp"] = otsReport;
+        var otsFailed = S(otsReport, "state") == Ots.OtsState.Failed;
+        static bool jwsPresent(Dictionary<string, PdfAttachment> f) => f.ContainsKey(IntegrityManifest.JwsName);
         var kind = S(vNode, "kind");
         var refs = new JsonArray(); var refsOk = vNode is not null;
         void Ref(string what, bool ok, string detail = "") { if (!ok) refsOk = false; refs.Add(new JsonObject { ["check"] = what, ["ok"] = ok, ["detail"] = detail.Length > 0 ? detail : null }); }
@@ -215,12 +249,12 @@ public sealed class PdfVerificationService
 
         var pdfOk = S(pdfNode, "signature_valid") == "true" && S(pdfNode, "document_unchanged") == "true";
         var signerRevoked = pkiV is { IssuerConfirmed: true, Revocation: "revoked" };
-        var valid = pdfOk && filesOk && credsValid && refsOk && !anyRevoked && !signerRevoked && (S(report["versions"], "match") == "true");
+        var valid = pdfOk && filesOk && manifestOk && !otsFailed && credsValid && refsOk && !anyRevoked && !signerRevoked && (S(report["versions"], "match") == "true");
         report["problems"] = problems;
         report["overall"] = new JsonObject
         {
             ["valid"] = valid,
-            ["pdf_signature_ok"] = pdfOk, ["attachments_ok"] = filesOk, ["credentials_ok"] = credsValid, ["references_ok"] = refsOk, ["revoked"] = anyRevoked, ["signer_revoked"] = signerRevoked, ["versions_ok"] = S(report["versions"], "match") == "true",
+            ["pdf_signature_ok"] = pdfOk, ["attachments_ok"] = filesOk, ["manifest_status"] = manifestStatus, ["timestamp_state"] = S(otsReport, "state"), ["credentials_ok"] = credsValid, ["references_ok"] = refsOk, ["revoked"] = anyRevoked, ["signer_revoked"] = signerRevoked, ["versions_ok"] = S(report["versions"], "match") == "true",
             ["signer_trust"] = signerTrust,
             ["summary"] = valid ? (signerTrust == "learny_pki" ? "Gültig: PDF-Signatur, Dateiinhalt, Credentials, Hashes und Versionen stimmen überein; das PDF wurde mit einem Zertifikat der Learny-PKI signiert (keine öffentliche Anerkennung durch Adobe oder Betriebssysteme)."
                     : signerTrust == "installation" ? "Gültig: PDF-Signatur, Dateiinhalt, Credentials, Hashes und Versionen stimmen überein; das PDF wurde von dieser Installation signiert."
@@ -228,6 +262,8 @@ public sealed class PdfVerificationService
                 : signerRevoked ? "Nicht gültig: Das Signaturzertifikat der Learny-PKI ist widerrufen."
                 : anyRevoked ? "Nicht gültig: Ein Nachweis ist widerrufen."
                 : !pdfOk ? "Nicht gültig: PDF-Signatur fehlt/ungültig oder die Datei wurde nach der Signierung verändert."
+                : !manifestOk ? "Nicht gültig: Das Integritätsmanifest ist ungültig (Signatur, Dateihashes oder unzulässige Anhänge)."
+                : otsFailed ? "Nicht gültig: Der Zeitnachweis (OpenTimestamps) ist ungültig oder gehört nicht zum Manifest."
                 : !filesOk ? "Nicht gültig: Ein eingebetteter Anhang stimmt nicht mit der Prüfsumme überein oder fehlt."
                 : !credsValid ? "Nicht gültig: Ein eingebettetes Credential ist ungültig."
                 : "Nicht gültig: Referenzen, Hashes oder Versionen stimmen nicht überein.",

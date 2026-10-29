@@ -1,3 +1,4 @@
+using System.Text;
 using System.Numerics;
 using System.Text.Json.Nodes;
 using LearnCards.Web.Data;
@@ -123,6 +124,7 @@ public static class BlockchainUnitTests
         Config(check);
         CostGuard(check);
         await BadgesAsync(check, tmp);
+        await ClrJwtCasesAsync(check, tmp);
         await PipelineAsync(check, tmp);
         await MainnetAsync(check, tmp);
         await FailuresAsync(check, tmp);
@@ -612,5 +614,57 @@ public static class BlockchainUnitTests
             var rows = await e.Certs.ListForAdminAsync(e.AdminId);
             check(rows.Count == 3 && rows.Where(r => r.Scope != "global").All(r => r.LearnerName is null && r.ModuleLabel == "(privates Modul)") && rows.Single(r => r.Scope == "global").LearnerName is not null, "B21 Administrator: Verwaltungsliste zeigt private Module und Lernende nicht (nur Nummer, Status, Verankerung)");
         }
+    }
+
+    /// <summary>
+    /// CLR-2.0-JWT-Fälle (Phase 1 des Auftrags vom 2026-10-29): A JSON mit Credential-Objekten, B JWT mit kompakten JWS, C ungültige eingebettete Signatur,
+    /// D fehlendes Pflichtfeld im eingebetteten Credential, E beschädigte eingebettete JWS. Learny prüft die eingebetteten JWS einzeln; ein gültiges äußeres JWT macht
+    /// ein eingebettetes fehlerhaftes Credential nicht gültig.
+    /// </summary>
+    private static async Task ClrJwtCasesAsync(Action<bool, string> check, string tmp)
+    {
+        await using var e = await Env.CreateAsync(Path.Combine(tmp, "clrjwt"));
+        var kid = e.Certs.JwtKeyId; var issuer = new JsonObject { ["id"] = e.Certs.IssuerId, ["type"] = new JsonArray("Profile"), ["name"] = "LearnCards" };
+        JsonObject Badge(string n, bool withType = true)
+        {
+            var b = new JsonObject
+            {
+                ["@context"] = new JsonArray("https://www.w3.org/ns/credentials/v2", "https://purl.imsglobal.org/spec/ob/v3p0/context-3.0.3.json"), ["id"] = $"https://learny.test/verify/{Guid.NewGuid()}",
+                ["type"] = new JsonArray("VerifiableCredential", "OpenBadgeCredential"), ["issuer"] = issuer.DeepClone(), ["validFrom"] = "2026-10-29T10:00:00Z", ["name"] = n,
+            };
+            if (!withType) b.Remove("type");
+            b["credentialSubject"] = new JsonObject { ["id"] = "urn:learny:subject:x", ["type"] = new JsonArray("AchievementSubject"), ["achievement"] = new JsonObject { ["id"] = "https://learny.test/badges/achievements/x/1", ["type"] = new JsonArray("Achievement"), ["name"] = n, ["criteria"] = new JsonObject { ["narrative"] = "n" } } };
+            return b;
+        }
+        JsonObject Clr(params JsonNode[] embedded) => new()
+        {
+            ["@context"] = new JsonArray("https://www.w3.org/ns/credentials/v2", CertificateService.ClrContext), ["id"] = $"https://learny.test/verify/{Guid.NewGuid()}/clr", ["type"] = new JsonArray("VerifiableCredential", "ClrCredential"),
+            ["issuer"] = issuer.DeepClone(), ["validFrom"] = "2026-10-29T10:00:00Z", ["name"] = "CLR",
+            ["credentialSubject"] = new JsonObject { ["id"] = "urn:learny:subject:x", ["type"] = new JsonArray("ClrSubject"), ["verifiableCredential"] = new JsonArray(embedded.Select(x => x.DeepClone()).ToArray()) },
+        };
+        string Sign(JsonObject c) => e.Signer.SignCredential(c, kid);
+        string FlipSignature(string jws) { var p = jws.Split('.'); var sig = p[2].ToCharArray(); sig[10] = sig[10] == 'A' ? 'B' : 'A'; return $"{p[0]}.{p[1]}.{new string(sig)}"; }
+
+        var good = Sign(Badge("Modul A")); var jwtOk = Sign(Clr(good));
+        var vB = await e.Certs.VerifyAsync(jwtOk);
+        check(vB.SignatureValid && vB.IssuerValid && vB.EmbeddedSignaturesValid == true && vB.EmbeddedCount == 1 && vB.Valid, "CLR-JWT B: eingebettete kompakte JWS werden einzeln geprüft (gültig)");
+
+        var clrObj = Clr(JsonNode.Parse(BadgeSignerPayload(good))!); var jsonOnly = clrObj.ToJsonString();
+        check(Sign(clrObj).Split('.').Length == 3 && (await e.Certs.VerifyAsync(jsonOnly)).ContentMatches is null or false, "CLR-JSON A: unsigniertes JSON gilt nicht allein als Nachweis (kein proof, Status kommt aus der Online-Prüfung)");
+
+        var vC = await e.Certs.VerifyAsync(Sign(Clr(FlipSignature(good))));
+        check(vC.SignatureValid && vC.EmbeddedSignaturesValid == false && !vC.Valid, "CLR-JWT C: gültiges äußeres JWT mit ungültiger eingebetteter Signatur gilt als ungültig");
+        var vD = await e.Certs.VerifyAsync(Sign(Clr(Sign(Badge("Modul D", withType: false)))));
+        check(vD.SignatureValid && vD.EmbeddedSignaturesValid == false && !vD.Valid, "CLR-JWT D: eingebettetes Credential ohne Pflichtfeld type gilt als ungültig (trotz gültiger Signatur)");
+        var vE = await e.Certs.VerifyAsync(Sign(Clr("nicht.eine.jws")));
+        check(vE.SignatureValid && vE.EmbeddedSignaturesValid == false && !vE.Valid, "CLR-JWT E: beschädigte eingebettete JWS gilt als ungültig");
+        var vF = await e.Certs.VerifyAsync(Sign(Clr(good, FlipSignature(Sign(Badge("Modul F"))))));
+        check(vF.EmbeddedSignaturesValid == false && !vF.Valid, "CLR-JWT: ein fehlerhaftes eingebettetes Credential unter mehreren macht das Gesamtergebnis ungültig (kein Überdecken durch gültige Teile)");
+    }
+
+    private static string BadgeSignerPayload(string jws)
+    {
+        var s = jws.Split('.')[1].Replace('-', '+').Replace('_', '/'); s = s.PadRight(s.Length + (4 - s.Length % 4) % 4, '=');
+        return JsonNode.Parse(Encoding.UTF8.GetString(Convert.FromBase64String(s)))!["vc"]!.ToJsonString();
     }
 }

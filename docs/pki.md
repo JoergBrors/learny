@@ -79,3 +79,7 @@ OCSP (kein Responder, keine OCSP-URL in den Zertifikaten), automatische Root-/Is
 Administratoren sehen ausgestellte Nachweise im Register (`/admin/credentials`) und können einzelne Nachweise gezielt widerrufen; das Widerrufen eines Signaturzertifikats geschieht weiterhin nur hier in der PKI (`PkiService.RevokeAsync`). Der PKI-Status des PDF-Signaturzertifikats wird im Register-Detail angezeigt (Suche über den Thumbprint).
 
 Abgrenzung im Ausstellungsregister (ADR 0037): Der **X.509-Thumbprint** identifiziert das Signaturzertifikat eines PDFs und kann viele Nachweise treffen; ein **Credential-Widerruf** lässt das Zertifikat und alle anderen damit signierten PDFs unberührt (getestet). Wird ein PKI-Signaturzertifikat über `PkiService.RevokeAsync` widerrufen, melden die PDF-Prüfung (`signer_revoked`) und die Registerdetails (PKI-Status) die Folge für alle damit signierten PDFs; die Credentials selbst (Badge/CLR) werden dadurch nicht widerrufen.
+
+## Hinweis zu Manifest und Zeitnachweis (ADR 0039)
+
+Die Learny-PKI beglaubigt das **PDF-Signaturzertifikat** (CMS). Das Integritätsmanifest wird dagegen mit dem Badge-Schlüssel (ES256) signiert; beide Vertrauensstränge bleiben getrennt. Die PKI wird dafür nicht dupliziert; sie dient als zusätzlicher unabhängiger Anker, wenn die CMS-Signatur über `learny_pki` bestätigt ist. Ein OpenTimestamps-Nachweis ersetzt weder Zertifikatskette noch CRL.

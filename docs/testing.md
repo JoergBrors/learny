@@ -150,3 +150,28 @@ Im Block „Beispiele, Templates, Schema, MCP, Hilfe“ werden zusätzlich `modu
 ### Open-Badges-Validierung (ADR 0038)
 
 `CredentialRegisterTests` prüft zusätzlich: die `kid`-URL liefert genau ein JWK (kein JWKS/Profil) und entspricht dem JWKS-Eintrag, keine privaten Schlüsselteile, Ablehnung manipulierter Signatur/Header/Nutzlast, Kennzeichnung des JSON-Downloads als unsigniert, stabiler Fingerprint, Struktur von Modul- und Master-Badge, Prüfstatus der Admin-Detailansicht (Schlüssel „nicht erreichbar“ ≠ ungültige Signatur; externe Prüfung „nicht geprüft“). Nicht automatisiert: der Lauf des 1EdTech-Validators.
+
+## Integritätsmanifest, OpenTimestamps und Phase-1-Fälle (ADR 0039, Auftrag 2026-10-29)
+
+`IntegrityTests` (Unit + E2E): gültiges Paket; Manipulation jeder geschützten Datei einzeln; verändertes Manifest; manipulierte Manifest-JWS (Signatur/Nutzlast); falsche JWS-Zuordnung; fremder Ausstellerschlüssel (mathematisch gültig, aber `unconfirmed`); ausgetauschtes `public-key.jwk` (inkl. ungültiger Kurvenpunkt ohne 500); zusätzlicher/versteckter/nicht lesbarer Anhang; fehlende Pflichtdatei; Paket ohne Manifest; OTS: pending ≠ verankert, ausgetauschte Receipt, falscher Digest, ungültige Operationen, korrekter/falscher Bitcoin-Block, Bestätigungstiefe, Reorganisation, Datenquelle nicht erreichbar, Wartungslauf mit Calendar-Ausfall, Proof-Versionen. Die Bitcoin-Datenquelle ist ein Test-Double (`IBitcoinHeaderSource`), der `ots`-Client ein Test-Double (`IOtsClient`); echte Calendars/Blöcke wurden nicht geprüft. `BlockchainUnitTests`: CLR-JWT-Fälle B–E und Mischfall. `TopicCredentialTests`: Widerrufsliste `revokedCredential`, Achievement-/Criteria-URLs. Mit `TEST_DUMP_DIR=<Pfad>` schreibt der Lauf `topic.pdf` und `attachments/` für `tools/integrity/verify_package.py`.
+
+## Restabnahme 2026-10-29: reale externe Prüfungen (getrennt von Test-Doubles)
+
+- **PostgreSQL:** Der Lauf gegen eine private PostgreSQL-17-Instanz (Port 55433, `initdb` im Scratchpad) ergab laut Agentenbericht 1437/1437; die Instanz wurde danach gestoppt, das Datenverzeichnis liegt nur im Scratchpad (nichts im Repository). Nach den späteren Änderungen (OTS-Fixtures, Leser) wurde der Lauf auf SQLite wiederholt, nicht erneut auf PostgreSQL (kein Schemabezug).
+- **Reale Prüfungen (nicht Teil des Pflichtlaufs, kein Test-Double):** offizieller 1EdTech-Validator lokal (Berichte unter `docs/reviews/1edtech-2026-10-29/`), `ots` 0.7.2 gegen drei reale Calendars, Verifikation des offiziellen Beispiel-Nachweises gegen echte Bitcoin-Daten (`verify_package.py ots …`). Sie sind in `credential-validation.md` und `pdf-signature.md` beschrieben.
+- **Test-Doubles bleiben** im Pflichtlauf (`IOtsClient`, `IBitcoinHeaderSource`), zusätzlich prüft `IntegrityTests.RealArtifactsAsync` eine **echte** Receipt (`tests/…/fixtures/ots/`, vom Client 0.7.2 für eine Test-Manifest-JWS erzeugt): Lesen, Bindung, Pending-Einstufung, Ablehnung für veränderte JWS.
+
+
+## Nativer OpenTimestamps-Client (ADR 0040)
+
+`IntegrityTests.NativeAsync` (im Pflichtlauf, ohne Netzwerk): RIPEMD-160-Vektoren; **bytegleicher Rundlauf** einer echten ots-0.7.2-Receipt (3 Calendars) und der offiziellen Beispiel-Receipt (`fixtures/ots/official`, Bitcoin-Block 358391); Stempeln gegen Calendar-Doubles (POST `/digest`, Accept-Header, Nonce-Baum, ≥ 2 Calendars, Ausfall eines dritten tolerierbar, < 2 → Fehler, Redirects/Übergröße/http abgelehnt); Upgrade (404 → unverändert, 200 → vereinigt, Pending bleibt, nie „bestätigt“ ohne Header-Prüfung, fremde URIs aus der Receipt werden nicht abgerufen); 3000 manipulierte/abgeschnittene Receipts ohne unkontrollierte Ausnahme; Tiefen-/Operandenlimit; Keccak-256 → „nicht überprüfbar“; Receipt einer anderen Datei → falsch zugeordnet.
+
+**Live (nicht im Pflichtlauf, benötigt Internet):** `OTS_LIVE_TESTS=1 dotnet run --project tests/LearnCards.IntegrationTests --no-build` — stempelt nativ bei alice/finney/catallaxy, upgradet (bleibt ausstehend) und prüft den offiziellen Beispielbeweis über `EsploraHeaderSource` (mempool.space) als bestätigt. Mit `TEST_DUMP_DIR=<Pfad>` landen `native-live.bin(.ots)` für den Gegentest mit dem offiziellen Client (`ots info`, `ots upgrade`; z. B. unter WSL auf dem Entwicklungsrechner — auf dem Produktivserver nicht nötig).
+
+
+### Restabnahme 2026-10-29 (Betreiber, Windows-Isolation)
+
+- **SQLite:** 1473/1473 im Pflichtlauf (1460 + 13 neue: Betreiberzuordnung inkl. „zwei Hosts desselben Betreibers reichen nicht“, unbekannte Betreiber, ungültige Konfiguration, Calendar-Timeout, > 20 000 Knoten, Größen-Plausibilität, Upgrade-Bindung/Original erhalten, Explorer ≠ unabhängig, Detailstatus, RPC-Double). Mit `OTS_LIVE_TESTS=1`: 1476/1476 (zusätzlich echte Calendars, reales Upgrade, bestätigter Beispielbeweis über mempool.space). Mit `OTS_UPGRADE_FILE=<.ots>` und `OTS_UPGRADE_SUBJECT=<Datei>` lässt sich eine vorhandene Receipt real upgraden und bewerten.
+- **PostgreSQL:** nicht erneut (keine Schemaänderung).
+- **Windows-Isolationstest:** siehe `pdf-signature.md` („Windows-/IIS-Betrieb ohne CLI“).
+- **Offene Langzeitprüfung:** Bestätigung der gestempelten Receipts in einem Bitcoin-Block (Stand der letzten Prüfung: Calendars melden „Timestamped by transaction …“ bzw. „Pending confirmation“); Prüfung mit echtem eigenen Bitcoin-Core-Knoten.

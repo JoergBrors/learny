@@ -1,0 +1,39 @@
+{
+  "id" : "991df072-4d44-4a8e-b8d5-2014e1770a63",
+  "generated" : "2026-10-29T21:07:10",
+  "generator" : "OB30Inspector",
+  "input" : {
+    "name" : "master.json",
+    "type" : "JSON"
+  },
+  "summary" : {
+    "outcome" : "ERROR",
+    "fatals" : 0,
+    "errors" : 1,
+    "warnings" : 0,
+    "exceptions" : 0,
+    "notRun" : 0,
+    "totalRun" : 14,
+    "valid" : 0
+  },
+  "specification" : {
+    "pid" : "ob30.pid",
+    "shortName" : "ob",
+    "version" : "3.0",
+    "title" : "Open Badges 3.0"
+  },
+  "exceptions" : [ ],
+  "warnings" : [ ],
+  "valids" : [ ],
+  "errors" : [ {
+    "title" : "Embedded Proof Verification",
+    "message" : "The verifiable credential is missing a proof.",
+    "location" : {
+      "resource" : "master.json"
+    },
+    "generator" : "EmbeddedProofProbe",
+    "detailsMessage" : null
+  } ],
+  "fatals" : [ ],
+  "notRun" : [ ]
+}

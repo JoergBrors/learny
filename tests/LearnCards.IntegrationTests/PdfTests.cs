@@ -118,7 +118,7 @@ public static class PdfTests
         var verification = JsonNode.Parse(insp.Attachments.First(a => a.Name == "verification.json").Data)!;
         check(S(verification, "signature.algorithm") == "ES256" && S(verification, "signature.key_id").Length > 0 && S(verification, "hashes.clr_jws_sha256") == BadgeSigner.HashHex(clrJws)
               && S(verification, "hashes.master_badge_jws_sha256") == BadgeSigner.HashHex(masterJws) && S(verification, "topic.version") == "1" && S(verification, "certificate_id") == topicCertId
-              && verification["hashes"]!["embedded_files"]!.AsArray().Count == insp.Attachments.Count - 1 && verification["standards"]!.ToJsonString().Contains("CLR Standard 2.0"),
+              && verification["hashes"]!["embedded_files"]!.AsArray().Count == insp.Attachments.Count(a => !IntegrityManifest.ArtifactNames.Contains(a.Name)) - 1 && verification["standards"]!.ToJsonString().Contains("CLR Standard 2.0"),
             "PDF11 verification.json: Kennungen, Algorithmus, Schlüssel-ID, Version, Hashes von CLR/Badge/Snapshot und aller übrigen Anhänge stimmen mit den Originalen überein");
         var jwkText = Encoding.UTF8.GetString(insp.Attachments.First(a => a.Name == "public-key.jwk").Data);
         var allText = Encoding.Latin1.GetString(pdf1);
@@ -173,6 +173,7 @@ public static class PdfTests
         var vChangedClr = await UploadAsync(changedClr);
         check(S(vChangedClr, "pdf.signature_valid") == "true" && S(vChangedClr, "pdf.document_unchanged") == "true" && S(vChangedClr, "overall.valid") == "false" && S(vChangedClr, "attachments.hashes_match") == "false" && S(vChangedClr, "pdf.signer_trust") == "untrusted",
             "V4 gültige PDF-Signatur eines Fremden, aber veränderter Anhang (CLR): Hash stimmt nicht — nicht gültig; Unterzeichner nicht vertrauenswürdig");
+        await IntegrityTests.E2EAsync(insp.Attachments, UploadAsync, foreign, check, pdf1);   // Integritätsmanifest (ADR 0039)
         // Angreifer rechnet die Hashes in verification.json nach — dann scheitert die CLR-Signatur selbst
         var fixedHash = Rebuild((n, b) =>
         {

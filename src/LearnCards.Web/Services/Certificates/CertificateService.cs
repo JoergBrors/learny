@@ -29,7 +29,10 @@ public sealed class BadgeVerification
     public string ChainStatus { get; set; } = "none";
     public string? ChainNetwork { get; set; }
     public string? TxHash { get; set; }
-    public bool Valid => SignatureValid && IssuerValid && ContentMatches != false && !Revoked;
+    /// <summary>Bei einem signierten CLR: wahr, wenn jede eingebettete kompakte JWS (ClrSubjectJwtPayload) eine gültige ES256-Signatur dieses Ausstellers trägt und ein Credential beschreibt; sonst null (keine eingebetteten JWS).</summary>
+    public bool? EmbeddedSignaturesValid { get; set; }
+    public int EmbeddedCount { get; set; }
+    public bool Valid => SignatureValid && IssuerValid && ContentMatches != false && EmbeddedSignaturesValid != false && !Revoked;
 }
 
 /// <summary>
@@ -218,6 +221,35 @@ public sealed partial class CertificateService
     }
 
     /// <summary>
+    /// Öffentliche Achievement-/Criteria-Ressource (<c>/badges/achievements/…</c>), die <c>achievement.id</c> bzw. <c>criteria.id</c> der ausgestellten Credentials auflöst.
+    /// Quelle ist ausschließlich das bei der Ausstellung signierte Credential (historischer Stand, nichts wird aus aktuellen Einstellungen neu berechnet).
+    /// Veröffentlicht werden nur die nicht personenbezogenen Kernangaben (Typ, Name, Beschreibung, Version, Kriterientext) — keine Kompetenzen, Ergebnisse, Lernenden- oder Lerninhalte.
+    /// </summary>
+    public async Task<JsonObject?> GetPublicAchievementAsync(string ownerId, int version, bool topic, bool criteriaOnly)
+    {
+        if (!UserService.IsGuid(ownerId) || version < 0) return null;
+        var rows = await _db.QueryAsync($"SELECT badge_jws FROM certificates WHERE module_id = @m AND module_version = @v AND kind {(topic ? "=" : "<>")} 'topic' ORDER BY issued_at DESC LIMIT 5",
+            new (string, object?)[] { ("m", ownerId), ("v", version) });
+        var expectedId = $"{BaseUrl}/badges/achievements/{(topic ? "topics/" : "")}{ownerId}/{version}";
+        foreach (var r in rows)
+        {
+            JsonObject? ach;
+            try { ach = BadgeSigner.CredentialFromJws(r["badge_jws"]!)["credentialSubject"]?["achievement"] as JsonObject; }
+            catch (Exception e) when (e is System.Text.Json.JsonException or FormatException or InvalidOperationException) { continue; }
+            if (ach?["id"]?.GetValue<string>() != expectedId) continue;   // nur Credentials, die genau diese URL ausgewiesen haben
+            var criteria = ach["criteria"] as JsonObject;
+            var context = new JsonArray("https://purl.imsglobal.org/spec/ob/v3p0/context-3.0.3.json");
+            if (criteriaOnly)
+                return criteria is null ? null : new JsonObject { ["@context"] = context, ["id"] = criteria["id"]?.DeepClone(), ["narrative"] = criteria["narrative"]?.DeepClone() };
+            var o = new JsonObject { ["@context"] = context };
+            foreach (var k in new[] { "id", "type", "achievementType", "name", "description", "version" }) if (ach[k] is { } v) o[k] = v.DeepClone();
+            if (criteria is not null) o["criteria"] = new JsonObject { ["id"] = criteria["id"]?.DeepClone(), ["narrative"] = criteria["narrative"]?.DeepClone() };
+            return o;
+        }
+        return null;
+    }
+
+    /// <summary>
     /// Open Badge als JSON. Neue Credentials: das reine Credential (kein erfundener Proof-Typ; das JWT ist der Proof und wird getrennt geliefert, OB 3.0 §8.2.2).
     /// Altbestand (Profil <c>vc+jwt</c>): Credential plus die ursprüngliche Hülle <c>proof.jwt</c>, unverändert.
     /// </summary>
@@ -400,6 +432,17 @@ public sealed partial class CertificateService
             // Das CLR-JSON enthält die eingebetteten Credentials als Objekte, das signierte CLR als kompakte JWS: für den Vergleich beides in Objektform bringen
             v.ContentMatches = JsonNode.DeepEquals(ExpandEmbedded(embedded), ExpandEmbedded(cred));
         }
+        if (jv.SignatureValid && credPayload?["credentialSubject"]?["verifiableCredential"] is { } embeddedClaim)
+        {
+            // CLR 2.0 B.2.2: eingebettete Credentials sind kompakte JWS — jede einzeln prüfen, nicht nur die äußere Signatur
+            var items = embeddedClaim is JsonArray arr ? arr.ToList() : new List<JsonNode?> { embeddedClaim };
+            var jwsItems = items.Where(i => i is JsonValue val && val.TryGetValue<string>(out _)).ToList();
+            if (jwsItems.Count > 0)
+            {
+                v.EmbeddedCount = jwsItems.Count;
+                v.EmbeddedSignaturesValid = jwsItems.Count == items.Count && jwsItems.All(i => { var iv = _signer.Verify(i!.GetValue<string>()); return iv.SignatureValid && iv.Payload is JsonObject ip && ip["vc"] is JsonObject ivc && ivc["type"] is not null && ivc["credentialSubject"] is JsonObject; });   // gültige Signatur UND ein Credential mit type/credentialSubject (Profil ADR 0038)
+            }
+        }
         v.BadgeHash = BadgeSigner.HashHex(jws);
         if (credPayload is not null)
         {
@@ -421,15 +464,23 @@ public sealed partial class CertificateService
 
     // ─── Widerruf, Verwaltung, Prüfung durch Auditoren ─────────────────────
 
-    public async Task<object> RevocationListAsync()
+    /// <summary>
+    /// Öffentliche Widerrufsliste (<c>1EdTechRevocationList</c>). Zwei gleichwertige Darstellungen desselben Registers:
+    /// <c>revokedCredential</c> (<c>[{id, revoked:true}]</c>, vom 1EdTech-Validator gelesen) und das bisherige <c>revoked_credentials</c> (mit Grund) für bestehende Clients.
+    /// Als <see cref="JsonObject"/> ausgegeben, damit die Schlüssel von der snake_case-Namenspolitik unberührt bleiben.
+    /// </summary>
+    public async Task<JsonObject> RevocationListAsync()
     {
-        var rows = await _db.QueryAsync("SELECT id, revoked_reason, kind FROM certificates WHERE status = 'revoked'");
-        return new
+        var rows = await _db.QueryAsync("SELECT id, revoked_reason, kind FROM certificates WHERE status = 'revoked' ORDER BY id");
+        var entries = rows.SelectMany(r => (r["kind"] == "topic" ? new[] { "", "/clr" } : new[] { "" }).Select(sfx => (Id: $"{BaseUrl}/verify/{r["id"]}{sfx}", Reason: r["revoked_reason"] ?? ""))).ToList();
+        var ctx = new JsonArray("https://www.w3.org/ns/credentials/v2", "https://purl.imsglobal.org/spec/ob/v3p0/context-3.0.3.json");
+        var validator = new JsonArray(); var legacy = new JsonArray();
+        foreach (var (id, reason) in entries)
         {
-            context = new[] { "https://www.w3.org/ns/credentials/v2", "https://purl.imsglobal.org/spec/ob/v3p0/context-3.0.3.json" },
-            type = "1EdTechRevocationList", issuer = IssuerId,
-            revokedCredentials = rows.SelectMany(r => (r["kind"] == "topic" ? new[] { "", "/clr" } : new[] { "" }).Select(sfx => new { id = $"{BaseUrl}/verify/{r["id"]}{sfx}", revocationReason = r["revoked_reason"] ?? "" })).ToList(),
-        };
+            validator.Add(new JsonObject { ["id"] = id, ["revoked"] = true });
+            legacy.Add(new JsonObject { ["id"] = id, ["revocation_reason"] = reason });
+        }
+        return new JsonObject { ["context"] = ctx, ["type"] = "1EdTechRevocationList", ["issuer"] = IssuerId, ["revokedCredential"] = validator, ["revoked_credentials"] = legacy };
     }
 
     /// <summary>Widerruft ein Zertifikat (nur Administratoren). Das signierte Badge bleibt erhalten, gilt aber bei jeder Prüfung als widerrufen.</summary>

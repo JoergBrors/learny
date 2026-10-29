@@ -9,6 +9,9 @@ namespace LearnCards.Web.Services.Certificates;
 /// <summary>Ergebnis der Prüfung einer kompakten JWS.</summary>
 public sealed record JwsVerification(bool SignatureValid, string? Error, JsonNode? Payload, string? Kid);
 
+/// <summary>Ergebnis der Prüfung einer ES256-JWS über beliebige Bytes (Integritätsmanifest, ADR 0039): <see cref="PayloadBytes"/> sind die exakt signierten Nutzlast-Bytes.</summary>
+public sealed record BytesJwsVerification(bool SignatureValid, string? Error, byte[]? PayloadBytes, string? Kid, string? Typ);
+
 /// <summary>
 /// Signiert und prüft Open-Badge-Nachweise als VC-JWT (kompakte JWS, ES256 = ECDSA P-256/SHA-256) — mit den Bordmitteln von .NET, ohne Fremdpaket (ADR 0021).
 /// Der private Schlüssel stammt aus <c>BADGE_SIGNING_KEY_PEM</c> (PKCS#8, Secret-Verwaltung/Key Vault) oder <c>BADGE_SIGNING_KEY_FILE</c>; nur in Entwicklung wird
@@ -275,10 +278,52 @@ public sealed class BadgeSigner : IDisposable
             return key.VerifyData(Encoding.ASCII.GetBytes(parts[0] + "." + parts[1]), sig, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation)
                 ? new(true, null, payload, kid) : new(false, "Die Signatur stimmt nicht mit dem Inhalt überein.", payload, kid);
         }
-        catch (Exception e) when (e is FormatException or JsonException or CryptographicException or ArgumentException or NullReferenceException or InvalidOperationException)
+        catch (Exception e) when (e is FormatException or JsonException or CryptographicException or ArgumentException or NullReferenceException or InvalidOperationException or NotSupportedException)
         {
             return new(false, "Die Signatur oder der Schlüssel konnte nicht gelesen werden.", null, null);
         }
+    }
+
+    /// <summary>
+    /// Signiert beliebige Bytes als kompakte ES256-JWS (Profil „learny-integrity-manifest“, ADR 0039): Header <c>alg</c>, <c>kid</c>, <c>typ</c>, <c>cty</c>; Nutzlast = Base64url der exakten Bytes.
+    /// Nutzt denselben Schlüssel wie die Credentials (keine zweite Schlüsselverwaltung); kein VC-JWT-Profil.
+    /// </summary>
+    public string SignBytes(byte[] payload, string typ, string cty, string kidUrl)
+    {
+        var header = new JsonObject { ["alg"] = "ES256", ["kid"] = kidUrl, ["typ"] = typ, ["cty"] = cty };
+        var signingInput = B64(Encoding.UTF8.GetBytes(header.ToJsonString())) + "." + B64(payload);
+        var sig = _key.SignData(Encoding.ASCII.GetBytes(signingInput), HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+        return signingInput + "." + B64(sig);
+    }
+
+    /// <summary>Prüft eine mit <see cref="SignBytes"/> erzeugte JWS mit einem mitgelieferten JWK (Unversehrtheit; die Echtheit des Schlüssels beweist das nicht).</summary>
+    public static BytesJwsVerification VerifyBytesWithJwk(string jws, JsonNode? jwk)
+    {
+        try
+        {
+            if (jwk?["kty"]?.GetValue<string>() != "EC" || jwk["crv"]?.GetValue<string>() != "P-256") return new(false, "Kein ES256-Schlüssel (EC P-256).", null, null, null);
+            var parts = jws.Trim().Split('.');
+            if (parts.Length != 3) return new(false, "Keine kompakte JWS (3 Teile erwartet).", null, null, null);
+            var header = JsonNode.Parse(FromB64(parts[0]));
+            var kid = header?["kid"]?.GetValue<string>(); var typ = header?["typ"]?.GetValue<string>();
+            if (header?["alg"]?.GetValue<string>() != "ES256") return new(false, "Nur ES256 wird akzeptiert.", null, kid, typ);
+            var payload = FromB64Bytes(parts[1]); var sig = FromB64Bytes(parts[2]);
+            if (sig.Length != 64) return new(false, "Signaturlänge ungültig.", payload, kid, typ);
+            using var key = ECDsa.Create(new ECParameters { Curve = ECCurve.NamedCurves.nistP256, Q = new ECPoint { X = FromB64Bytes(jwk["x"]!.GetValue<string>()), Y = FromB64Bytes(jwk["y"]!.GetValue<string>()) } });
+            return key.VerifyData(Encoding.ASCII.GetBytes(parts[0] + "." + parts[1]), sig, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation)
+                ? new(true, null, payload, kid, typ) : new(false, "Die Signatur stimmt nicht mit dem Inhalt überein.", payload, kid, typ);
+        }
+        catch (Exception e) when (e is FormatException or JsonException or CryptographicException or ArgumentException or NullReferenceException or InvalidOperationException or NotSupportedException)
+        {
+            return new(false, "Die Signatur oder der Schlüssel konnte nicht gelesen werden.", null, null, null);
+        }
+    }
+
+    /// <summary>JWK-Thumbprint nach RFC 7638 (SHA-256 über <c>{"crv","kty","x","y"}</c>, Base64url) — Fingerabdruck des öffentlichen Schlüssels.</summary>
+    public static string JwkThumbprint(JsonNode jwk)
+    {
+        var json = $"{{\"crv\":\"{jwk["crv"]!.GetValue<string>()}\",\"kty\":\"{jwk["kty"]!.GetValue<string>()}\",\"x\":\"{jwk["x"]!.GetValue<string>()}\",\"y\":\"{jwk["y"]!.GetValue<string>()}\"}}";
+        return B64(SHA256.HashData(Encoding.UTF8.GetBytes(json)));
     }
 
     /// <summary>Nutzlast (Teil 2) einer kompakten JWS als JSON-Text — ohne Signaturprüfung (nur für bereits geprüfte, gespeicherte Badges).</summary>

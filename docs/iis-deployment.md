@@ -356,3 +356,8 @@ POST https://<mcp-host>/mcp  ohne Token                            → 401 mit W
 Abschnitte zu `POST /auth/callback` (ADR 0036) und zum Sicherheitsupdate: [security-update-cve-2026-111497.md](security-update-cve-2026-111497.md). Tests: `OidcCallbackTests.cs` (Formular, Cookie, Redirect-URI, state-Einmaligkeit, HTTP-Abweisungen).
 
 Der Laufzeitnachweis des Betreibers (w3wp und MCP mit 10.0.14) und offene Betriebsaufgaben (alte Runtimes 10.0.11/9.0.4) stehen in [security-update-cve-2026-111497.md](security-update-cve-2026-111497.md).
+
+**Hinweis (2026-10-29):** Das Segment `keys` ist in `web.config` **nicht** mehr gesperrt, weil die öffentliche kid-URL `/badges/keys/<ID>` sonst von IIS mit HTTP 404.8 beantwortet wird. Schlüsseldateien bleiben über `.pem`/`.key`/`.initialized`, den Speicherort außerhalb des Webroots und die Segmente `data`/`logs` geschützt; „Verify Secure Configuration“ prüft die kid-URL.
+
+
+**OpenTimestamps unter IIS (ADR 0040):** Es wird nichts installiert — kein Python, kein WSL, kein `ots`-Programm. Erforderlich sind ausgehende HTTPS-Verbindungen des Anwendungspools zu den in `OTS_CALENDARS` (`https://calendar|Betreiber`) genannten Calendar-Servern (mindestens zwei benannte Betreiber), optional zu `OTS_BITCOIN_EXPLORER_URL` bzw. einem eigenen Bitcoin-Knoten (`OTS_BITCOIN_RPC_URL`). Ohne diese Variablen bleibt OTS ausgeschaltet; Ausfälle der Calendars verhindern das PDF nicht (dann ohne `.ots`). Ausstehende Nachweise werden per `POST /api/admin/integrity/maintain` (Administrator) aktualisiert; kein Wartungslauf hält eine Anfrage bis zur Bitcoin-Bestätigung offen.

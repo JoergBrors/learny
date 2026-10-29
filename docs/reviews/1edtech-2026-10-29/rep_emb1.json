@@ -1,0 +1,31 @@
+{
+  "id" : "313e19d9-a29d-4ae1-b53f-3e39d5019385",
+  "generated" : "2026-10-29T21:07:10",
+  "generator" : "OB30Inspector",
+  "input" : {
+    "name" : "emb1.jwt",
+    "type" : "JWT"
+  },
+  "summary" : {
+    "outcome" : "VALID",
+    "fatals" : 0,
+    "errors" : 0,
+    "warnings" : 0,
+    "exceptions" : 0,
+    "notRun" : 0,
+    "totalRun" : 14,
+    "valid" : 0
+  },
+  "specification" : {
+    "pid" : "ob30.pid",
+    "shortName" : "ob",
+    "version" : "3.0",
+    "title" : "Open Badges 3.0"
+  },
+  "exceptions" : [ ],
+  "warnings" : [ ],
+  "valids" : [ ],
+  "errors" : [ ],
+  "fatals" : [ ],
+  "notRun" : [ ]
+}

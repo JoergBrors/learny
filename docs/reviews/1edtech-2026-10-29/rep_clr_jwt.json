@@ -1,0 +1,48 @@
+{
+  "id" : "90a6f9f6-3e72-4429-b7b2-dcbecf2315b8",
+  "generated" : "2026-10-29T21:07:09",
+  "generator" : "CLR20Inspector",
+  "input" : {
+    "name" : "clr.jwt",
+    "type" : "JWT"
+  },
+  "summary" : {
+    "outcome" : "EXCEPTION",
+    "fatals" : 0,
+    "errors" : 1,
+    "warnings" : 0,
+    "exceptions" : 1,
+    "notRun" : 0,
+    "totalRun" : 11,
+    "valid" : 0
+  },
+  "specification" : {
+    "pid" : "clr20.pid",
+    "shortName" : "clr",
+    "version" : "2.0",
+    "title" : "Comprehensive Learner Record 2.0"
+  },
+  "exceptions" : [ {
+    "title" : "CLR20Inspector validation",
+    "message" : "Cannot invoke \"java.util.List.stream()\" because the return value of \"org.oneedtech.inspect.vc.util.JsonNodeUtil.asNodeList(com.fasterxml.jackson.databind.JsonNode)\" is null",
+    "location" : {
+      "resource" : "clr.jwt"
+    },
+    "generator" : ".Uncaught.Exception",
+    "detailsMessage" : null
+  } ],
+  "warnings" : [ ],
+  "valids" : [ ],
+  "errors" : [ {
+    "title" : "JSON Schema Validation",
+    "message" : "$.credentialSubject.verifiableCredential: muss für ein und nur ein Schema gültig sein, aber 0 sind gültig",
+    "location" : {
+      "path" : "$.credentialSubject.verifiableCredential",
+      "resource" : "clr.jwt"
+    },
+    "generator" : "JsonSchemaProbe|https://purl.imsglobal.org/spec/clr/v2p0/schema/json/clr_v2p0_clrcredential_schema.json",
+    "detailsMessage" : null
+  } ],
+  "fatals" : [ ],
+  "notRun" : [ ]
+}

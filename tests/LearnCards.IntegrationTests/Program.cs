@@ -219,6 +219,7 @@ try
     await ImageStorageRemoteUnitTests.RunAsync(Check);
     RichTextUnitTests.Run(Check);
     await BlockchainUnitTests.RunAsync(Check, tmp);
+    await IntegrityTests.UnitAsync(Check, tmp);   // Integritätsmanifest, Manifest-JWS, OpenTimestamps (ADR 0039)
     PdfTests.Unit(Check);   // PDF, CMS-Signatur, Umbruch (ADR 0033)
     await TransferIntegrityUnitTests.RunAsync(Check, tmp);   // Fehlerinjektion, Referenzen, Altbestand (ADR 0028)
     WorkflowStructureTests.Run(Check, repoRoot);   // IIS-Workflow: MCP-Neustart (ADR 0029)

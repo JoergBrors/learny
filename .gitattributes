@@ -1,0 +1,2 @@
+# OTS-Testbeweise sind bytegenau (Hash-Bindung): keine Zeilenendumwandlung
+tests/LearnCards.IntegrationTests/fixtures/** -text

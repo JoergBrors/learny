@@ -24,9 +24,9 @@ public static partial class ApiEndpoints
     private static readonly ConcurrentDictionary<string, (int Count, DateTime Window)> PublicHits = new();
 
     /// <summary>Einfache Missbrauchsbremse für anonyme Prüf-Endpunkte (je Adresse und Minute).</summary>
-    private static bool PublicAllowed(HttpContext http, int perMinute)
+    private static bool PublicAllowed(HttpContext http, int perMinute, string bucket = "")
     {
-        var key = http.Connection.RemoteIpAddress?.ToString() ?? "?";
+        var key = bucket + (http.Connection.RemoteIpAddress?.ToString() ?? "?");
         var now = DateTime.UtcNow;
         var entry = PublicHits.AddOrUpdate(key, _ => (1, now), (_, e) => now - e.Window > TimeSpan.FromMinutes(1) ? (1, now) : (e.Count + 1, e.Window));
         return entry.Count <= perMinute;
@@ -84,6 +84,50 @@ public static partial class ApiEndpoints
             return await certs.GetPublicEvidenceJsonAsync(id) is { } json ? Results.Text(json, "application/json") : Results.Json(new { detail = "Kein Prüfungsnachweis vorhanden." }, statusCode: 404);
         }).AllowAnonymous();
 
+        // Achievement-/Criteria-URLs der Credentials (historischer Stand aus dem signierten Credential, ohne Personen-, Ergebnis- und Lerninhalte). Browser erhalten eine lesbare Seite, sonst JSON-LD.
+        foreach (var topic in new[] { false, true })
+            foreach (var criteria in new[] { false, true })
+            {
+                var path = "/badges/achievements/" + (topic ? "topics/" : "") + "{ownerId}/{version:int}" + (criteria ? "/criteria" : "");
+                app.MapGet(path, async Task<IResult> (string ownerId, int version, CertificateService certs, HttpContext http) =>
+                {
+                    if (!PublicAllowed(http, 120, "achievement:")) return Results.StatusCode(429);   // eigener Zähler: Validatoren rufen viele dieser Ressourcen nacheinander ab
+                    if (await certs.GetPublicAchievementAsync(ownerId, version, topic, criteria) is not { } doc) return Results.Json(new { detail = "Unbekannte Ressource." }, statusCode: 404);
+                    http.Response.Headers.CacheControl = "public, max-age=3600";   // unveränderlich: ein Credential trägt genau diese Fassung
+                    var accept = http.Request.Headers.Accept.ToString();
+                    if (accept.Contains("text/html", StringComparison.OrdinalIgnoreCase) && !accept.Contains("json", StringComparison.OrdinalIgnoreCase))
+                    {
+                        Func<string?, string> h = t => System.Net.WebUtility.HtmlEncode(t) ?? "";
+                        var narrative = h((criteria ? doc["narrative"] : doc["criteria"]?["narrative"])?.GetValue<string>() ?? "");
+                        var title = criteria ? "Kriterien" : h(doc["name"]?.GetValue<string>() ?? "Abschluss");
+                        var desc = criteria ? "" : $"<p>{h(doc["description"]?.GetValue<string>() ?? "")}</p><h2>Kriterien</h2>";
+                        return Results.Content($"<!doctype html><html lang=\"de\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{title}</title><body style=\"font-family:system-ui;max-width:42rem;margin:2rem auto;padding:0 1rem\"><h1>{title}</h1>{desc}<p>{narrative}</p></body></html>", "text/html; charset=utf-8");
+                    }
+                    return Results.Text(doc.ToJsonString(), "application/ld+json");
+                }).AllowAnonymous();
+            }
+
+        // Zeitnachweis-Status eines Zertifikats (ADR 0039): nur Digests, Zustand und Blockdaten — keine Personen-, Credential- oder Lerninhalte
+        app.MapGet("/api/public/certificates/{id}/integrity", async (string id, LearnCards.Web.Services.Certificates.Ots.OtsMaintenanceService ots, HttpContext http) =>
+        {
+            if (!PublicAllowed(http, 120)) return Results.StatusCode(429);
+            var versions = await ots.GetVersionsAsync(id);
+            if (versions.Count == 0) return Results.Json(new { detail = "Kein Integritätsnachweis vorhanden." }, statusCode: 404);
+            return Results.Json(new { certificate_id = id, versions = versions.Select(v => new { proof_version = v.ProofVersion, manifest_sha256 = v.ManifestSha256, jws_sha256 = v.JwsSha256, has_ots = v.Ots is not null, anchor_status = v.AnchorStatus,
+                bitcoin_height = v.BitcoinHeight, bitcoin_block_hash = v.BlockHash, bitcoin_block_time = v.BlockTime, confirmations = v.Confirmations, last_checked_at = v.LastCheckedAt, last_verified_at = v.LastVerifiedAt, created_at = v.CreatedAt }) });
+        }).AllowAnonymous();
+
+        // Aktuelle (oder gewählte) OpenTimestamps-Receipt separat abrufbar: das gespeicherte PDF bleibt unverändert (ADR 0033/0040); die Receipt gehört zur eingebetteten Manifest-JWS
+        app.MapGet("/api/public/certificates/{id}/integrity.ots", async (string id, int? version, LearnCards.Web.Services.Certificates.Ots.OtsMaintenanceService ots, HttpContext http) =>
+        {
+            if (!PublicAllowed(http, 120)) return Results.StatusCode(429);
+            var versions = (await ots.GetVersionsAsync(id)).Where(v => v.Ots is not null).ToList();
+            var v = version is { } n ? versions.FirstOrDefault(x => x.ProofVersion == n) : versions.LastOrDefault();
+            if (v is null) return Results.Json(new { detail = "Keine OpenTimestamps-Receipt vorhanden." }, statusCode: 404);
+            http.Response.Headers.ContentDisposition = $"attachment; filename=\"integrity-manifest.jws.v{v.ProofVersion}.ots\"";
+            return Results.File(v.Ots!, "application/vnd.opentimestamps.ots");
+        }).AllowAnonymous();
+
         app.MapGet("/api/public/revocation-list", async (CertificateService certs) => Results.Json(await certs.RevocationListAsync())).AllowAnonymous();
 
         // Prüft ein Badge (JSON mit proof.jwt oder kompakte JWS). Eingabe begrenzt; Antwort ohne Lernendendaten.
@@ -95,7 +139,7 @@ public static partial class ApiEndpoints
             var read = await reader.ReadBlockAsync(buffer, 0, buffer.Length);
             if (read > 200_000) return Results.Json(new { detail = "Die Eingabe ist zu groß (höchstens 200 000 Zeichen)." }, statusCode: 413);
             var v = await certs.VerifyAsync(new string(buffer, 0, read));
-            return Results.Json(new { valid = v.Valid, signature_valid = v.SignatureValid, signature_error = v.SignatureError, content_matches = v.ContentMatches, issuer_valid = v.IssuerValid, known = v.Known, revoked = v.Revoked,
+            return Results.Json(new { valid = v.Valid, signature_valid = v.SignatureValid, signature_error = v.SignatureError, content_matches = v.ContentMatches, embedded_signatures_valid = v.EmbeddedSignaturesValid, embedded_count = v.EmbeddedCount, issuer_valid = v.IssuerValid, known = v.Known, revoked = v.Revoked,
                 revoked_at = v.RevokedAt, revoked_reason = v.RevokedReason, badge_hash = v.BadgeHash, certificate_id = v.CertificateId, number = v.Number, module_name = v.ModuleName, module_version = v.ModuleVersion,
                 issued_at = v.IssuedAt, chain_status = v.ChainStatus, chain_network = v.ChainNetwork, tx_hash = v.TxHash });
         }).AllowAnonymous().DisableAntiforgery();
@@ -317,6 +361,14 @@ public static partial class ApiEndpoints
                 await users.RequireRoleAsync(Uid(http), Roles.Admin);
                 var result = await anchors.ProcessAsync(req?.Force == true, http.RequestAborted);
                 return Results.Ok(new { planned = result.Planned, submitted = result.Submitted, confirmed = result.Confirmed, blocked = result.Blocked, failed = result.Failed, note = result.Note });
+            }));
+
+        // OpenTimestamps-Wartung (ADR 0039): Receipts aktualisieren und Bitcoin-Nachweis prüfen; fügt Proof-Versionen an, ändert nie PDFs. Nur Administratoren (Rolle gegen die DB), nie per MCP-Token.
+        admin.MapPost("/integrity/maintain", (LearnCards.Web.Services.Certificates.Ots.OtsMaintenanceService ots, UserService users, HttpContext http) =>
+            Guard(async () =>
+            {
+                await users.RequireRoleAsync(Uid(http), Roles.Admin);
+                return Results.Ok(new { new_proof_versions = await ots.RunOnceAsync(http.RequestAborted), ots_enabled = ots.Settings.Enabled, problem = ots.Settings.Problem() });
             }));
 
         admin.MapPost("/blockchain/batches/{id}/retry", (string id, AnchorService anchors, HttpContext http) =>

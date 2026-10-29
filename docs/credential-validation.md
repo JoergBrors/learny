@@ -161,3 +161,82 @@ Die Detailansicht trennt: Signaturformat, Signatur (lokal geprüft), Aussteller,
 ### Stand der externen Prüfung
 
 Neu ausgestellte Badges mit der korrigierten `kid` wurden **noch nicht** erneut beim Validator geprüft. Voraussetzung: öffentlich erreichbare HTTPS-Instanz (`PUBLIC_BASE_URL`), erreichbare `/badges/keys/<ID>`, `/.well-known/jwks.json` und `/api/public/revocation-list`. Das JSON bleibt beim Validator ohne Proof ein Fehler (siehe oben). Keine 1EdTech-Zertifizierung.
+
+## Validierung vom 2026-10-29 (fünfte Runde): kid-404, Widerrufsliste, Achievement-URLs, CLR-JWT-Ausnahme
+
+Quelle der Validator-Analyse: `1EdTech/digital-credentials-public-validator` (Stand `67532ac`, 2026-10-27), **nur gelesen**. Die gehostete Instanz `vc.1ed.tech/validate` antwortete aus der Ausführungsumgebung mit HTTP 500; ein lokaler Build des Fremdcodes wurde nicht ausgeführt. **Ein erneuter externer Lauf ist daher offen** (Anleitung: „Manuelle Abnahme“ oben). Keine 1EdTech-Zertifizierung.
+
+### Bereits geprüfte Eigenschaften (Berichte vom 29.10.)
+
+Master-Badge-JWT, CLR-JWT und drei eingebettete Badge-JWT: ES256-Signatur gültig; öffentlicher Schlüssel = JWKS-Eintrag; JSON und dekodierte JWT-Inhalte gleich. Diese Befunde sind automatisiert abgedeckt (Integrationstests „D1–D3“, „CLR-JWT B–E“, „kid: …“; unabhängige `ECDsa`-Prüfung ohne Learny-Verifier).
+
+### 1. `kid`-URL `/badges/keys/{id}` lieferte 404 — Ursache belegt (Betriebs-/Konfigurationsfehler)
+
+Die Route ist im Code vorhanden (`CertificateEndpoints.cs`). Die Live-Antwort (`GET https://learny.brors.date/badges/keys/bb771e1b1ffa0a67`) ist die **IIS-Detailseite „404.8 – Not Found“** (Hidden Segment) mit `Physical Path …\LearnCards\badges\keys\…`, nicht eine Antwort der Anwendung. Ursache: `web.config` sperrte per `requestFiltering/hiddenSegments` das Segment `keys` **an beliebiger Stelle der URL** — also auch `/badges/keys/…`. Routing, Authentifizierung und Schlüssel-ID waren korrekt (das JWKS liefert dieselbe `kid`); Tracking-Parameter spielen keine Rolle (mit/ohne identisch 404).
+
+**Korrektur:** Das Segment `keys` ist nicht mehr gesperrt (`web.config`). Schlüsseldateien liegen ohnehin außerhalb des Webroots (ADR 0023) und bleiben über die Dateiendungen `.pem`/`.key`/`.initialized` sowie die Segmente `data`/`logs` (u. a. `data\keys`) gesperrt. Der Workflow-Schritt „Verify Secure Configuration“ prüft jetzt zusätzlich, dass `/badges/keys/<kid>` ein einzelnes EC-P-256-JWK ohne privaten Anteil liefert, das dem JWKS-Eintrag entspricht. **Wirksam erst nach dem nächsten Deployment** (nicht ausgelöst).
+
+### 2. Widerrufsliste: `revoked_credentials` statt `revokedCredential`
+
+Der Validator (`RevocationListProbe`) liest `revokedCredential`. Die Antwort enthält jetzt **beide** Felder aus demselben Register: `revokedCredential: [{id, revoked: true}]` (Validator) und `revoked_credentials: [{id, revocation_reason}]` (bestehende Clients). Master-Badge und CLR werden gemeinsam gelistet (ADR 0032), Modulnachweise nie automatisch. Ist die Liste nicht erreichbar, bleibt der Status „nicht überprüfbar“ (keine bestätigte Gesamtgültigkeit). Test: „Sperrliste: Feld revokedCredential …“.
+
+### 3. Achievement-/Criteria-URLs (404)
+
+`achievement.id` und `criteria.id` sind in Open Badges 3.0 URIs, die auflösbar sein *sollten*; ein 404 darauf ist kein Pflichtfehler des Validators. Learny veröffentlicht sie jetzt dennoch: `/badges/achievements/{moduleId}/{version}[/criteria]` und `/badges/achievements/topics/{topicId}/{version}[/criteria]` (JSON-LD; Browser erhalten eine lesbare Seite). Der Inhalt stammt **ausschließlich aus dem bei der Ausstellung signierten Credential** (historischer Stand, nichts aus aktuellen Einstellungen); veröffentlicht werden nur Typ, Name, Beschreibung, Version und Kriterientext — keine Kompetenzen, Ergebnisse, Personen- oder Lerninhalte. Unbekannte IDs: 404. Eigener Rate-Limit-Zähler. Test: „achievement.id und criteria.id sind öffentlich abrufbar …“.
+
+### 4. Evidence-Endpunkt
+
+`GET /api/public/certificates/{id}/evidence` ist unverändert (Test E3: Snapshot-Hash, keine Antworten/Lernendendaten).
+
+### 5. CLR-JWT: Schemafehler und Java-Exception — Ursache aus dem Quelltext belegt
+
+| Beobachtung | Ursache | Zuordnung |
+|---|---|---|
+| `$.credentialSubject.verifiableCredential: must be valid to one and only one schema, but 0 are valid` | `VCVersion.VCDMv2p0` ordnet `ClrCredential` dem **JSON**-Schema `clr_v2p0_clrcredential_schema.json` zu, auch für ein aus einem JWT extrahiertes Credential. Dort ist `ClrSubject.verifiableCredential` `oneOf [VerifiableCredential-Objekt, Array davon]`; eine kompakte JWS (String) ist **nicht** zulässig. CLR 2.0 B.2.2 (`ClrSubjectJwtPayload`) schreibt für die JWT-Form aber gerade `CompactJws` vor. Ein JWT-Payload-Schema existiert nicht (`…jwt_payload_schema.json` → HTTP 404). | **Validator** (falsche Schemaauswahl) |
+| `Cannot invoke "java.util.List.stream()" because "JsonNodeUtil.asNodeList(…)" is null` | `CLR20Inspector.run` („embedded subject credentials“) übergibt jeden Eintrag von `$.credentialSubject.verifiableCredential` an `VerifiableCredential.Builder.build()`. Bei einem String-Knoten liefert `getJsonData().get("@context")` `null`; `VCVersion.of(null)` ruft `JsonNodeUtil.asNodeList(null).stream()` auf — `asNodeList(JsonNode)` gibt für `null` selbst `null` zurück → NullPointerException (als `NO_UNCAUGHT_EXCEPTIONS` gemeldet). Eingebettete Compact-JWS werden nicht als signierte AchievementCredentials erkannt und nicht einzeln geprüft. | **Validator** (fehlende JWT-Unterstützung, fehlende Null-Behandlung) |
+| Hinweis auf erwartetes Muster | Die Referenzdatei `inspector-clr/src/test/resources/clr20/simple.jwt` enthält selbst eine Liste mit **einer kompakten JWS** in `credentialSubject.verifiableCredential`; `CLR20Tests` hat keinen JWT-Testfall. | Testlücke im Validator |
+
+Kein Learny-Datenmodellfehler: Die Struktur wurde gegen CLR 2.0 §7.2 und B.2.1/B.2.2 geprüft (Test „CLR-JWT: Credential im Claim vc, drei eingebettete kompakte JWS …“). Das JSON enthält die eingebetteten Credentials als Objekte (schemakonform für die JSON-Form), das JWT als Compact JWS. **Das Learny-Modell wird nicht geändert, um den Validatorfehler zu umgehen.** Die Zuordnung beruht auf dem Quelltext, nicht auf einer Ausführung des Validators.
+
+Learny-seitig ergänzt: `CertificateService.VerifyAsync` prüft eingebettete JWS eines CLR-JWT jetzt **einzeln** (`embedded_signatures_valid`, `embedded_count`); eine ungültige, beschädigte oder unvollständige eingebettete JWS macht das Gesamtergebnis ungültig, auch bei gültiger äußerer Signatur.
+
+Fallmatrix (Learny-Tests `CLR-JWT …`): A CLR-JSON mit Objekten (unsigniert, kein Proof — erwartungsgemäß) · B CLR-JWT mit Compact-JWS → gültig · C ungültige eingebettete Signatur → ungültig · D Pflichtfeld `type` fehlt → ungültig · E beschädigte JWS → ungültig · Mischfall (eine gültige, eine fehlerhafte) → ungültig. Nicht automatisiert: der Lauf des Java-Validators.
+
+### 6. Weitere Befunde der Berichte
+
+- *CLR-JSON/CLR20Inspector „missing a proof“ (4×)*: erwartet für die unsignierte JSON-Darstellung (JWT-Profil, ADR 0038); kein künstlicher `DataIntegrityProof`.
+- *CLR-JSON/OB30Inspector*: falscher Validator für den Typ `ClrCredential`; keine Modelländerung.
+
+### 7. Verbleibende Einschränkungen
+
+Die externe Gesamtprüfung des CLR-JWT bleibt wegen des Validatorfehlers offen; eingebettete Modul-JWT lassen sich einzeln mit dem `OB30Inspector` (JWT-Eingabe) prüfen. Issue-Entwurf: [reviews/2026-10-29-1edtech-clr-jwt-issue.md](reviews/2026-10-29-1edtech-clr-jwt-issue.md).
+
+## Restabnahme 2026-10-29 (sechste Runde): offizieller 1EdTech-Validator tatsächlich ausgeführt
+
+**Validator:** `1EdTech/digital-credentials-public-validator`, Commit `67532ac` (2026-10-27), lokal gebaut (`mvn -DskipTests clean install`, Maven 3.9.9, JDK 21) und über die dokumentierte REST-API gestartet (`GET /api/validators`, `POST /api/validate?validatorId=…` mit Multipart-Feld `file`; Spezifikation aus `/v3/api-docs`). Die öffentliche Instanz `vc.1ed.tech/validate` antwortete weiterhin mit HTTP 500. Alle Berichte liegen als JSON unter [reviews/1edtech-2026-10-29/](reviews/1edtech-2026-10-29/) (nur Testsubjekte, keine Personendaten).
+
+**Aufbau:** Die Learny-Instanz lief lokal unter `http://localhost:5099` (`PUBLIC_BASE_URL` darauf gesetzt, damit der Validator `kid`, JWKS und Widerrufsliste erreicht), Testnachweis „Themenabschluss“ per Administrator ausgestellt (Master-Badge, CLR, drei eingebettete Badges). Die Produktionsinstanz `learny.brors.date` liefert **weiterhin** HTTP 404.8 für die kid-URL und `revoked_credentials` ohne `revokedCredential` — die Korrekturen sind dort **nicht deployt** (kein Deployment ausgelöst). Eine externe Prüfung gegen die Produktions-Credentials ist bis dahin nicht möglich.
+
+| Fall | Eingabe / Validator | Ergebnis |
+|---|---|---|
+| A Master-Badge | JWT / `OB30Inspector` | **VALID** — 14 Probes, 0 Fatals, 0 Fehler, 0 Warnungen, 0 Exceptions (JWT-Profil, ES256-Signatur, Schlüsselauflösung über die kid-URL, Aussteller, Widerrufsliste) |
+| B CLR | JWT / `CLR20Inspector` | **EXCEPTION** — 1 Fehler (`$.credentialSubject.verifiableCredential: must be valid to one and only one schema, but 0 are valid`) und 1 Exception (`Cannot invoke "java.util.List.stream()" because the return value of "JsonNodeUtil.asNodeList(JsonNode)" is null`); 11 Probes. Beides **reproduziert**. |
+| C Eingebettete Badges (3×) | JWT / `OB30Inspector` | je **VALID** — 14 Probes, 0 Fehler/Warnungen/Exceptions |
+| D Master-Badge | JSON / `OB30Inspector` | ERROR: „The verifiable credential is missing a proof.“ (erwartet: unsignierte JSON-Darstellung, kein erfundener Proof) |
+| E CLR | JSON / `CLR20Inspector` | 4× „missing a proof“ (Master + 3 eingebettete), **kein Schemafehler**, keine Exception; 50 Probes — die JSON-Form mit Credential-Objekten besteht das CLR-Schema |
+| F Widerruf | Master-Badge-JWT nach Widerruf / `OB30Inspector` | **FATAL „Credential has been revoked“** — der Validator liest `revokedCredential` der Learny-Liste korrekt |
+| Kontrolle | Referenzdatei `clr20/simple.jwt` des Validators selbst / `CLR20Inspector` | gleiche Exception und gleicher Schemafehler (die Datei ist ein v1.1-AchievementCredential mit eingebetteter JWS, also ein unvollkommener Kontrollfall — sie belegt aber, dass die Exception nicht an Learny-Daten hängt) |
+
+**Ursache B (belegt durch Lauf + Quelltext, siehe oben „fünfte Runde“):** Der Vergleich D/E ↔ B isoliert sie: Dieselben Credentials bestehen die CLR-Schemaprüfung als JSON-Objekte (E) und scheitern als CLR-JWT mit Compact-JWS (B), obwohl CLR 2.0 B.2.2 für die JWT-Form gerade Compact-JWS vorschreibt; die nachfolgende Exception entsteht beim Aufbau eines `VerifiableCredential` aus dem String-Knoten (`VCVersion.of(null)`). Die eingebetteten Badges bestehen einzeln (C). Learny-Daten wurden nicht geändert.
+
+**Status der externen Konformität:** Master-Badge-JWT und alle eingebetteten Modul-JWT bestehen den offiziellen OB30Inspector. Für das CLR-JWT gilt: *Interne Prüfung bestanden; externe 1EdTech-Konformitätsprüfung wegen dokumentiertem Validatorfehler nicht abschließend möglich.* Eine vollständige externe Abnahme wird **nicht** behauptet. Issue-Entwurf: [reviews/2026-10-29-1edtech-clr-jwt-issue.md](reviews/2026-10-29-1edtech-clr-jwt-issue.md).
+
+**Öffentliche Endpunkte der Produktionsinstanz (Stand 2026-10-29, vor Deployment):** `/.well-known/jwks.json` 200 `application/json` (JWKS, ein EC-P-256-Schlüssel, kid `bb771e1b1ffa0a67`); `/badges/issuer` 200 (Profil, JWKS eingebettet); `/api/public/revocation-list` 200 (nur `revoked_credentials`); `/badges/keys/bb771e1b1ffa0a67` **404 (IIS 404.8)**. Lokal (korrigierte Fassung): kid-URL 200 `application/jwk+json` mit einem JWK, identisch zum JWKS-Eintrag; Liste mit `revokedCredential` und `revoked_credentials`.
+
+
+**Hinweis (ADR 0040):** Die OpenTimestamps-Stempelung benötigt keinen externen Client mehr (nativer Client in der Anwendung); das berührt die 1EdTech-Validierung nicht, die Credentials und ihre Signaturen bleiben unverändert.
+
+
+### Offene produktive Punkte (Stand 2026-10-29, unabhängig vom OpenTimestamps-Auftrag)
+
+OpenTimestamps betrifft nur den Zeitnachweis der PDF-Pakete und behebt **keinen** der folgenden Punkte; sie bleiben offen: (1) die produktive kid-URL `/badges/keys/<id>` liefert wegen der IIS-Sperre des Segments `keys` HTTP 404.8 (Korrektur im Repository, nicht deployt); (2) die produktive Widerrufsliste enthält noch nicht das vom Validator erwartete Feld `revokedCredential` (Korrektur im Repository, nicht deployt); (3) das CLR-JWT scheitert im offiziellen 1EdTech-Validator wegen eines dokumentierten Validatorfehlers; (4) eine produktive Gesamtvalidierung steht aus. Es wird keine vollständige 1EdTech-Konformität behauptet. An Credentials und CLR-JWTs wurde in diesem Auftrag nichts geändert.

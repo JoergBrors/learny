@@ -52,6 +52,7 @@ public class AppConfig
 
     // PDF-Signatur der Zertifikate (ADR 0033)
     public PdfSigningSettings PdfSigning { get; set; } = new();
+    public OtsSettings Ots { get; set; } = new();   // OpenTimestamps (ADR 0039)
 
     // Learny-PKI (ADR 0035)
     public PkiSettings Pki { get; set; } = new();
@@ -136,6 +137,7 @@ public class AppConfig
         cfg.Pki = PkiSettings.Load(Path.GetFullPath("data"));
         if (cfg.Pki.PublicUrl.Length == 0) cfg.Pki.PublicUrl = cfg.Blockchain.PublicBaseUrl;   // PKI_PUBLIC_URL fehlt: die bestehende PUBLIC_BASE_URL gilt
         if (cfg.Pki.Validate() is { Count: > 0 } pkiErrors) throw new InvalidOperationException("Ungültige PKI-Konfiguration: " + string.Join(" ", pkiErrors));
+        cfg.Ots = OtsSettings.Load();
         cfg.PdfSigning = PdfSigningSettings.Load(Path.GetFullPath("data"), envName.Equals("Development", StringComparison.OrdinalIgnoreCase));
 
         // ── Datenbank-Provider bestimmen ────────────────────────────────

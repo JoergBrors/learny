@@ -188,10 +188,28 @@ public static class TopicCredentialTests
 
         await AchievementTests.RunAsync(lea, oth, newClient, certId, moduleCertIds[0], check);
 
+        // ─── Achievement-/Criteria-URLs (ADR 0021/0032): lösen sich öffentlich auf, ohne Personen-/Ergebnisdaten ───
+        foreach (var (label, vc) in new[] { ("Master-Badge", master!), ("Modul-Badge", embedded.First(v => S(v, "credentialSubject.achievement.name") == "TC-A")!) })
+        {
+            var aId = S(vc, "credentialSubject.achievement.id"); var cId = S(vc, "credentialSubject.achievement.criteria.id");
+            var aRes = await newClient().GetAsync(new Uri(aId).AbsolutePath); var cRes = await newClient().GetAsync(new Uri(cId).AbsolutePath);
+            var aBody = await aRes.Content.ReadAsStringAsync(); var aj = JsonNode.Parse(aBody)!; var cj = JsonNode.Parse(await cRes.Content.ReadAsStringAsync())!;
+            check(aRes.IsSuccessStatusCode && cRes.IsSuccessStatusCode && S(aj, "id") == aId && S(aj, "type").Contains("Achievement") && S(aj, "criteria.id") == cId && S(cj, "id") == cId && S(cj, "narrative").Length > 0
+                  && S(aj, "name") == S(vc, "credentialSubject.achievement.name") && !aBody.Contains("identifier") && !aBody.Contains("result") && !aBody.Contains(S(vc, "credentialSubject.id")),
+                $"{label}: achievement.id und criteria.id sind öffentlich abrufbar (id stimmt, Kriterientext vorhanden, keine Lernenden-/Ergebnisdaten)");
+        }
+        check((await newClient().GetAsync($"/badges/achievements/{Guid.NewGuid()}/1")).StatusCode == System.Net.HttpStatusCode.NotFound && (await newClient().GetAsync("/badges/achievements/topics/nicht-vorhanden/1")).StatusCode == System.Net.HttpStatusCode.NotFound,
+            "Achievement-URL: unbekannte Ressource liefert 404");
+
         // ─── Widerruf ───
         var rev = await admin.PostAsync($"/api/admin/certificates/{certId}/revoke", Body(new { reason = "Testwiderruf" }));
         var list = await J(await newClient().GetAsync("/api/public/revocation-list"));
         var revoked = list!["revoked_credentials"]!.AsArray().Select(r => S(r, "id")).ToList();
+        // Feld des 1EdTech-Validators (RevocationListProbe liest „revokedCredential“, Einträge {id, revoked:true}); das bisherige Feld bleibt erhalten
+        var vRevoked = list["revokedCredential"]!.AsArray();
+        check(vRevoked.Count == list["revoked_credentials"]!.AsArray().Count && vRevoked.Count >= 2 && vRevoked.All(r => r!["revoked"]!.GetValue<bool>() && S(r, "id").StartsWith("http"))
+              && vRevoked.Any(r => S(r, "id").EndsWith($"/verify/{certId}")) && vRevoked.Any(r => S(r, "id").EndsWith($"/verify/{certId}/clr")) && !vRevoked.Any(r => S(r, "id").Contains(moduleCertIds[0])),
+            "Sperrliste: Feld revokedCredential ([{id, revoked:true}]) aus dem Register, revoked_credentials bleibt; Modulnachweise nicht mitwiderrufen");
         var vMasterRev = await VerifyAsync(master); var vClrRev = await VerifyAsync(clr);
         check(rev.IsSuccessStatusCode && revoked.Any(r => r.EndsWith($"/verify/{certId}")) && revoked.Any(r => r.EndsWith($"/verify/{certId}/clr")) && S(vMasterRev, "revoked") == "true" && S(vClrRev, "revoked") == "true" && S(vClrRev, "valid") == "false",
             "F1 Widerruf des Themenabschlusses: Master-Badge und CLR gelten als widerrufen (Sperrliste, Prüfung); Modulabschlüsse bleiben einzeln gültig");

@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using LearnCards.Web.Data;
 using LearnCards.Web.Domain;
 using LearnCards.Web.Infrastructure;
+using LearnCards.Web.Services.Certificates.Ots;
 using LearnCards.Web.Services.Pdf;
 
 namespace LearnCards.Web.Services.Certificates;
@@ -22,11 +23,15 @@ public sealed class CertificatePdfService
     private readonly CertificateService _certs;
     private readonly CompetencyService _competencies;
     private readonly PdfSigningProvider _signing;
+    private readonly OtsMaintenanceService _ots;
 
-    public CertificatePdfService(IDatabase db, CertificateService certs, CompetencyService competencies, PdfSigningProvider signing)
+    public CertificatePdfService(IDatabase db, CertificateService certs, CompetencyService competencies, PdfSigningProvider signing, OtsMaintenanceService ots)
     {
-        _db = db; _certs = certs; _competencies = competencies; _signing = signing;
+        _db = db; _certs = certs; _competencies = competencies; _signing = signing; _ots = ots;
     }
+
+    /// <summary>Beim Erzeugen entstandene Daten des Integritätsmanifests (für die Ablage der Proof-Version 1).</summary>
+    public sealed record IntegrityBuild(byte[] ManifestBytes, string Jws, StampResult Stamp);
 
     private static string Day(DateTime t) => t.ToUniversalTime().ToString("dd.MM.yyyy", CultureInfo.InvariantCulture);
     private static string Pct(double v) => v.ToString("0.#", CultureInfo.InvariantCulture) + " %";
@@ -41,7 +46,8 @@ public sealed class CertificatePdfService
         if (rows.Count > 0) return new(Convert.FromBase64String(rows[0]["pdf_base64"] ?? ""), rows[0]["pdf_sha256"] ?? "", name, false);
 
         var options = await _signing.GetOptionsAsync();   // wirft PdfSigningUnavailableException, wenn kein Signaturzertifikat konfiguriert ist (fail-closed)
-        var pdf = await BuildAsync(cert, options, ct);
+        IntegrityBuild? integrity = null;
+        var pdf = await BuildAsync(cert, options, ct, b => integrity = b);
         var sha = Convert.ToHexString(SHA256.HashData(pdf)).ToLowerInvariant();
         try
         {
@@ -56,6 +62,7 @@ public sealed class CertificatePdfService
             if (raced.Count > 0) return new(Convert.FromBase64String(raced[0]["pdf_base64"] ?? ""), raced[0]["pdf_sha256"] ?? "", name, false);
             throw;
         }
+        if (integrity is not null) await _ots.RecordInitialAsync(cert.Id, integrity.ManifestBytes, integrity.Jws, integrity.Stamp, sha);   // Proof-Version 1 (ADR 0039)
         await _certs.RecordPdfIssuedAsync(userId, cert, sha);
         return new(pdf, sha, name, true);
     }
@@ -64,7 +71,7 @@ public sealed class CertificatePdfService
 
     private sealed record ModuleCredentialInfo(Certificate Cert, JsonObject Signed, JsonNode? Snapshot);
 
-    public async Task<byte[]> BuildAsync(Certificate cert, PdfSignOptions options, CancellationToken ct = default)
+    public async Task<byte[]> BuildAsync(Certificate cert, PdfSignOptions options, CancellationToken ct = default, Action<IntegrityBuild>? integrityOut = null)
     {
         var verifyUrl = $"{_certs.BaseUrl}/verify/{cert.Id}";
         var doc = new PdfBuilder
@@ -94,6 +101,19 @@ public sealed class CertificatePdfService
         // Anhänge: verification.json zuletzt (listet die Hashes aller übrigen Dateien) und öffentlicher Schlüssel
         files.Add(new PdfEmbeddedFile("public-key.jwk", Encoding.UTF8.GetBytes(_certs.Signer.PublicJwk().ToJsonString(new() { WriteIndented = true })), "application/jwk+json", "Supplement", "Öffentlicher Schlüssel (ES256) zur Prüfung der Credential-Signaturen – Echtheit nur über die Aussteller-Adresse bestätigt"));
         files.Add(BuildVerificationFile(cert, files, moduleInfos));
+
+        // Signiertes Integritätsmanifest (ADR 0039): schützt alle Nutzdateien einschließlich verification.json; erst danach Manifest-JWS, Rückprobe, optional OTS-Receipt
+        var jwk = _certs.Signer.PublicJwk(); var kidUrl = _certs.JwtKeyId;
+        var manifestBytes = IntegrityManifest.Build(cert, verifyUrl, _certs.IssuerId, cert.IssuedAt, jwk, kidUrl, _certs.BaseUrl + "/.well-known/jwks.json", files);
+        var manifestJws = _certs.Signer.SignBytes(manifestBytes, IntegrityManifest.JwsTyp, IntegrityManifest.JwsCty, kidUrl);
+        var back = BadgeSigner.VerifyBytesWithJwk(manifestJws, jwk);
+        if (!back.SignatureValid || back.PayloadBytes is null || !manifestBytes.AsSpan().SequenceEqual(back.PayloadBytes)) throw new InvalidOperationException("Integritätsmanifest: Rückprüfung der Manifest-JWS fehlgeschlagen — kein PDF wird erzeugt.");
+        var jwsBytes = Encoding.ASCII.GetBytes(manifestJws);
+        files.Add(new PdfEmbeddedFile(IntegrityManifest.ManifestName, manifestBytes, "application/json", "Supplement", "Integritätsmanifest: Dateiinventar mit SHA-256 der Originalbytes (durch die Manifest-JWS signiert)"));
+        files.Add(new PdfEmbeddedFile(IntegrityManifest.JwsName, jwsBytes, "application/jose", "Supplement", "Kompakte JWS (ES256) über die exakten Bytes von integrity-manifest.json"));
+        var stamp = await _ots.TryStampAsync(jwsBytes, ct);   // optional; ein Ausfall verhindert das PDF nicht und gilt nie als Nachweis
+        if (stamp.Ots is not null) files.Add(new PdfEmbeddedFile(IntegrityManifest.OtsName, stamp.Ots, "application/vnd.opentimestamps.ots", "Supplement", "OpenTimestamps-Receipt (Bitcoin-Zeitnachweis) über SHA-256 der Datei integrity-manifest.jws"));
+        integrityOut?.Invoke(new IntegrityBuild(manifestBytes, manifestJws, stamp));
         foreach (var f in files) doc.Files.Add(f);
 
         // Fuß: Seitenzahl und Kennung auf jeder Seite (erst jetzt bekannt)
