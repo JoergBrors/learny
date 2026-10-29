@@ -42,3 +42,7 @@ Für die externe Validierung (1EdTech) und für den Betrieb fehlten drei Dinge: 
 - PostgreSQL-Prüfung deckte zwei Fehler auf (Index vor Spalte bei Altdatenbanken; `LOWER(uuid)`); beide behoben, siehe [credential-validation.md](../credential-validation.md).
 - Datenschutzabwägung (Register zeigt Empfänger und Titel auch privater Module) und offene Betreiberentscheidung dort dokumentiert.
 - Die Missbrauchsbremse der öffentlichen Endpunkte bleibt unverändert; Tests nutzen eine eigene Client-Adresse.
+
+## Nachtrag 2026-10-29
+
+Das Register zeigt je Nachweis die Formatversion (Format 1 = Altbestand, Format 2 = VC-JWT-Profil, ADR 0038). Die Widerrufsliste (`/api/public/revocation-list`) enthält zusätzlich zu `revoked_credentials` das vom Validator gelesene Feld `revokedCredential: [{id, revoked}]`; Master-Badge und CLR werden gemeinsam gelistet, Modulnachweise nie automatisch (ADR 0032).

@@ -37,3 +37,7 @@ Das bisherige „PDF“ war eine druckbare HTML-Seite ohne kryptografischen Wert
 
 - `Services/Pdf/*` (`PdfBuilder`, `PdfFlow`, `PdfCms`, `PdfInspector`, `QrCode`), `Services/Certificates/CertificatePdfService.cs`, `PdfVerificationService.cs`
 - `Infrastructure/PdfSigningSettings.cs` (`PdfSigningProvider`), `Api/CertificateEndpoints.cs`, `Components/Pages/Verify.razor`, `Profile.razor`
+
+## Nachtrag 2026-10-29 (ADR 0039/0040)
+
+Neue PDFs enthalten zusätzlich `integrity-manifest.json`, `integrity-manifest.jws` und optional `integrity-manifest.jws.ots` (Zeitnachweis, nativer OpenTimestamps-Client). Die Reihenfolge bleibt: Nutzdateien → Manifest → Manifest-JWS (mit Rückprobe) → OTS-Stempel → Einbetten → CMS/CAdES-Signatur zuletzt → unveränderliche Ablage. Gespeicherte PDFs werden nie verändert; aktualisierte Receipts sind separat abrufbar (`GET /api/public/certificates/{id}/integrity.ots`). Ältere PDFs ohne Manifest bleiben vollständig prüfbar.

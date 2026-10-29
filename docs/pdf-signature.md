@@ -81,7 +81,7 @@ Geschützter Umfang: Themenabschluss `clr-credential.json|.jwt`, `master-badge.j
 
 | Variable | Bedeutung |
 |---|---|
-| `OTS_ENABLED` | `true` schaltet das Stempeln ein. |
+| `OTS_ENABLED` | `true` schaltet das Stempeln ein. **Seit v0.1.22 standardmäßig `true`** in `deploy/iis/web.env` und in den Docker-Compose-Dateien; ohne die Variable (z. B. eigene Starts) bleibt es aus. |
 | *(entfällt)* `OTS_CLIENT_PATH` | Seit ADR 0040 gibt es keinen externen Client mehr; die Variable wird ignoriert. |
 | `OTS_CALENDARS` | Kommagetrennte Einträge `https://calendar\|Betreiber`, mindestens zwei Calendars **unterschiedlicher, benannter Betreiber**. Keine Standardwerte; der Betreiber der Installation benennt den Betreiber (er wird nicht aus dem Hostnamen geraten). Einträge ohne Betreiber gelten als unbekannt und **nicht** als unabhängig; antworten nur Calendars eines Betreibers, entsteht keine Receipt. Belege: Abschnitt „Betreiberzuordnung“. |
 | `OTS_TIMEOUT_SEC` | Zeitlimit je Clientaufruf (Standard 60). |
@@ -97,7 +97,7 @@ Geschützter Umfang: Themenabschluss `clr-credential.json|.jwt`, `master-badge.j
 
 ### Proof-Upgrade
 
-`POST /api/admin/integrity/maintain` (Administrator) bzw. `OtsMaintenanceService.RunOnceAsync` lädt die jüngsten Proof-Versionen mit Receipt, führt `ots upgrade` auf einer Kopie aus, prüft den Bitcoin-Nachweis und legt bei Änderung eine **neue Proof-Version** in `integrity_proofs` an. Ursprüngliche Receipt und gespeichertes PDF bleiben unverändert. Öffentlicher Status ohne Personendaten: `GET /api/public/certificates/{id}/integrity`. *Noch nicht umgesetzt:* automatisches Einbetten eines aktualisierten Proofs in ein neues PDF-Artefakt (dann neu CMS-signieren, altes PDF behalten).
+`POST /api/admin/integrity/maintain` (Administrator) bzw. `OtsMaintenanceService.RunOnceAsync` lädt die jüngsten Proof-Versionen mit Receipt, führt `ots upgrade` auf einer Kopie aus, prüft den Bitcoin-Nachweis und legt bei Änderung eine **neue Proof-Version** in `integrity_proofs` an. Ursprüngliche Receipt und gespeichertes PDF bleiben unverändert. Öffentlicher Status ohne Personendaten: `GET /api/public/certificates/{id}/integrity`. *Bewusst nicht umgesetzt:* automatisches Einbetten eines aktualisierten Proofs in ein neues PDF-Artefakt; stattdessen ist die aktuelle Receipt separat abrufbar (siehe unten), das gespeicherte PDF bleibt unverändert.
 
 ### Grenzen
 
@@ -115,6 +115,8 @@ Der Zeitnachweis bestätigt die Existenz der gebundenen Daten spätestens zum Bi
 Praktisch erprobt: `verify_package.py` gegen die Anhänge eines im Integrationstest erzeugten Themenabschluss-PDFs (alle Prüfungen gültig; manipulierte Datei und zusätzlicher Anhang → Exit-Code 1). Die Bitcoin-Schritte wurden mangels Knoten nicht gegen echte Blöcke ausgeführt.
 
 ## Reale OpenTimestamps-Ausführung (2026-10-29)
+
+> Historisches Prüfprotokoll mit dem damaligen CLI-Client unter WSL (v0.7.2). Seit ADR 0040 stempelt die Anwendung **nativ**; der offizielle Client dient nur noch als Gegenprobe auf Entwicklungsrechnern.
 
 Offizieller Client `opentimestamps-client` **v0.7.2** (`ots --version`), in einer isolierten virtuellen Umgebung unter WSL/Debian installiert (unter Windows lädt `python-bitcoinlib` OpenSSL nicht). Die Anwendung ruft ihn über `OTS_CLIENT_PATH` auf (Wrapper `wsl.exe … ots %*`; `CliOtsClient` übergibt Dateien relativ zum leeren Arbeitsverzeichnis). Calendars: `alice.btc.calendar.opentimestamps.org`, `finney.calendar.eternitywall.com`, `btc.calendar.catallaxy.com` (alice: Peter Todd, finney: Eternity Wall, catallaxy: Catallaxy — drei Betreiber).
 

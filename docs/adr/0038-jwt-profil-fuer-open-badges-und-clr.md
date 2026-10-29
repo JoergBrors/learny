@@ -53,3 +53,11 @@ Die Fehlermeldung `JwtProof2020` ist damit **verursachte** Fehlkonstruktion (und
 - `kid` neuer Credentials = `<PUBLIC_BASE_URL>/badges/keys/<Schlüssel-ID>`, ein Endpunkt, der genau ein JWK liefert (der Validator liest die `kid`-URL direkt als JWK). Die ältere `…/badges/issuer#<ID>` lieferte das Ausstellerprofil; sie bleibt für Altbestand gültig (`BadgeSigner.Verify` akzeptiert beide Formen).
 - **RS256 ist nicht erforderlich:** Der Validator erlaubt RS256 und ES256 (Quelltext `ExternalProofProbe`); ES256 bleibt. Die Aussage „ES256 nicht belegt“ oben ist damit für diesen Validator belegt widerlegt.
 - JSON-Darstellung = unsignierte Datendarstellung (Header `X-Credential-Representation: unsigned-json`); ein eigenständig signiertes JSON-LD (DataIntegrityProof) bleibt außerhalb des Profils.
+
+## Nachtrag 2026-10-29 (Abschluss der externen Abnahme)
+
+- **Eingebettete Credentials im CLR-JWT** sind immer kompakte JWS (CLR 2.0 B.2.2), **auch Altbestand**: `EmbeddedCredential` bettet die gespeicherte JWS unverändert ein. Die frühere Regel „Altbestand als Objekt mit Hülle `JwtProof2020`“ gilt nur noch für bereits ausgestellte CLR (unverändert, nicht umsigniert) und ist für neue CLR aufgehoben.
+- `VerifyAsync` prüft die eingebetteten JWS eines CLR-JWT einzeln (Signatur, Aussteller-Schlüssel, Credential mit `type` und `credentialSubject`); beide Profile (Claim `vc` oder Credential auf oberster Ebene) werden akzeptiert.
+- **Formatversion:** Format 2 = dieses Profil, Format 1 = Altbestand (`vc+jwt`). Sie wird in Nachweisübersicht und Register angezeigt (`CertificateFormat`).
+- **Welche Datei prüfen:** maßgeblich ist das signierte JWT; das JSON ist die lesbare, unsignierte Darstellung (der Validator meldet dort erwartungsgemäß „missing a proof“). Ein eigenständig signiertes JSON-LD (Ed25519/URDNA2015) wird nicht angeboten.
+- **Externe Abnahme:** Der offizielle OB30Inspector bewertet Master-Badge-JWT, eingebettete Badge-JWT und Modul-JWT als VALID; das CLR-JWT scheitert am dokumentierten Validatorfehler (Schemaauswahl und `asNodeList(null)`, siehe `docs/credential-validation.md`). Die öffentliche kid-URL wurde durch das Entfernen der IIS-Sperre des Segments `keys` erreichbar; die Widerrufsliste enthält zusätzlich `revokedCredential`.

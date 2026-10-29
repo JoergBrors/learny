@@ -58,10 +58,14 @@
                         @if (c.IsTopic && i.ModuleCount > 0) { <dt>Enthaltene Module</dt><dd>@i.ModuleCount mit Einzelnachweis</dd> }
                         <dt>Verifikation</dt><dd><a href="/verify/@c.Id">@(i.VerifyUrl)</a></dd>
                     </dl>
+                    <p class="muted" style="font-size:.85rem;margin:.5rem 0">Zum Prüfen (z. B. im 1EdTech-Validator) das <strong>signierte JWT</strong> verwenden. Die JSON-Datei ist nur die lesbare Darstellung desselben Inhalts und trägt bewusst keine Signatur – ein externer Prüfer meldet dort „missing a proof“.</p>
                     <div class="actions" style="display:flex;gap:.5rem;flex-wrap:wrap">
                         <a class="btn btn-primary btn-sm" href="/api/certificates/@c.Id/certificate.pdf" download>@(c.IsTopic ? "Themenabschluss als PDF" : "Modulzertifikat als PDF")</a>
-                        @if (c.IsTopic) { <a class="btn btn-ghost btn-sm" href="/api/certificates/@c.Id/clr" download>CLR (JSON-LD)</a> }
-                        <a class="btn btn-ghost btn-sm" href="/api/certificates/@c.Id/badge" download>@(c.IsTopic ? "Master-Badge (Open Badge)" : "Open Badge")</a>
+                        @* Maßgeblich ist das signierte JWT (Open Badges 3.0 / CLR 2.0, ADR 0038); das JSON ist die lesbare Darstellung ohne Signatur und enthält bewusst keinen Proof *@
+                        @if (c.IsTopic) { <a class="btn btn-ghost btn-sm" href="/api/certificates/@c.Id/clr.jwt" download title="Signierter Nachweis (JWT) – diese Datei prüfen lassen">CLR (signiert, JWT)</a> }
+                        <a class="btn btn-ghost btn-sm" href="/api/certificates/@c.Id/badge.jwt" download title="Signierter Nachweis (JWT) – diese Datei prüfen lassen">@(c.IsTopic ? "Master-Badge (signiert, JWT)" : "Open Badge (signiert, JWT)")</a>
+                        @if (c.IsTopic) { <a class="btn btn-ghost btn-sm" href="/api/certificates/@c.Id/clr" download title="Lesbare Darstellung ohne Signatur (kein Proof) – zum Prüfen das JWT verwenden">CLR (JSON, ohne Signatur)</a> }
+                        <a class="btn btn-ghost btn-sm" href="/api/certificates/@c.Id/badge" download title="Lesbare Darstellung ohne Signatur (kein Proof) – zum Prüfen das JWT verwenden">@(c.IsTopic ? "Master-Badge (JSON, ohne Signatur)" : "Open Badge (JSON, ohne Signatur)")</a>
                         <a class="btn btn-ghost btn-sm" href="/verify/@c.Id">Zertifikat prüfen</a>
                         <button class="btn btn-ghost btn-sm" @onclick="() => ToggleLinkedIn(c.Id)" aria-expanded="@(_linkedIn == c.Id)">Auf LinkedIn hinzufügen</button>
                     </div>

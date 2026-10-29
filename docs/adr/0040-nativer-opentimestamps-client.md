@@ -1,6 +1,6 @@
 # 0040 — Nativer OpenTimestamps-Client (ohne CLI, Python und WSL)
 
-- **Status:** Akzeptiert
+- **Status:** Akzeptiert und umgesetzt (in Produktion seit v0.1.22)
 - **Datum:** 2026-10-29
 - **Ersetzt teilweise:** [0039](0039-opentimestamps-integritaetsmanifest-und-langzeitverifikation.md) — nur die Punkte 1 und 2 (offizieller `ots`-CLI als externes Betriebswerkzeug, Prozessaufruf) und die zugehörigen Konfigurationsvariablen `OTS_CLIENT_PATH`. Alle übrigen Entscheidungen von 0039 (Manifest, Manifest-JWS, Stempelgrundlage, Zustände, Persistenz, Upgrade-Prinzip, Bitcoin-Prüfung, Datenschutz) gelten unverändert.
 
@@ -28,6 +28,10 @@ Der Produktivserver (Windows Server/IIS) bietet kein WSL; der Python-Client läs
 - **Prüfvertrauensmodell:** `IBitcoinHeaderSource.Independent` ist nur beim eigenen Bitcoin-Core-RPC wahr; Explorer-Prüfung bleibt „explorer_verified“ und wird nie als unabhängig ausgegeben. Der öffentliche Zustand (`State`) bleibt unverändert, `OtsEvaluation.Detail` ergänzt intern `receipt_valid · pending · bitcoin_attestation_present · header_verified · explorer_verified · independently_confirmed · not_verifiable · failed`.
 - **Aktualisierte Receipts:** werden nie in ein gespeichertes PDF geschrieben; sie sind als Proof-Version separat abrufbar (`GET /api/public/certificates/{id}/integrity.ots[?version=N]`). Ein neues, neu CMS-signiertes PDF-Artefakt bleibt eine eigene, noch nicht getroffene Architekturentscheidung.
 - **Legacy-Hashes:** SHA-1 und RIPEMD-160 werden nur zum Nachrechnen von OTS-Operationen verwendet; die DevSkim-Meldungen sind zeilenweise mit Begründung unterdrückt (keine globale Deaktivierung).
+
+## Abnahme (2026-10-29)
+
+Erfüllt und belegt: nativer Client ohne Prozesse (im Quellcode keine Prozessaufrufe; Windows-Lauf mit Minimal-PATH ohne WSL/Python); drei echte Calendars antworten, Receipts sind standardkonform (`ots info` des offiziellen Clients liest sie, die Calendars erkennen die nativen Commitments); offizielle Receipts werden nativ gelesen und bytegleich zurückgeschrieben; Parser-Grenzen und Manipulationsfälle getestet; Betreiberzuordnung mit dokumentierten Belegen; Detailstatus und Vertrauensmodelle (Explorer ≠ unabhängig). **Nicht erreicht, bewusst offen:** ein reales Upgrade zu einer Bitcoin-Attestierung (alle gestempelten Receipts waren zum Prüfzeitpunkt noch ausstehend), die Prüfung gegen einen echten eigenen Bitcoin-Core-Knoten und ein Windows-Test auf einem Server ohne installiertes WSL. Diese Punkte ändern die Entscheidung nicht; sie sind Betriebsprüfungen, die nachzuholen sind, sobald die Bestätigung vorliegt bzw. ein Knoten bereitsteht.
 
 ## Konsequenzen
 

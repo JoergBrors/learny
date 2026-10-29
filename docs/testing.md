@@ -175,3 +175,10 @@ Im Block „Beispiele, Templates, Schema, MCP, Hilfe“ werden zusätzlich `modu
 - **PostgreSQL:** nicht erneut (keine Schemaänderung).
 - **Windows-Isolationstest:** siehe `pdf-signature.md` („Windows-/IIS-Betrieb ohne CLI“).
 - **Offene Langzeitprüfung:** Bestätigung der gestempelten Receipts in einem Bitcoin-Block (Stand der letzten Prüfung: Calendars melden „Timestamped by transaction …“ bzw. „Pending confirmation“); Prüfung mit echtem eigenen Bitcoin-Core-Knoten.
+
+## Gesamtstand der Tests (2026-10-29, nach v0.1.22)
+
+- **Pflichtlauf SQLite:** 1475/1475. PostgreSQL: letzter vollständiger Lauf 1437/1437 (vor den OTS-Erweiterungen; seitdem keine Schemaänderung außer der idempotenten Tabelle `integrity_proofs`, die im PostgreSQL-Lauf bereits enthalten war).
+- **Live-Tests (optional, Internet):** `OTS_LIVE_TESTS=1` (echte Calendars, Bitcoin-Beispielbeweis über Explorer), `OTS_UPGRADE_FILE`/`OTS_UPGRADE_SUBJECT` (reales Upgrade einer Receipt). Sie laufen nicht im Pflichtlauf.
+- **Offizieller 1EdTech-Validator:** lokal gebaut und per REST aufgerufen (nicht Teil des Testlaufs); Berichte unter `docs/reviews/1edtech-2026-10-29/`.
+- **Offen:** Windows-Test auf einem WSL-freien Server, Prüfung gegen einen eigenen Bitcoin-Core-Knoten, Bitcoin-Bestätigung der gestempelten Receipts.

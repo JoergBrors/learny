@@ -46,8 +46,8 @@ Referenz dafür, *wie das System funktioniert und warum* — für Menschen und f
 | [0036](0036-oidc-form-post-und-https-callbacks.md) | OIDC form_post und sichere HTTPS-Callbacks | Akzeptiert |
 | [0037](0037-testausstellung-ausstellungsregister-und-credential-widerruf.md) | Administrative Testausstellung, Ausstellungsregister und gezielter Credential-Widerruf | Akzeptiert |
 | [0038](0038-jwt-profil-fuer-open-badges-und-clr.md) | JWT-Profil für Open Badges 3.0 und CLR 2.0 (ersetzt 0021/0032 teilweise) | Akzeptiert |
-| [0039](0039-opentimestamps-integritaetsmanifest-und-langzeitverifikation.md) | OpenTimestamps, signierte Integritätsmanifeste und unabhängige Langzeitverifikation | Akzeptiert (teilweise umgesetzt) |
-| [0040](0040-nativer-opentimestamps-client.md) | Nativer OpenTimestamps-Client ohne CLI, Python und WSL (ersetzt 0039 teilweise) | Akzeptiert |
+| [0039](0039-opentimestamps-integritaetsmanifest-und-langzeitverifikation.md) | OpenTimestamps, signierte Integritätsmanifeste und unabhängige Langzeitverifikation | Akzeptiert und umgesetzt (teilweise ersetzt durch 0040) |
+| [0040](0040-nativer-opentimestamps-client.md) | Nativer OpenTimestamps-Client ohne CLI, Python und WSL (ersetzt 0039 teilweise) | Akzeptiert und umgesetzt |
 | [0025](0025-sichere-speicherung-von-mcp-tokens.md) | Sichere Speicherung von MCP-Tokens, Codes und OAuth-Clients (Schutz bei Datenbankzugriff) | Akzeptiert und umgesetzt |
 
 Prüfberichte, die Anlass für ADRs sind, liegen unter [docs/reviews/](../reviews/) (aktuell: [Mehrbenutzer-Prüfbericht](../reviews/2026-10-24-mehrbenutzer-pruefbericht.md)).

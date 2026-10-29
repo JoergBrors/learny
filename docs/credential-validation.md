@@ -1,6 +1,22 @@
 # Externe Validierung von Open Badges 3.0 und CLR 2.0
 
-Stand: 2026-10-28 · Entscheidung: [ADR 0038](adr/0038-jwt-profil-fuer-open-badges-und-clr.md) · Testausstellung und Register: [ADR 0037](adr/0037-testausstellung-ausstellungsregister-und-credential-widerruf.md)
+Stand: 2026-10-29 · Entscheidung: [ADR 0038](adr/0038-jwt-profil-fuer-open-badges-und-clr.md) · Testausstellung und Register: [ADR 0037](adr/0037-testausstellung-ausstellungsregister-und-credential-widerruf.md)
+
+## Aktueller Gesamtstand (2026-10-29, nach v0.1.22)
+
+| Punkt | Stand |
+|---|---|
+| kid-URL `/badges/keys/<id>` | Produktion: **200**, ein JWK (IIS-Sperre des Segments `keys` entfernt) |
+| Widerrufsliste | enthält `revokedCredential` und `revoked_credentials`; der Validator erkennt widerrufene Nachweise (FATAL „Credential has been revoked“) |
+| Achievement-/Criteria-URLs, Evidence | erreichbar (200) |
+| Master-Badge-JWT, Modul-Badge-JWT, eingebettete Badge-JWT | **VALID** im offiziellen OB30Inspector (14 Prüfungen, 0 Fehler/Warnungen) |
+| JSON-Darstellungen | „missing a proof“ — erwartet (unsigniert); zum Prüfen das JWT verwenden |
+| CLR-JWT | **offen, Validatorfehler**: Schemafehler bei `credentialSubject.verifiableCredential` und `asNodeList(null)`; Issue-Entwurf in `reviews/`. Interne Prüfung bestanden; externe 1EdTech-Prüfung des CLR-JWT nicht abschließend möglich. |
+| Altbestand (Format 1) | bleibt unverändert und prüfbar; ein Altbestand-Modul in einem **alten** CLR ist als Objekt mit `JwtProof2020` eingebettet (nicht änderbar); **neue** CLR betten Altbestand als Compact-JWS ein |
+| Formatversion | in Nachweisübersicht und Register sichtbar (Format 1 Altbestand / Format 2 VC-JWT) |
+| 1EdTech-Zertifizierung | **keine** — Learny ist nicht von 1EdTech oder LinkedIn zertifiziert |
+
+Die älteren Abschnitte unten sind das Prüfprotokoll in zeitlicher Reihenfolge; Aussagen wie „nicht ausgeführt“ sind dort durch die Läufe vom 2026-10-29 überholt.
 
 ## Ausgangslage (externe Validierung vom 2026-10-28)
 
@@ -240,3 +256,8 @@ Die externe Gesamtprüfung des CLR-JWT bleibt wegen des Validatorfehlers offen; 
 ### Offene produktive Punkte (Stand 2026-10-29, unabhängig vom OpenTimestamps-Auftrag)
 
 OpenTimestamps betrifft nur den Zeitnachweis der PDF-Pakete und behebt **keinen** der folgenden Punkte; sie bleiben offen: (1) die produktive kid-URL `/badges/keys/<id>` liefert wegen der IIS-Sperre des Segments `keys` HTTP 404.8 (Korrektur im Repository, nicht deployt); (2) die produktive Widerrufsliste enthält noch nicht das vom Validator erwartete Feld `revokedCredential` (Korrektur im Repository, nicht deployt); (3) das CLR-JWT scheitert im offiziellen 1EdTech-Validator wegen eines dokumentierten Validatorfehlers; (4) eine produktive Gesamtvalidierung steht aus. Es wird keine vollständige 1EdTech-Konformität behauptet. An Credentials und CLR-JWTs wurde in diesem Auftrag nichts geändert.
+
+
+### „missing a proof“ bei JSON-Dateien (Stand 2026-10-29)
+
+Der offizielle Validator verlangt bei JSON-Credentials einen eingebetteten Proof (`Ed25519Signature2020` oder `DataIntegrityProof` mit `eddsa-rdfc-2022`/`ecdsa-sd-2023`). Learny signiert als **VC-JWT (ES256)**; das JSON ist die lesbare, unsignierte Darstellung. Maßnahme: Die Oberfläche (Nachweisübersicht, Hilfe) benennt das signierte JWT als zu prüfende Datei, das JSON als „ohne Signatur“. Echte Belege: `MODULE/validator-report-…jwt` = VALID (14 Prüfungen, 0 Fehler), `…json` = ein Fehler „missing a proof“. Ein eigenständig signiertes JSON-LD wäre nur mit einem Ed25519-Schlüssel und selbst implementierter RDF-Kanonisierung (URDNA2015) möglich und braucht eine eigene Entscheidung (ADR 0038 schließt künstliche Proofs aus).
