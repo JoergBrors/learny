@@ -1,0 +1,29 @@
+@page "/admin/events"
+@attribute [Authorize(Policy = "AdminOnly")]
+@inject PortalServices Svc
+
+<PageTitle>Ereignisprotokoll</PageTitle>
+<h1>Ereignisprotokoll</h1>
+<p class="muted">Technisch beobachtete Ereignisse, neueste zuerst. Es werden keine Codes, Einladungslinks oder Tokens gespeichert.</p>
+<div class="table-wrap"><table>
+    <thead><tr><th>Zeitpunkt</th><th>Ereignis</th><th>Kategorie</th><th>Einladung</th><th>Benutzer</th><th>Akteur</th></tr></thead>
+    <tbody>
+    @if (Events.Count == 0) { <tr><td colspan="6" class="muted">Noch keine Ereignisse.</td></tr> }
+    @foreach (var e in Events)
+    {
+        <tr>
+            <td>@e.At.ToUniversalTime().ToString("dd.MM.yyyy HH:mm:ss") UTC</td>
+            <td>@PortalText.Event(e.Type)</td>
+            <td>@(e.Category is null ? "–" : PortalText.Category(e.Category))</td>
+            <td>@if (e.InvitationId is not null) { <a href="/admin/invitations/@e.InvitationId">Einladung</a> } else { <span>–</span> }</td>
+            <td>@if (e.UserId is not null) { <a href="/admin/users/@e.UserId">Benutzer</a> } else { <span>–</span> }</td>
+            <td>@(e.ActorUserId is null ? "–" : "Administrator")</td>
+        </tr>
+    }
+    </tbody>
+</table></div>
+
+@code {
+    private List<InviteEvent> Events = new();
+    protected override async Task OnInitializedAsync() => Events = await Svc.Events.ListAsync(null, null, 300);
+}

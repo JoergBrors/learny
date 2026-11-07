@@ -1,0 +1,65 @@
+@page "/profile"
+@attribute [Authorize(Policy = "UserOnly")]
+@inject PortalServices Svc
+
+<PageTitle>Profil</PageTitle>
+<h1>Mein Profil</h1>
+<section class="card narrow">
+    <dl>
+        <dt class="muted">Anzeigename</dt><dd>@Name</dd>
+        <dt class="muted">E-Mail-Adresse</dt><dd>@Email</dd>
+        <dt class="muted">Lernprofil</dt><dd>@PortalText.Profile(Profile)</dd>
+        <dt class="muted">Registriert am</dt><dd>@Created.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</dd>
+    </dl>
+    <p class="muted">Das Lernprofil wird bei der Einladung festgelegt und kann hier nicht geändert werden.</p>
+</section>
+
+@if (TokenJwt is not null)
+{
+    <h2>Mein Anmelde-Token (nur Entwicklung)</h2>
+    <section class="card">
+        <p class="muted">Das ID-Token deiner letzten Anmeldung (@TokenAt.ToUniversalTime().ToString("dd.MM.yyyy HH:mm:ss") UTC). Es steht nur im Speicher des Portals und wird nur dir in der Entwicklung angezeigt. Teile es nicht.</p>
+        <h3>Claims</h3>
+        <div class="table-wrap"><table><thead><tr><th>Claim</th><th>Wert</th></tr></thead><tbody>
+            @foreach (var (k, v) in Claims) { <tr><td><code>@k</code></td><td>@v</td></tr> }
+        </tbody></table></div>
+        <h3>Header</h3><pre>@TokenHeader</pre>
+        <h3>JWT (Header.Payload.Signatur)</h3>
+        <textarea readonly rows="8" style="width:100%;font-family:monospace;font-size:.8rem">@TokenJwt</textarea>
+    </section>
+}
+
+@code {
+    [CascadingParameter] private HttpContext Http { get; set; } = default!;
+    private string Name = "", Email = "", Profile = "";
+    private DateTime Created;
+    private string? TokenJwt, TokenHeader; private DateTime TokenAt; private List<(string, string)> Claims = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var uid = Http.User.FindFirst("uid")!.Value;
+        var u = (await Svc.Db.QueryAsync("SELECT u.display_name AS n, u.email AS e, u.created_at AS c, p.profile AS p FROM users u JOIN user_profiles p ON p.user_id=u.id WHERE u.id=@u", new (string, object?)[] { ("u", uid) })).First();
+        Name = u["n"] ?? ""; Email = u["e"] ?? ""; Profile = u["p"] ?? ""; Created = LearnCards.Web.Data.DbValue.ToDateTime(u["c"]);
+        if (Svc.Options.TokenViewer is { } viewer)
+        {
+            var subs = await Svc.Db.QueryAsync("SELECT subject FROM user_identities WHERE user_id=@u", new (string, object?)[] { ("u", uid) });
+            foreach (var s in subs)
+                if (s["subject"] is { } sub && viewer.Get(sub) is { } t) { Load(t.Jwt); TokenAt = t.At; break; }
+        }
+    }
+
+    private void Load(string jwt)
+    {
+        try
+        {
+            var parts = jwt.Split('.');
+            static byte[] B64(string p) => Convert.FromBase64String(p.Replace('-', '+').Replace('_', '/').PadRight((p.Length + 3) / 4 * 4, '='));
+            using var h = System.Text.Json.JsonDocument.Parse(B64(parts[0]));
+            using var p = System.Text.Json.JsonDocument.Parse(B64(parts[1]));
+            TokenHeader = System.Text.Json.JsonSerializer.Serialize(h.RootElement, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+            Claims = p.RootElement.EnumerateObject().Select(c => (c.Name, c.Value.ValueKind == System.Text.Json.JsonValueKind.String ? c.Value.GetString()! : c.Value.GetRawText())).ToList();
+            TokenJwt = jwt;
+        }
+        catch (Exception e) when (e is FormatException or System.Text.Json.JsonException or IndexOutOfRangeException) { TokenJwt = null; }
+    }
+}

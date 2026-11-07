@@ -48,6 +48,13 @@ Referenz dafür, *wie das System funktioniert und warum* — für Menschen und f
 | [0038](0038-jwt-profil-fuer-open-badges-und-clr.md) | JWT-Profil für Open Badges 3.0 und CLR 2.0 (ersetzt 0021/0032 teilweise) | Akzeptiert |
 | [0039](0039-opentimestamps-integritaetsmanifest-und-langzeitverifikation.md) | OpenTimestamps, signierte Integritätsmanifeste und unabhängige Langzeitverifikation | Akzeptiert und umgesetzt (teilweise ersetzt durch 0040) |
 | [0040](0040-nativer-opentimestamps-client.md) | Nativer OpenTimestamps-Client ohne CLI, Python und WSL (ersetzt 0039 teilweise) | Akzeptiert und umgesetzt |
+| [0041](0041-entra-external-id-terraform-und-tenant-modell.md) | Entra External ID: Terraform- und Tenant-Modell (PoC, isolierter External Tenant) | Akzeptiert (PoC) |
+| [0042](0042-einladungspflichtige-external-id-registrierung.md) | Einladungspflichtige External-ID-Registrierung und einmalige Einlösung (PoC) | Akzeptiert (PoC) |
+| [0043](0043-transaktionsmodell-einladungseinloesung.md) | Transaktionsmodell der Einladungseinlösung (atomarer Anspruch, Kompensation, fail-closed) | Akzeptiert (PoC) |
+| [0044](0044-exchange-online-einladungsversand-und-versandstatus.md) | Exchange-Online-Einladungsversand und getrennter Versandstatus | Akzeptiert (PoC) |
+| [0045](0045-external-id-branding-und-eigener-otp-mailprovider.md) | External-ID-Branding und eigener OTP-Mailprovider (Custom Authentication Extension OnOtpSend, Exchange) | Akzeptiert (PoC) |
+| [0046](0046-administrationsportal-externe-registrierung.md) | Administrationsportal für externe Registrierung und Benutzer-Lebenszyklus (PoC) | Akzeptiert (PoC) |
+| [0047](0047-token-anreicherung-mit-lernrechten.md) | Token-Anreicherung mit Lernrechten (Custom Claims Provider, PoC) | Akzeptiert (PoC) |
 | [0025](0025-sichere-speicherung-von-mcp-tokens.md) | Sichere Speicherung von MCP-Tokens, Codes und OAuth-Clients (Schutz bei Datenbankzugriff) | Akzeptiert und umgesetzt |
 
 Prüfberichte, die Anlass für ADRs sind, liegen unter [docs/reviews/](../reviews/) (aktuell: [Mehrbenutzer-Prüfbericht](../reviews/2026-10-24-mehrbenutzer-pruefbericht.md)).

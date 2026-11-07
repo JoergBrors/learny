@@ -1,0 +1,78 @@
+@page "/admin"
+@page "/admin/invitations"
+@attribute [Authorize(Policy = "AdminOnly")]
+@inject PortalServices Svc
+
+<PageTitle>Administration – Übersicht</PageTitle>
+<h1>Übersicht</h1>
+
+@if (Stats is not null)
+{
+    <div class="grid">
+        <div class="stat"><b>@Stats.TotalInvitations</b><span>Einladungen gesamt</span></div>
+        <div class="stat"><b>@Stats.Pending</b><span>Offene Einladungen</span></div>
+        <div class="stat"><b>@Stats.Submitted</b><span>Versendet (angenommen)</span></div>
+        <div class="stat"><b>@Stats.Accepted</b><span>Erfolgreiche Registrierungen</span></div>
+        <div class="stat"><b>@Stats.Expired</b><span>Abgelaufen</span></div>
+        <div class="stat"><b>@Stats.Revoked</b><span>Widerrufen</span></div>
+        <div class="stat"><b>@Stats.SendFailed</b><span>Fehlgeschlagene Versandversuche</span></div>
+        <div class="stat"><b>@Stats.ActiveUsers</b><span>Aktive externe Benutzer</span></div>
+        <div class="stat"><b>@Stats.DisabledUsers</b><span>Deaktivierte externe Benutzer</span></div>
+    </div>
+}
+
+<h2>Einladungen</h2>
+<form method="get" action="/admin/invitations" class="filters">
+    <div><label for="q">Suche</label><input id="q" name="q" type="text" value="@Q" placeholder="E-Mail oder Name" /></div>
+    <div><label for="status">Einladungsstatus</label>
+        <select id="status" name="status">
+            <option value="">alle</option>
+            @foreach (var s in new[] { "pending", "accepted", "expired", "revoked" }) { <option value="@s" selected="@(Status == s)">@PortalText.InvitationStatus(s)</option> }
+        </select></div>
+    <div><label for="delivery">Versandstatus</label>
+        <select id="delivery" name="delivery">
+            <option value="">alle</option>
+            @foreach (var s in new[] { "pending", "submitted", "failed", "unknown" }) { <option value="@s" selected="@(Delivery == s)">@PortalText.DeliveryStatus(s)</option> }
+        </select></div>
+    <div><button class="btn" type="submit">Filtern</button></div>
+    <div><a class="btn ghost" href="/admin/invitations/new">Neue Einladung</a></div>
+</form>
+
+<div class="table-wrap"><table>
+    <thead><tr><th>E-Mail</th><th>Profil</th><th>Einladung</th><th>Versand</th><th>Erstellt</th><th>Läuft ab</th><th>Registriert</th><th>Module</th><th>Letzter Status</th><th></th></tr></thead>
+    <tbody>
+    @if (Rows.Count == 0) { <tr><td colspan="10" class="muted">Keine Einladungen gefunden.</td></tr> }
+    @foreach (var r in Rows)
+    {
+        <tr>
+            <td>@r.RecipientEmail@if (!string.IsNullOrEmpty(r.DisplayName)) { <div class="muted">@r.DisplayName</div> }</td>
+            <td>@PortalText.Profile(r.TargetProfile)</td>
+            <td><span class="@PortalText.Badge("inv", r.Status)">@PortalText.InvitationStatus(r.Status)</span></td>
+            <td><span class="@PortalText.Badge("del", r.DeliveryStatus)">@PortalText.DeliveryStatus(r.DeliveryStatus)</span></td>
+            <td>@Fmt(r.CreatedAt)</td>
+            <td>@Fmt(r.ExpiresAt)</td>
+            <td>@(r.AcceptedAt is null ? "–" : Fmt(r.AcceptedAt.Value))</td>
+            <td>@(r.Modules.Count == 0 ? "–" : string.Join(", ", r.Modules))</td>
+            <td>@(r.LastEvent is null ? "–" : PortalText.Event(r.LastEvent))</td>
+            <td><a href="/admin/invitations/@r.InvitationId">Details</a></td>
+        </tr>
+    }
+    </tbody>
+</table></div>
+
+@code {
+    [CascadingParameter] private HttpContext Http { get; set; } = default!;
+    [SupplyParameterFromQuery(Name = "status")] private string? Status { get; set; }
+    [SupplyParameterFromQuery(Name = "delivery")] private string? Delivery { get; set; }
+    [SupplyParameterFromQuery(Name = "q")] private string? Q { get; set; }
+    private AdminStats? Stats;
+    private List<InvitationRow> Rows = new();
+    private static string Fmt(DateTime d) => d.ToUniversalTime().ToString("dd.MM.yyyy HH:mm") + " UTC";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var actor = Http.User.FindFirst("uid")!.Value;
+        Stats = await Svc.Admin.GetStatsAsync(actor);
+        Rows = await Svc.Admin.ListInvitationsAsync(actor, new InvitationFilter(Status, Delivery, Q));
+    }
+}

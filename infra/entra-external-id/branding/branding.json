@@ -1,0 +1,36 @@
+{
+  "$comment": "Soll-Zustand des Brandings der External-ID-Anmeldeseiten (ADR 0045). Werte stammen aus dem Bestand: Farben aus src/LearnCards.Web/wwwroot/app.css, Bildmaterial aus wwwroot/brand und dem Karten-Symbol der App. Wird nur ueber bootstrap/branding.ps1 angewendet (Dry-Run als Standard).",
+  "targetBrandName": "Learny",
+  "tenantDisplayName": {
+    "current": "Learny External ID PoC",
+    "target": "Learny",
+    "apply": false,
+    "note": "Die Umbenennung des Tenants wird nicht automatisch angewendet (separate Freigabe). Der Anzeigename erscheint u. a. in der Microsoft-Standardmail."
+  },
+  "assets": {
+    "bannerLogo": "infra/entra-external-id/branding/banner-logo.png",
+    "favicon": "src/LearnCards.Web/wwwroot/brand/favicon-32.png"
+  },
+  "colors": {
+    "backgroundColor": "#F7F5F0",
+    "textColor": "#29323C",
+    "linkAndAccentColor": "#196F67",
+    "$source": "app.css: --bg, --ink, --brand-700"
+  },
+  "default": {
+    "backgroundColor": "#F7F5F0",
+    "signInPageText": "Learny: Anmeldung per E-Mail-Adresse und Einmalcode. Die Registrierung ist nur mit persönlicher Einladung möglich.",
+    "usernameHintText": "E-Mail-Adresse"
+  },
+  "localizations": {
+    "de-DE": {
+      "backgroundColor": "#F7F5F0",
+      "signInPageText": "Learny: Anmeldung per E-Mail-Adresse und Einmalcode. Die Registrierung ist nur mit persönlicher Einladung möglich.",
+      "usernameHintText": "E-Mail-Adresse"
+    }
+  },
+  "pageTexts": {
+    "status": "nicht umgesetzt",
+    "note": "Konto erstellen, Code eingeben, Details hinzufügen, Fehlermeldungen und Abmeldung nutzen die Microsoft-Standardtexte in der Browsersprache (Deutsch). Eigene Seitentexte wären über contentCustomization möglich (nur External ID, nicht verifiziert) und wurden nicht vorbereitet."
+  }
+}

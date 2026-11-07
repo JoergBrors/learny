@@ -1,0 +1,7 @@
+# Optional: Remote-State (Azure Storage, verschluesselt, RBAC). Dann in versions.tf den backend "local" durch backend "azurerm" {} ersetzen
+# und: terraform init -backend-config=backend.hcl
+resource_group_name  = "rg-tfstate"
+storage_account_name = "sttfstatelearny"
+container_name       = "tfstate"
+key                  = "entra-external-id/00-tenant.tfstate"
+use_azuread_auth     = true

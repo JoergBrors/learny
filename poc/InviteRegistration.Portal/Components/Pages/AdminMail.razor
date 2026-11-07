@@ -1,0 +1,103 @@
+@page "/admin/mail"
+@attribute [Authorize(Policy = "AdminOnly")]
+@inject PortalServices Svc
+
+<PageTitle>Mail-Einrichtung</PageTitle>
+<h1>Mail-Einrichtung</h1>
+@if (PortalText.Flash(M) is { } f) { <div class="msg @(f.Error ? "err" : "ok")" role="status">@f.Text</div> }
+
+@if (Settings is null)
+{
+    <p class="muted">Die Mail-Einrichtung ist in dieser Instanz nicht verfügbar.</p>
+}
+else
+{
+    <p class="muted">Einladungen und Anmeldecodes werden über Microsoft Graph (<code>sendMail</code>) mit einer App-Registrierung und deren Zertifikat versendet. Der private Schlüssel entsteht hier im Portal, wird verschlüsselt im Datenverzeichnis abgelegt und ist nie abrufbar; heruntergeladen wird nur das öffentliche Zertifikat.</p>
+
+    @if (Svc.Options.OtpHandler is null)
+    {
+        <div class="msg err" role="status">Die OTP-Extension ist in dieser Instanz <b>nicht aktiv</b> (<code>PORTAL_OTP_ENABLED=1</code> und <code>OTP_EXT_AUDIENCES</code> fehlen). Entra kann dann keine Anmeldecodes versenden lassen; bei der Registrierung erscheint „Fehler bei der Suche nach Ihrem Konto“.</div>
+    }
+    <h2>Letzte Versand- und Anmeldecode-Ereignisse</h2>
+    <div class="card">
+        @if (Recent.Count == 0) { <p class="muted">Noch keine Ereignisse.</p> }
+        @foreach (var e in Recent)
+        {
+            <div>@e.At.ToUniversalTime().ToString("dd.MM.yyyy HH:mm:ss") UTC · @PortalText.Event(e.Type) · <span class="@(IsError(e) ? "badge bad" : "badge ok")">@(e.Category ?? "ok")</span> <span class="muted">@Explain(e)</span></div>
+        }
+        <p class="muted">Statuscodes der Anmeldecode-Anfragen: <code>200:accepted</code> = Mail angenommen, <code>502:mail_disabled</code> = Versand nicht aktiviert, <code>502:recipient_not_allowed</code> / <code>403:recipient_not_allowed</code> = Adresse nicht eingeladen oder nicht erlaubt, <code>401:unauthorized</code> = Entra-Token ungültig (Audience/Tenant), <code>502:auth_failed</code> = Anmeldung der Mail-App fehlgeschlagen (Zertifikat nicht in Entra oder falsche IDs), <code>502:permission_denied</code> = Exchange-RBAC für das Absenderpostfach fehlt, <code>502:mailbox_not_found</code> = Absenderpostfach unbekannt, <code>502:unauthorized</code> = Graph lehnt die App ab, <code>504:…</code> = keine Antwort. Kommt gar kein Eintrag, erreicht Entra das Portal nicht (Tunnel/Port 5080).</p>
+    </div>
+
+    <h2>1. App-Registrierung</h2>
+    <form method="post" action="/admin/actions/mail/settings" class="card">
+        <AntiforgeryToken />
+        @if (Settings.IsPreselected) { <p class="muted">Vorausgewählt aus der Konfiguration des Portals; noch nichts gespeichert.</p> }
+        <label for="tenantId">Verzeichnis-ID (Tenant der Mail-App, nicht der External-ID-Tenant)</label>
+        <input id="tenantId" name="tenantId" type="text" required maxlength="36" value="@Settings.TenantId" autocomplete="off" />
+        <label for="clientId">Anwendungs-ID (Client-ID der Mail-App)</label>
+        <input id="clientId" name="clientId" type="text" required maxlength="36" value="@Settings.ClientId" autocomplete="off" />
+        <label for="sender">Absenderpostfach (muss dem Exchange-RBAC-Bereich der App entsprechen)</label>
+        <input id="sender" name="sender" type="email" required maxlength="254" value="@Settings.Sender" autocomplete="off" />
+        <label for="recipients">Erlaubte Empfänger (Adressen oder <code>@@domain</code>, durch Komma getrennt; leer = niemand)</label>
+        <input id="recipients" name="recipients" type="text" maxlength="1000" value="@string.Join(", ", Settings.AllowedRecipients)" autocomplete="off" />
+        <label class="checks"><span><input type="checkbox" name="enabled" value="yes" checked="@Settings.Enabled" /> Versand aktivieren (nur mit Zertifikat und mindestens einem erlaubten Empfänger)</span></label>
+        <p><button class="btn" type="submit">Speichern</button></p>
+    </form>
+
+    <h2>2. Zertifikat</h2>
+    <div class="card">
+        @if (Settings.CertUsable)
+        {
+            <p>Zertifikat vorhanden. Fingerabdruck (SHA-1, wie in Entra angezeigt): <code>@Settings.CertThumbprint</code></p>
+            <p class="muted">@Settings.CertSubject · erzeugt @Fmt(Settings.CertCreatedAt) · gültig bis @Fmt(Settings.CertNotAfter)</p>
+            <p><a class="btn" href="/admin/mail/certificate.cer">Öffentliches Zertifikat herunterladen (.cer)</a></p>
+        }
+        else
+        {
+            <p>Noch kein Zertifikat (oder es ist mit dem aktuellen Schlüssel nicht lesbar).</p>
+        }
+        <form method="post" action="/admin/actions/mail/certificate">
+            <AntiforgeryToken />
+            <label class="checks"><span><input type="checkbox" name="confirm" value="yes" /> Ich bestätige: @(Settings.CertUsable ? "das vorhandene Zertifikat wird ersetzt, der Versand deaktiviert, bis das neue in Entra hinterlegt ist" : "ein neues Zertifikat wird erzeugt")</span></label>
+            <p><button class="btn ghost" type="submit">@(Settings.CertUsable ? "Neues Zertifikat erzeugen" : "Zertifikat erzeugen")</button></p>
+        </form>
+    </div>
+
+    <h2>3. Anleitung: Zertifikat in Entra hinterlegen</h2>
+    <div class="card">
+        <ol>
+            <li>Zertifikat oben erzeugen und die Datei <code>learny-poc-mail.cer</code> herunterladen.</li>
+            <li>Im <b>Workforce-/Exchange-Tenant</b> (nicht im External-ID-Tenant) im Entra-Portal: <i>App-Registrierungen</i> → App mit der Anwendungs-ID <code>@Settings.ClientId</code> → <i>Zertifikate &amp; Geheimnisse</i> → <i>Zertifikate</i> → <i>Zertifikat hochladen</i> → die <code>.cer</code>-Datei wählen.</li>
+            <li>Prüfen, dass der in Entra angezeigte <i>Fingerabdruck</i> mit dem oben angezeigten übereinstimmt.</li>
+            <li>Alternativ per Azure CLI: <code>az ad app credential reset --id @Settings.ClientId --cert "@@learny-poc-mail.cer" --append</code> (<code>--append</code> erhält vorhandene Zertifikate).</li>
+            <li>Die App braucht die Anwendungsberechtigung <i>Mail.Send</i> mit Administratorzustimmung <b>und</b> eine Exchange-Online-RBAC-Zuweisung, die auf das Absenderpostfach <code>@Settings.Sender</code> begrenzt ist (siehe <code>docs/entra-external-id/mail-permissions.md</code>). Ohne diese Begrenzung darf die App sonst als jedes Postfach senden.</li>
+            <li>Oben die Angaben speichern, erlaubte Empfänger eintragen, <i>Versand aktivieren</i> ankreuzen und eine Einladung versenden. Die Aktivierung wirkt sofort, ein Neustart ist nicht nötig.</li>
+        </ol>
+        <p class="muted">Ersetzen Sie das Zertifikat vor dem Ablaufdatum. Ein ersetztes Zertifikat kann nicht wiederhergestellt werden; entfernen Sie das alte in Entra, sobald das neue dort liegt. Ändert sich <code>PORTAL_INVITE_TOKEN_KEY</code>, ist das gespeicherte Zertifikat nicht mehr lesbar und muss neu erzeugt werden.</p>
+    </div>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "m")] private string? M { get; set; }
+    private MailSettingsView? Settings;
+    private List<InviteEvent> Recent = new();
+    private static bool IsError(InviteEvent e) => e.Type == EventTypes.SendFailed || (e.Type == EventTypes.OtpSend && e.Category is not null && !e.Category.StartsWith("200:"));
+    private static string Explain(InviteEvent e) => e.Category switch
+    {
+        "mail_disabled" or "502:mail_disabled" => "Versand ist nicht aktiviert.",
+        "502:mail_not_configured" => "Einrichtung unvollständig.",
+        "502:auth_failed" or "auth_failed" => "Mail-App konnte sich nicht anmelden (Zertifikat/IDs prüfen).",
+        "502:recipient_not_allowed" or "403:recipient_not_allowed" or "recipient_not_allowed" => "Empfänger nicht erlaubt.",
+        "401:unauthorized" => "Token von Entra abgelehnt.",
+        "502:permission_denied" => "Exchange-RBAC-Zuweisung für das Postfach fehlt.",
+        "502:mailbox_not_found" => "Absenderpostfach nicht gefunden.",
+        _ => "",
+    };
+    private static string Fmt(DateTime? d) => d is null ? "–" : d.Value.ToUniversalTime().ToString("dd.MM.yyyy") + " UTC";
+
+    protected override async Task OnInitializedAsync()
+    {
+        Settings = Svc.Options.MailSettings is { } ms ? await ms.GetAsync() : null;
+        Recent = (await Svc.Events.ListAsync(null, null, 300)).Where(e => e.Type is EventTypes.OtpSend or EventTypes.SendFailed or EventTypes.MailSettingsChanged or EventTypes.MailCertificateCreated).Take(12).ToList();
+    }
+}

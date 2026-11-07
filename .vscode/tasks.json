@@ -25,6 +25,14 @@
       "problemMatcher": [],
       "group": { "kind": "build", "isDefault": true }
     },
+    {
+      "label": "build: poc portal",
+      "type": "process",
+      "command": "dotnet",
+      "args": ["build", "${workspaceFolder}/poc/InviteRegistration.Portal/InviteRegistration.Portal.csproj"],
+      "problemMatcher": "$msCompile",
+      "group": "build"
+    },
 
     // ─── PostgreSQL im Docker für die Entwicklung (docker-compose.dev.yml) ───
     {

@@ -1,0 +1,50 @@
+@inherits LayoutComponentBase
+
+<header class="top">
+    <div class="top-inner">
+        <a class="brand" href="/" aria-label="Learny"><img src="/brand/learny-banner.png" alt="Learny" height="28" /></a>
+        @if (IsAdmin)
+        {
+            <nav class="main" aria-label="Administration">
+                <a href="/admin">Übersicht</a>
+                <a href="/admin/invitations">Einladungen</a>
+                <a href="/admin/invitations/new">Neue Einladung</a>
+                <a href="/admin/users">Benutzer</a>
+                <a href="/admin/assignments">Lernzuweisungen</a>
+                <a href="/admin/events">Ereignisprotokoll</a>
+                <a href="/admin/mail">Mail-Einrichtung</a>
+            </nav>
+            <div class="who">
+                <span>Administrator</span>
+                <form method="post" action="/admin/logout" class="inline"><AntiforgeryToken /><button class="btn ghost small" type="submit">Abmelden</button></form>
+            </div>
+        }
+        else if (IsLearner)
+        {
+            <nav class="main" aria-label="Lernbereich">
+                <a href="/dashboard">Meine Lernmodule</a>
+                <a href="/profile">Profil</a>
+            </nav>
+            <div class="who">
+                <form method="post" action="/logout" class="inline"><AntiforgeryToken /><button class="btn ghost small" type="submit">Abmelden</button></form>
+            </div>
+        }
+        else
+        {
+            <nav class="main" aria-label="Start">
+                <a href="/login">Anmelden</a>
+                <a href="/admin/signin">Administration</a>
+            </nav>
+        }
+    </div>
+</header>
+<main>
+    @Body
+</main>
+
+@code {
+    [CascadingParameter] private HttpContext? Http { get; set; }
+    private string? Role => Http?.User.FindFirst("role")?.Value;
+    private bool IsAdmin => Role == "admin";
+    private bool IsLearner => Role == "learner";
+}

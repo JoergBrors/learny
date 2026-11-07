@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Manueller Livetest des Exchange-Mailservices (Test A und B aus docs/entra-external-id/mail-permissions.md). Keine NuGet-Pakete. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\InviteRegistration\InviteRegistration.csproj" />
+  </ItemGroup>
+
+</Project>

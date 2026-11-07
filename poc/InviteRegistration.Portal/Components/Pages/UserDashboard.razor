@@ -1,0 +1,53 @@
+@page "/dashboard"
+@attribute [Authorize(Policy = "UserOnly")]
+@inject PortalServices Svc
+
+<PageTitle>Meine Lernmodule</PageTitle>
+<h1>Willkommen bei Learny, @Name</h1>
+<p class="muted">Lernprofil: <b>@PortalText.Profile(Profile)</b></p>
+
+<h2>Meine Lernmodule</h2>
+<p class="muted">Quelle der Übersicht: @Source. Beim Öffnen eines Moduls wird der Zugriff immer gegen die Datenbank geprüft.</p>
+@if (Modules.Count == 0)
+{
+    <div class="card"><p>Ihnen sind derzeit keine Lernmodule zugewiesen.</p></div>
+}
+else
+{
+    <div class="table-wrap"><table>
+        <thead><tr><th>Modul</th><th>Art</th><th></th></tr></thead>
+        <tbody>
+        @foreach (var m in Modules)
+        {
+            <tr><td>@m.Name</td><td>@PortalText.Scope(m.Scope)</td><td><a href="/modules/@m.Id">Öffnen</a></td></tr>
+        }
+        </tbody>
+    </table></div>
+}
+
+@code {
+    [CascadingParameter] private HttpContext Http { get; set; } = default!;
+    private string Name = "";
+    private string Profile = "";
+    private List<(string Id, string Name, string Scope)> Modules = new();
+    private string Source = "Datenbank";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var uid = Http.User.FindFirst("uid")!.Value;
+        var u = (await Svc.Db.QueryAsync("SELECT u.display_name AS n, p.profile AS p FROM users u JOIN user_profiles p ON p.user_id=u.id WHERE u.id=@u", new (string, object?)[] { ("u", uid) })).FirstOrDefault();
+        Name = u?["n"] ?? ""; Profile = u?["p"] ?? "";
+        // Übersicht aus den Claims der Anmeldung, solange deren Marke zur aktuellen passt (ADR 0047); sonst aus der Datenbank.
+        var lv = Http.User.FindFirst("lv")?.Value; var lm = Http.User.FindFirst("lm");
+        if (lv is not null && lm is not null && lv == await Svc.Overview.CurrentVersionAsync(uid))
+        {
+            foreach (var id in lm.Value.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                if (await Svc.Overview.ModuleAsync(id) is { } m) Modules.Add(m);
+            Source = "Claims der Anmeldung (Marke " + lv + " gültig, keine Listenabfrage)";
+            return;
+        }
+        Source = lv is null ? "Datenbank (keine Claims in der Sitzung)" : "Datenbank (Berechtigungen haben sich seit der Anmeldung geändert)";
+        foreach (var id in await Svc.Access.ListReadableModulesAsync(uid))
+            if (await Svc.Overview.ModuleAsync(id) is { } m) Modules.Add(m);
+    }
+}

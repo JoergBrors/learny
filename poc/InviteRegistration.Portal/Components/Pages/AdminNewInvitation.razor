@@ -1,0 +1,50 @@
+@page "/admin/invitations/new"
+@attribute [Authorize(Policy = "AdminOnly")]
+@inject PortalServices Svc
+
+<PageTitle>Neue Einladung</PageTitle>
+<h1>Neue Einladung</h1>
+@if (PortalText.Flash(M) is { } f) { <div class="msg @(f.Error ? "err" : "ok")" role="status">@f.Text</div> }
+
+<form method="post" action="/admin/actions/invitations" class="card">
+    <AntiforgeryToken />
+    <label for="email">E-Mail-Adresse (Pflicht)</label>
+    <input id="email" name="email" type="email" required maxlength="254" autocomplete="off" />
+
+    <label for="profile">Lernprofil (Pflicht, wird verbindlich festgelegt)</label>
+    <select id="profile" name="profile" required>
+        <option value="B2C_LEARNER">B2C-Lernende (nur ausdrücklich zugewiesene Inhalte)</option>
+        <option value="B2B_LEARNER">B2B-Lernende</option>
+    </select>
+
+    <label for="validityHours">Gültigkeit in Stunden (1–720)</label>
+    <input id="validityHours" name="validityHours" type="number" min="1" max="720" value="72" required />
+
+    <label>Lernberechtigungen (globale oder freigegebene Module)</label>
+    <div class="checks">
+        @foreach (var m in Modules)
+        {
+            <label><input type="checkbox" name="moduleIds" value="@m.Id" /> @m.Name <span class="muted">(@PortalText.Scope(m.Scope))</span></label>
+        }
+        @if (Modules.Count == 0) { <span class="muted">Keine Module vorhanden.</span> }
+    </div>
+
+    <label for="displayName">Anzeigename (optional)</label>
+    <input id="displayName" name="displayName" type="text" maxlength="80" />
+    <label for="description">Beschreibung (optional)</label>
+    <input id="description" name="description" type="text" maxlength="300" />
+    <label for="note">Interne Notiz (optional, nur für Administratoren)</label>
+    <textarea id="note" name="note" rows="3" maxlength="500"></textarea>
+
+    <p class="muted">Administrator-, Auditor- oder Themen-Admin-Rollen können über Einladungen nicht vergeben werden. Die Einladung wird erst nach ausdrücklicher Bestätigung auf der nächsten Seite versendet.</p>
+    <p><button class="btn" type="submit">Einladung erstellen</button></p>
+</form>
+
+@code {
+    [CascadingParameter] private HttpContext Http { get; set; } = default!;
+    [SupplyParameterFromQuery(Name = "m")] private string? M { get; set; }
+    private List<ModuleRow> Modules = new();
+
+    protected override async Task OnInitializedAsync() =>
+        Modules = await Svc.Admin.ListModulesAsync(Http.User.FindFirst("uid")!.Value);
+}

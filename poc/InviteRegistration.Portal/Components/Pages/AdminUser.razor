@@ -1,0 +1,98 @@
+@page "/admin/users/{Id}"
+@attribute [Authorize(Policy = "AdminOnly")]
+@inject PortalServices Svc
+
+<PageTitle>Benutzer</PageTitle>
+@if (U is null)
+{
+    <section class="card narrow"><h1>Benutzer nicht gefunden</h1><p><a href="/admin/users">Zurück zu den Benutzern</a></p></section>
+}
+else
+{
+    <h1>@U.DisplayName</h1>
+    @if (PortalText.Flash(M) is { } f) { <div class="msg @(f.Error ? "err" : "ok")" role="status">@f.Text</div> }
+    <div class="card">
+        <dl>
+            <dt class="muted">Interne Benutzer-ID</dt><dd>@U.UserId</dd>
+            <dt class="muted">E-Mail-Adresse</dt><dd>@U.Email</dd>
+            <dt class="muted">Lernprofil</dt><dd>@PortalText.Profile(U.Profile) <span class="muted">(wird bei der Einladung festgelegt; ein Wechsel zwischen B2B und B2C ist nicht vorgesehen)</span></dd>
+            <dt class="muted">Status</dt><dd><span class="@PortalText.Badge("usr", U.Status)">@PortalText.UserStatus(U.Status)</span></dd>
+            <dt class="muted">Registriert / letzte beobachtete Anmeldung</dt><dd>@Fmt(U.CreatedAt) / @Fmt(U.LastLoginAt)</dd>
+        </dl>
+        <div class="row">
+            @if (U.Status == "active")
+            {
+                <form method="post" action="/admin/actions/users/@U.UserId/deactivate" class="inline">
+                    <AntiforgeryToken />
+                    <label><input type="checkbox" name="confirm" value="yes" /> Deaktivierung bestätigen</label>
+                    <button class="btn danger" type="submit">Benutzer deaktivieren</button>
+                </form>
+            }
+            else
+            {
+                <form method="post" action="/admin/actions/users/@U.UserId/reactivate" class="inline">
+                    <AntiforgeryToken />
+                    <button class="btn" type="submit">Benutzer reaktivieren</button>
+                </form>
+            }
+        </div>
+    </div>
+
+    <h2>Lernberechtigungen</h2>
+    <div class="table-wrap"><table>
+        <thead><tr><th>Modul</th><th>Art</th><th></th></tr></thead>
+        <tbody>
+        @if (Grants.Count == 0) { <tr><td colspan="3" class="muted">Keine Module zugewiesen.</td></tr> }
+        @foreach (var g in Grants)
+        {
+            <tr><td>@g.ModuleName</td><td>@PortalText.Scope(g.Scope)</td><td>
+                <form method="post" action="/admin/actions/users/@U.UserId/revoke" class="inline"><AntiforgeryToken /><input type="hidden" name="moduleId" value="@g.ModuleId" /><button class="btn danger small" type="submit">Entziehen</button></form>
+            </td></tr>
+        }
+        </tbody>
+    </table></div>
+
+    <div class="card">
+        <h2>Modul zuweisen</h2>
+        <form method="post" action="/admin/actions/users/@U.UserId/assign">
+            <AntiforgeryToken />
+            <label for="moduleId">Modul</label>
+            <select id="moduleId" name="moduleId">
+                @foreach (var m in Modules.Where(m => !Grants.Any(g => g.ModuleId == m.Id)))
+                {
+                    <option value="@m.Id">@m.Name (@PortalText.Scope(m.Scope))</option>
+                }
+            </select>
+            <p><button class="btn" type="submit">Zuweisen</button></p>
+        </form>
+    </div>
+
+    <h2>Ereignisse des Benutzers</h2>
+    <div class="card">
+        @if (Events.Count == 0) { <p class="muted">Keine Ereignisse.</p> }
+        <ul class="timeline">
+        @foreach (var e in Events) { <li><time>@Fmt(e.At)</time><span>@PortalText.Event(e.Type)@(e.Category is null ? "" : " – " + PortalText.Category(e.Category))</span></li> }
+        </ul>
+    </div>
+}
+
+@code {
+    [Parameter] public string Id { get; set; } = "";
+    [CascadingParameter] private HttpContext Http { get; set; } = default!;
+    [SupplyParameterFromQuery(Name = "m")] private string? M { get; set; }
+    private UserRow? U;
+    private List<(string ModuleId, string ModuleName, string Scope)> Grants = new();
+    private List<ModuleRow> Modules = new();
+    private List<InviteEvent> Events = new();
+    private static string Fmt(DateTime d) => d.ToUniversalTime().ToString("dd.MM.yyyy HH:mm:ss") + " UTC";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var actor = Http.User.FindFirst("uid")!.Value;
+        U = await Svc.Admin.GetUserAsync(actor, Id);
+        if (U is null) return;
+        Grants = await Svc.Admin.ListGrantsAsync(actor, Id);
+        Modules = await Svc.Admin.ListModulesAsync(actor);
+        Events = await Svc.Events.ListAsync(null, Id, 100);
+    }
+}

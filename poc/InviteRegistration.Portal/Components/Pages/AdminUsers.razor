@@ -1,0 +1,34 @@
+@page "/admin/users"
+@attribute [Authorize(Policy = "AdminOnly")]
+@inject PortalServices Svc
+
+<PageTitle>Benutzer</PageTitle>
+<h1>Registrierte externe Benutzer</h1>
+<div class="table-wrap"><table>
+    <thead><tr><th>Anzeigename</th><th>E-Mail</th><th>Profil</th><th>Status</th><th>Registriert</th><th>Letzte beobachtete Anmeldung</th><th>Module</th><th></th></tr></thead>
+    <tbody>
+    @if (Users.Count == 0) { <tr><td colspan="8" class="muted">Noch keine registrierten Benutzer.</td></tr> }
+    @foreach (var u in Users)
+    {
+        <tr>
+            <td>@u.DisplayName</td>
+            <td>@u.Email</td>
+            <td>@PortalText.Profile(u.Profile)</td>
+            <td><span class="@PortalText.Badge("usr", u.Status)">@PortalText.UserStatus(u.Status)</span></td>
+            <td>@Fmt(u.CreatedAt)</td>
+            <td>@Fmt(u.LastLoginAt)</td>
+            <td>@(u.ModuleNames.Count == 0 ? "–" : string.Join(", ", u.ModuleNames))</td>
+            <td><a href="/admin/users/@u.UserId">Details</a></td>
+        </tr>
+    }
+    </tbody>
+</table></div>
+
+@code {
+    [CascadingParameter] private HttpContext Http { get; set; } = default!;
+    private List<UserRow> Users = new();
+    private static string Fmt(DateTime d) => d.ToUniversalTime().ToString("dd.MM.yyyy HH:mm") + " UTC";
+
+    protected override async Task OnInitializedAsync() =>
+        Users = await Svc.Admin.ListUsersAsync(Http.User.FindFirst("uid")!.Value);
+}

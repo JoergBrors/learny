@@ -1,0 +1,3 @@
+workforce_tenant_id = "db88f9b6-c89a-41a3-a21d-b61458e234ff"
+sender_mailbox      = "learny@brors.link"
+# mail_certificate_path = "mail-app-public.pem"   # nur oeffentlicher Teil, nach new-mail-certificate.ps1

@@ -1,0 +1,81 @@
+@page "/admin/invitations/{Id}"
+@attribute [Authorize(Policy = "AdminOnly")]
+@inject PortalServices Svc
+
+<PageTitle>Einladung</PageTitle>
+@if (D is null)
+{
+    <section class="card narrow"><h1>Einladung nicht gefunden</h1><p><a href="/admin/invitations">Zurück zu den Einladungen</a></p></section>
+}
+else
+{
+    var r = D.Row;
+    <h1>Einladung an @r.RecipientEmail</h1>
+    @if (PortalText.Flash(M) is { } f) { <div class="msg @(f.Error ? "err" : "ok")" role="status">@f.Text</div> }
+
+    <div class="card">
+        <dl>
+            <dt class="muted">Lernprofil</dt><dd>@PortalText.Profile(r.TargetProfile)</dd>
+            <dt class="muted">Einladungsstatus</dt><dd><span class="@PortalText.Badge("inv", r.Status)">@PortalText.InvitationStatus(r.Status)</span></dd>
+            <dt class="muted">Versandstatus</dt><dd><span class="@PortalText.Badge("del", r.DeliveryStatus)">@PortalText.DeliveryStatus(r.DeliveryStatus)</span> <span class="muted">(@D.Attempts Versuche@(D.DeliveryErrorCode is null ? "" : ", letzte Fehlerkategorie: " + D.DeliveryErrorCode))</span></dd>
+            <dt class="muted">Erstellt / Läuft ab</dt><dd>@Fmt(r.CreatedAt) / @Fmt(r.ExpiresAt)</dd>
+            <dt class="muted">Zugewiesene Module</dt><dd>@(r.Modules.Count == 0 ? "–" : string.Join(", ", r.Modules))</dd>
+            @if (!string.IsNullOrEmpty(r.DisplayName)) { <dt class="muted">Anzeigename</dt><dd>@r.DisplayName</dd> }
+            @if (!string.IsNullOrEmpty(D.Description)) { <dt class="muted">Beschreibung</dt><dd>@D.Description</dd> }
+            @if (!string.IsNullOrEmpty(D.Note)) { <dt class="muted">Interne Notiz</dt><dd>@D.Note</dd> }
+            @if (D.AcceptedUserId is not null) { <dt class="muted">Registrierter Benutzer</dt><dd><a href="/admin/users/@D.AcceptedUserId">Benutzer anzeigen</a></dd> }
+        </dl>
+        <p class="muted">Der Einladungslink wird nie angezeigt oder dauerhaft gespeichert. „Versandstatus angenommen“ bedeutet nur, dass Exchange Online die Nachricht angenommen hat, nicht dass sie zugestellt oder gelesen wurde.</p>
+    </div>
+
+    @if (r.Status == "pending")
+    {
+        <div class="card">
+            <h2>Versand und Verwaltung</h2>
+            <div class="row">
+                <form method="post" action="/admin/actions/invitations/@r.InvitationId/send" class="inline">
+                    <AntiforgeryToken />
+                    <label><input type="checkbox" name="confirm" value="yes" /> Versand an @r.RecipientEmail über learny@brors.link bestätigen</label>
+                    <button class="btn" type="submit">Einladung senden</button>
+                </form>
+            </div>
+            <div class="row">
+                <form method="post" action="/admin/actions/invitations/@r.InvitationId/rotate" class="inline">
+                    <AntiforgeryToken />
+                    <label><input type="checkbox" name="confirm" value="yes" /> Link neu ausstellen (der bisherige Link wird sofort ungültig)</label>
+                    <button class="btn ghost" type="submit">Neu ausstellen</button>
+                </form>
+            </div>
+            <div class="row">
+                <form method="post" action="/admin/actions/invitations/@r.InvitationId/revoke" class="inline">
+                    <AntiforgeryToken />
+                    <label><input type="checkbox" name="confirm" value="yes" /> Widerruf bestätigen</label>
+                    <button class="btn danger" type="submit">Einladung widerrufen</button>
+                </form>
+            </div>
+        </div>
+    }
+
+    <h2>Ereignisse</h2>
+    <div class="card">
+        <p class="muted">Es werden nur technisch beobachtete Ereignisse angezeigt. „Link aufgerufen“ kann auch durch E-Mail-Scanner oder Linkvorschauen entstehen. Fortschritt innerhalb des Microsoft-Anmeldeablaufs ist ohne Rückmeldung von Entra nicht sichtbar.</p>
+        @if (D.Events.Count == 0) { <p class="muted">Noch keine Ereignisse.</p> }
+        <ul class="timeline">
+        @foreach (var e in D.Events)
+        {
+            <li><time datetime="@e.At.ToUniversalTime().ToString("o")">@Fmt(e.At)</time><span>@PortalText.Event(e.Type)@(e.Category is null ? "" : " – " + PortalText.Category(e.Category))</span></li>
+        }
+        </ul>
+    </div>
+}
+
+@code {
+    [Parameter] public string Id { get; set; } = "";
+    [CascadingParameter] private HttpContext Http { get; set; } = default!;
+    [SupplyParameterFromQuery(Name = "m")] private string? M { get; set; }
+    private InvitationDetail? D;
+    private static string Fmt(DateTime d) => d.ToUniversalTime().ToString("dd.MM.yyyy HH:mm:ss") + " UTC";
+
+    protected override async Task OnInitializedAsync() =>
+        D = await Svc.Admin.GetInvitationAsync(Http.User.FindFirst("uid")!.Value, Id);
+}

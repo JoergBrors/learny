@@ -1,0 +1,27 @@
+@page "/admin/signin"
+@inject PortalServices Svc
+
+<PageTitle>Administration – Anmelden</PageTitle>
+<section class="card narrow">
+    <h1>Administration</h1>
+    <p>Die Anmeldung erfolgt über das Unternehmenskonto (Microsoft Entra Workforce). Zugang hat nur, wer ausdrücklich als Administrator freigegeben ist.</p>
+    @if (Svc.Options.AdminOidc is not null)
+    {
+        <p><a class="btn" href="/admin/login">Mit Microsoft anmelden</a></p>
+    }
+    else
+    {
+        <p class="msg err">Die Administratoranmeldung über Microsoft ist nicht konfiguriert.</p>
+    }
+    @if (Svc.Options.Development && Svc.Options.DevAdminKey is not null)
+    {
+        <h2>Lokaler Entwicklungszugang</h2>
+        <p class="muted">Nur im Development-Modus und nur von diesem Rechner.</p>
+        <form method="post" action="/admin/dev-login">
+            <AntiforgeryToken />
+            <label for="key">Entwicklungsschlüssel</label>
+            <input id="key" name="key" type="password" autocomplete="off" />
+            <p><button class="btn" type="submit">Anmelden</button></p>
+        </form>
+    }
+</section>

@@ -1,0 +1,3 @@
+external_tenant_id = "00000000-0000-0000-0000-000000000000"
+tenant_subdomain   = "learnyextidpoc"
+redirect_uris      = ["https://localhost:5001/auth/callback"]

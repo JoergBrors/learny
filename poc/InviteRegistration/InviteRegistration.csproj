@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Isoliertes PoC (ADR 0042): einladungspflichtige Registrierung. Keine NuGet-Pakete (ADR 0002).
+       Nutzt nur die Datenbank-Abstraktion von LearnCards.Web (lesende Wiederverwendung, keine Änderung dort).
+       Nicht Teil von LearnCards.slnx. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="..\..\src\LearnCards.Web\LearnCards.Web.csproj" />
+  </ItemGroup>
+
+</Project>

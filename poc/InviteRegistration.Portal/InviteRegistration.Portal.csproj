@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!-- Administrationsportal und Benutzerportal des Registrierungs-PoC (ADR 0046). Keine NuGet-Pakete (ADR 0002), nicht Teil von LearnCards.slnx.
+       Razor-Komponenten im statischen Server-Rendering (kein SignalR). Offline-Build: das interne AspNetCore-Asset-Paket wird nicht benoetigt. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RequiresAspNetWebAssets>false</RequiresAspNetWebAssets>
+    <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\InviteRegistration\InviteRegistration.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -65,6 +65,43 @@
       "type": "msedge",
       "request": "launch",
       "url": "http://127.0.0.1:8787/health"
+    },
+    {
+      // Registrierungs-PoC (Administrations- und Benutzerportal), nur lokal: docs/entra-external-id/poc-portal.md
+      // Geheimnisse stehen in poc/.secrets/portal.env (git-ignoriert); anlegen/ergänzen mit: pwsh poc/New-PortalEnv.ps1
+      // Anmeldung als Administrator lokal über /admin/signin mit PORTAL_DEV_ADMIN_KEY aus der portal.env.
+      "name": "Registrierungs-PoC Portal (lokal)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build: poc portal",
+      "program": "${workspaceFolder}/poc/InviteRegistration.Portal/bin/Debug/net10.0/InviteRegistration.Portal.dll",
+      "cwd": "${workspaceFolder}/poc/InviteRegistration.Portal",
+      "envFile": "${workspaceFolder}/poc/.secrets/portal.env",
+      "env": {
+        "PORTAL_MODE": "development",
+        "PORTAL_URL": "http://localhost:5090",
+        "PORTAL_DATA_DIR": "${workspaceFolder}/poc/.secrets/portal-data",
+        "PORTAL_SEED_DEMO": "1",
+        "PORTAL_OTP_ENABLED": "1",
+        "PORTAL_CLAIMS_ENABLED": "1",
+        "PORTAL_OTP_URL": "http://127.0.0.1:5080",
+        "OTP_EXT_AUDIENCES": "1132ae90-fa71-4a16-b5df-15054b9e1ff0,api://learny-otp.brors.date/1132ae90-fa71-4a16-b5df-15054b9e1ff0",
+        "PORTAL_ENTRA_TENANT_ID": "5fce2b3c-8e95-49b5-9cfd-fc223b7e8f63",
+        "PORTAL_ENTRA_AUTHORITY": "https://learnyextidpoc.ciamlogin.com/5fce2b3c-8e95-49b5-9cfd-fc223b7e8f63/v2.0",
+        "PORTAL_ENTRA_CLIENT_ID": "cb54157f-bcfb-4e78-9c81-b63ee7a0a03d",
+        // Administratoranmeldung: dieselbe Entra-App wie Learny ("Learny-oid", Workforce-Tenant). Admin = App-Rolle Admin.All. Das Secret steht in poc/.secrets/portal.env (PORTAL_ADMIN_CLIENT_SECRET).
+        "PORTAL_ADMIN_AUTHORITY": "https://login.microsoftonline.com/db88f9b6-c89a-41a3-a21d-b61458e234ff/v2.0",
+        "PORTAL_ADMIN_TENANT_ID": "db88f9b6-c89a-41a3-a21d-b61458e234ff",
+        "PORTAL_ADMIN_CLIENT_ID": "89e199e0-d6b4-4e49-8be5-daeb2a2fed75",
+        "PORTAL_ADMIN_ROLES": "Admin.All",
+        "PORTAL_ADMIN_REDIRECT": "http://localhost:5090/admin/callback"
+      },
+      "serverReadyAction": {
+        "action": "openExternally",
+        "pattern": "(https?://localhost:\\d+)\\s+\\(Modus",
+        "uriFormat": "%s/admin/signin"
+      },
+      "console": "integratedTerminal"
     }
   ],
   "compounds": [

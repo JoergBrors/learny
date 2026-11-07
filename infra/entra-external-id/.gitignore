@@ -1,0 +1,10 @@
+# Terraform-State und Plan-Dateien enthalten ggf. Secrets (ADR 0041) - nie committen
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+crash.log
+*.tfvars
+!*.tfvars.example
+backend.hcl

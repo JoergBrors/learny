@@ -1,0 +1,44 @@
+@page "/admin/assignments"
+@attribute [Authorize(Policy = "AdminOnly")]
+@inject PortalServices Svc
+
+<PageTitle>Lernzuweisungen</PageTitle>
+<h1>Lernzuweisungen</h1>
+<p class="muted">Übersicht, welcher Benutzer welches Modul sehen darf. Änderungen wirken sofort, auch beim direkten Aufruf eines Moduls. Globale Module sind ohne Zuweisung nicht sichtbar.</p>
+<div class="table-wrap"><table>
+    <thead><tr><th>Benutzer</th>@foreach (var m in Modules) { <th>@m.Name<div class="muted">@PortalText.Scope(m.Scope)</div></th> }</tr></thead>
+    <tbody>
+    @if (Users.Count == 0) { <tr><td colspan="@(Modules.Count + 1)" class="muted">Noch keine registrierten Benutzer.</td></tr> }
+    @foreach (var u in Users)
+    {
+        <tr>
+            <td><a href="/admin/users/@u.UserId">@u.DisplayName</a><div class="muted">@u.Email · @PortalText.Profile(u.Profile)</div></td>
+            @foreach (var m in Modules)
+            {
+                var has = u.ModuleNames.Contains(m.Name);
+                <td>
+                    <form method="post" action="/admin/actions/users/@u.UserId/@(has ? "revoke" : "assign")" class="inline">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="moduleId" value="@m.Id" />
+                        @if (has) { <span class="badge ok">zugewiesen</span> <button class="btn danger small" type="submit">Entziehen</button> }
+                        else { <button class="btn ghost small" type="submit">Zuweisen</button> }
+                    </form>
+                </td>
+            }
+        </tr>
+    }
+    </tbody>
+</table></div>
+
+@code {
+    [CascadingParameter] private HttpContext Http { get; set; } = default!;
+    private List<UserRow> Users = new();
+    private List<ModuleRow> Modules = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var actor = Http.User.FindFirst("uid")!.Value;
+        Users = await Svc.Admin.ListUsersAsync(actor);
+        Modules = await Svc.Admin.ListModulesAsync(actor);
+    }
+}
