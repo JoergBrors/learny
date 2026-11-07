@@ -11,6 +11,9 @@ public static class OidcCallback
 {
     public const string StateCookie = "lc.oidc.state";
     public const string CallbackPath = "/auth/callback";
+    /// <summary>Getrennter Rücksprung für Entra External ID (ADR 0048): eigener Pfad und eigenes Korrelationscookie, nie mit dem Workforce-Ablauf geteilt.</summary>
+    public const string ExternalStateCookie = "lc.oidc.ext.state";
+    public const string ExternalCallbackPath = "/auth/external/callback";
     /// <summary>Obergrenze des Formular-Bodys (Entra-Codes sind ~2 KB lang).</summary>
     public const int MaxBodyBytes = 32 * 1024;
     public static readonly TimeSpan StateLifetime = TimeSpan.FromMinutes(10);
@@ -44,21 +47,21 @@ public static class OidcCallback
     }
 
     /// <summary>Temporäres Korrelationscookie. SameSite=None ist nötig, weil der Identity Provider per Cross-Site-POST zurückleitet; deshalb Secure, HttpOnly, kurze Lebensdauer und enger Pfad.</summary>
-    public static CookieOptions StateCookieOptions() => new()
+    public static CookieOptions StateCookieOptions(string path = CallbackPath) => new()
     {
         HttpOnly = true,
         Secure = true,
         SameSite = SameSiteMode.None,
         MaxAge = StateLifetime,
-        Path = CallbackPath,
+        Path = path,
     };
 
     /// <summary>Redirect-URI: PUBLIC_BASE_URL hat Vorrang (nicht per Host-Header manipulierbar). Außerhalb der Entwicklung ist HTTPS Pflicht (null = abgelehnt).</summary>
-    public static string? ResolveRedirectUri(string? publicBaseUrl, string scheme, HostString host, bool allowHttp)
+    public static string? ResolveRedirectUri(string? publicBaseUrl, string scheme, HostString host, bool allowHttp, string path = CallbackPath)
     {
         var uri = !string.IsNullOrWhiteSpace(publicBaseUrl)
-            ? publicBaseUrl.TrimEnd('/') + CallbackPath
-            : $"{scheme}://{host}{CallbackPath}";
+            ? publicBaseUrl.TrimEnd('/') + path
+            : $"{scheme}://{host}{path}";
         if (!Uri.TryCreate(uri, UriKind.Absolute, out var parsed)) return null;
         if (parsed.Scheme != Uri.UriSchemeHttps && !(allowHttp && parsed.Scheme == Uri.UriSchemeHttp)) return null;
         return uri;

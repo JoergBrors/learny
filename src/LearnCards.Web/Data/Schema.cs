@@ -29,6 +29,7 @@ public static class Schema
                 subject    TEXT NOT NULL,
                 user_id    {id} NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 created_at TEXT NOT NULL,
+                kind       TEXT NOT NULL DEFAULT 'workforce',
                 PRIMARY KEY (provider, subject)
             )
             """;
@@ -57,6 +58,14 @@ public static class Schema
             """;
 
         yield return "CREATE INDEX IF NOT EXISTS ix_audit_log_created ON audit_log(created_at)";
+
+        // ─── Einmaligkeit des OIDC-state über alle Instanzen (External ID, ADR 0048): nur der Hash, kurze Lebensdauer ───
+        yield return """
+            CREATE TABLE IF NOT EXISTS oidc_consumed_states (
+                state_hash TEXT PRIMARY KEY,
+                expires_at TEXT NOT NULL
+            )
+            """;
 
         // ─── MCP-Zugänge (ADR 0013): benutzergebundene Tokens (nur als Hash gespeichert) und einmalige Übergabecodes ───
         yield return $"""
@@ -424,6 +433,116 @@ public static class Schema
         // ─── Themen, Lernpfade, Versionierung und Abschlussprüfungen (ADR 0027) ───
         // Absichtlich keine Fremdschlüssel auf modules: Die Tabelle wird bei alten Datenbanken von Migrationen neu aufgebaut; verwaiste Zuordnungen werden beim Lesen ausgeblendet.
         foreach (var statement in TopicStatements(id, real)) yield return statement;
+        foreach (var statement in InvitationStatements(id)) yield return statement;
+    }
+
+    /// <summary>
+    /// Einladungen, Lernprofile und ausdrückliche Modulzuweisungen (ADR 0049). Alle Tabellen sind neu; bestehende Tabellen und Daten werden nicht verändert.
+    /// Wird nach Modulen und Themen angelegt (Fremdschlüssel).
+    /// </summary>
+    private static IEnumerable<string> InvitationStatements(string id)
+    {
+        // Lernprofil externer Lernender (B2B_LEARNER | B2C_LEARNER). Kein Eintrag = Bestandsprofil (bisherige Berechtigungslogik) — nur für Benutzer des Workforce-Anbieters.
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS user_profiles (
+                user_id              {id} PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                profile              TEXT NOT NULL,
+                source_invitation_id {id} NULL,
+                created_at           TEXT NOT NULL
+            )
+            """;
+
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS invitations (
+                invitation_id    {id} PRIMARY KEY,
+                recipient_email  TEXT NOT NULL,
+                token_hash       TEXT NOT NULL UNIQUE,
+                target_profile   TEXT NOT NULL,
+                status           TEXT NOT NULL DEFAULT 'pending',
+                created_by       {id} NOT NULL,
+                created_at       TEXT NOT NULL,
+                expires_at       TEXT NOT NULL,
+                accepted_at      TEXT NULL,
+                accepted_user_id {id} NULL,
+                revoked_at       TEXT NULL,
+                token_version    INTEGER NOT NULL DEFAULT 1
+            )
+            """;
+        yield return "CREATE INDEX IF NOT EXISTS ix_invitations_email ON invitations(recipient_email, status)";
+
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS invitation_module_grants (
+                invitation_id {id} NOT NULL REFERENCES invitations(invitation_id) ON DELETE CASCADE,
+                module_id     {id} NOT NULL REFERENCES modules(id) ON DELETE CASCADE,
+                PRIMARY KEY (invitation_id, module_id)
+            )
+            """;
+
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS invitation_topic_grants (
+                invitation_id {id} NOT NULL REFERENCES invitations(invitation_id) ON DELETE CASCADE,
+                topic_id      {id} NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+                topic_version INTEGER NULL,
+                mandatory     INTEGER NOT NULL DEFAULT 0,
+                due_at        TEXT NULL,
+                PRIMARY KEY (invitation_id, topic_id)
+            )
+            """;
+
+        // Versandstatus getrennt vom Einladungsstatus (ADR 0044): pending | submitted | failed | unknown. Nie ein Token. Der Versand selbst folgt in Phase C.
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS invitation_deliveries (
+                invitation_id   {id} PRIMARY KEY REFERENCES invitations(invitation_id) ON DELETE CASCADE,
+                status          TEXT NOT NULL DEFAULT 'pending',
+                attempts        INTEGER NOT NULL DEFAULT 0,
+                lease_until     TEXT NULL,
+                last_attempt_at TEXT NULL,
+                submitted_at    TEXT NULL,
+                last_error_code TEXT NULL,
+                updated_at      TEXT NOT NULL
+            )
+            """;
+
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS invitation_meta (
+                invitation_id {id} PRIMARY KEY REFERENCES invitations(invitation_id) ON DELETE CASCADE,
+                display_name  TEXT NULL,
+                description   TEXT NULL,
+                note          TEXT NULL
+            )
+            """;
+
+        // Ereignisprotokoll (ADR 0046): nur beobachtete Ereignisse, nie Codes, Links oder Tokens.
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS invitation_events (
+                id            {id} PRIMARY KEY,
+                invitation_id {id} NULL,
+                user_id       {id} NULL,
+                event_type    TEXT NOT NULL,
+                category      TEXT NULL,
+                actor_user_id {id} NULL,
+                at            TEXT NOT NULL
+            )
+            """;
+        yield return "CREATE INDEX IF NOT EXISTS ix_invitation_events_inv ON invitation_events(invitation_id, at)";
+        yield return "CREATE INDEX IF NOT EXISTS ix_invitation_events_at ON invitation_events(at)";
+
+        // Ausdrückliche Modulzuweisung je Benutzer. Für externe Lernprofile ist sie die einzige Quelle von Zugriff auf globale Module;
+        // für das Bestandsprofil ist sie informativ (der Zugriff bleibt unverändert). Widerruf = revoked_at (Nachvollziehbarkeit).
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS module_grants (
+                user_id              {id} NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                module_id            {id} NOT NULL REFERENCES modules(id) ON DELETE CASCADE,
+                publication_id       {id} NULL,
+                source_invitation_id {id} NULL,
+                granted_by           {id} NULL,
+                granted_at           TEXT NOT NULL,
+                revoked_at           TEXT NULL,
+                revoked_by           {id} NULL,
+                PRIMARY KEY (user_id, module_id)
+            )
+            """;
+        yield return "CREATE INDEX IF NOT EXISTS ix_module_grants_publication ON module_grants(publication_id)";
     }
 
     private static IEnumerable<string> TopicStatements(string id, string real)

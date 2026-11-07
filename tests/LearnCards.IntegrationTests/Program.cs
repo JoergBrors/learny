@@ -226,6 +226,9 @@ try
     await McpTokenUnitTests.RunAsync(Check, tmp);   // Schutz der MCP-Tokens bei Datenbankzugriff (ADR 0025)
     AuthModeTests.Run(Check);   // Betriebsmodus fail closed (ADR 0026)
     OidcCallbackTests.Run(Check);   // OIDC form_post, Cookie, Redirect-URI, state (ADR 0036)
+    ExternalIdUnitTests.Run(Check);   // Entra External ID als zweiter Anbieter: Konfiguration, Trennung (ADR 0048)
+    await ExternalIdUnitTests.RunAsync(Check, tmp);   // state-Einmaligkeit in der Datenbank, Anmeldung ohne Benutzeranlage (ADR 0048)
+    await InvitationUnitTests.RunAsync(Check, tmp);   // Einladungen, Lernprofile, atomare Einlösung, Zugriffsregeln (ADR 0049)
     DockerConfigTests.Run(Check, repoRoot);   // Docker-Hub-Veröffentlichung (ADR 0024)
     Console.WriteLine();
 

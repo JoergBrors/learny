@@ -51,3 +51,7 @@ Nach der Anmeldung soll die Lernplattform die freigegebenen Module ohne Datenban
 - `poc/InviteRegistration/TokenClaims.cs`, `InviteHttp.cs` (`MapTokenClaims`), `InviteSchema.cs` (`user_entra_oids`), `InvitationService.cs` (`RecordObjectIdAsync`), `EntraOidcFlow.cs` (`oid`)
 - `poc/InviteRegistration.Portal/Program.cs`, `PortalHost.cs`
 - `poc/InviteRegistration.Tests/TokenClaimsTests.cs`, `infra/entra-external-id/bootstrap/claims-extension.ps1`
+
+## Nachtrag 2026-11-08 (Learny-Integration, Phase B)
+
+In Learny sind `learny_*`-Claims nie die Rechtequelle: Zugriffsentscheidungen kommen aus der Datenbank (`ResolveModuleAccessAsync`, Themenpfade, [0049](0049-einladungs-und-lernberechtigungsmodell.md)); die Token-Anreicherung ist ein späterer Hinweis ohne prozesslokalen Berechtigungszustand als Sicherheitsquelle. Sie ist nicht Teil von Phase B.

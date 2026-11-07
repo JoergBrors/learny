@@ -108,3 +108,7 @@ Ein Benutzer hat mehrere Rollen (`user_roles`); `user` besitzt jeder Benutzer im
 - `Api/ApiEndpoints.cs`, `Auth/AuthEndpoints.cs`, `Program.cs`, `Infrastructure/AppConfig.cs`
 - `Components/Pages/Profile.razor`, `Admin.razor`, `Components/Layout/MainLayout.razor`
 - `tests/LearnCards.IntegrationTests`
+
+## Nachtrag 2026-11-08 (ADR 0048)
+
+Es gibt einen zweiten, getrennten Identitätsanbieter (Entra External ID, `EXTID_*`, `/auth/external/*`). Der hier beschriebene Workforce-Ablauf bleibt unverändert (Bestandsschutz); Identitäten werden nie über die E-Mail-Adresse zusammengeführt, Rollen kommen weiter nur aus dem Workforce-Token bzw. von Administratoren. Siehe [0048](0048-multi-issuer-authentifizierung-und-bestandsschutz.md).

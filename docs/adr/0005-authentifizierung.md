@@ -40,3 +40,7 @@ einen Nicht-Browser-Zugang.
 ## Nachtrag (ADR 0036)
 
 Der OIDC-Rücksprung erfolgt per `response_mode=form_post` (`POST /auth/callback`); siehe [0036](0036-oidc-form-post-und-https-callbacks.md).
+
+## Nachtrag 2026-11-08 (ADR 0048)
+
+Es gibt einen zweiten, getrennten Identitätsanbieter (Entra External ID, `EXTID_*`, `/auth/external/*`). Der hier beschriebene Workforce-Ablauf bleibt unverändert (Bestandsschutz); Identitäten werden nie über die E-Mail-Adresse zusammengeführt, Rollen kommen weiter nur aus dem Workforce-Token bzw. von Administratoren. Siehe [0048](0048-multi-issuer-authentifizierung-und-bestandsschutz.md).

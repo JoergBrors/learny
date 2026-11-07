@@ -50,6 +50,15 @@ public partial class TopicService
     /// </summary>
     private async Task<TopicVersionInfo?> ResolveVersionForLearnerAsync(string userId, TopicInfo topic, string section, int? requestedVersion)
     {
+        // ADR 0049: externe Lernprofile lernen nur ausdrücklich zugewiesene Themen in der zugewiesenen Version — nie über Eigentum, Freigabe oder globale Sichtbarkeit.
+        if (await _repo.IsRestrictedLearnerAsync(userId))
+        {
+            var asg = (await _db.QueryAsync("SELECT topic_version FROM topic_assignments WHERE topic_id = @t AND user_id = @u AND status = 'active'", new (string, object?)[] { ("t", topic.Id), ("u", userId) })).FirstOrDefault();
+            if (asg is null) return null;
+            int? pin = asg.GetValueOrDefault("topic_version") is { Length: > 0 } pv ? DbValue.ToInt(pv) : null;
+            if (requestedVersion is int want && want > 0) return pin is null || pin == want ? await LoadVersionAsync(topic.Id, want) : null;
+            return pin is int p0 ? await LoadVersionAsync(topic.Id, p0) : await LoadLatestPublishedAsync(topic.Id);
+        }
         var (full, assigned, pinned) = section == TopicSections.Global ? (false, false, (int?)null) : await PrivateAccessAsync(userId, topic);
         if (requestedVersion is int rv && rv > 0)
         {

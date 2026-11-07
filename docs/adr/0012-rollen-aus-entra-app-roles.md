@@ -46,3 +46,7 @@ ID-Token-Claim `roles`.
 ## Betroffener Code
 
 - `Auth/AuthEndpoints.cs` (`GetRoles`, Dev-Simulation), `Services/UserService.cs` (`SyncIdpRolesAsync`), `Infrastructure/AppConfig.cs` (`RoleMap`)
+
+## Nachtrag 2026-11-08 (ADR 0048)
+
+Es gibt einen zweiten, getrennten Identitätsanbieter (Entra External ID, `EXTID_*`, `/auth/external/*`). Der hier beschriebene Workforce-Ablauf bleibt unverändert (Bestandsschutz); Identitäten werden nie über die E-Mail-Adresse zusammengeführt, Rollen kommen weiter nur aus dem Workforce-Token bzw. von Administratoren. Siehe [0048](0048-multi-issuer-authentifizierung-und-bestandsschutz.md).

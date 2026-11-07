@@ -32,12 +32,22 @@
             <a class="btn btn-primary btn-lg btn-block" href="@LoginHref">🧑‍💻 Lokal anmelden (Dev-Modus)</a>
             <p class="login-note">AUTH_MODE=dev — ohne Entra ID. Für Produktion OIDC in der .env konfigurieren.</p>
         }
+
+        @if (Config.ExternalId.Enabled)
+        {
+            <hr />
+            <a class="btn btn-secondary btn-block" href="@ExternalHref">Mit Einladung registriert? Externe Anmeldung</a>
+            <p class="login-note">Für externe Lernende (Entra External ID). Die Registrierung ist nur mit persönlicher Einladung möglich.</p>
+        }
     </div>
 </div>
 
 @code {
     [SupplyParameterFromQuery] public string? Error { get; set; }
     [SupplyParameterFromQuery] public string? ReturnUrl { get; set; }
+
+    private string ExternalHref => "/auth/external/login?returnUrl=" + Uri.EscapeDataString(
+        !string.IsNullOrEmpty(ReturnUrl) && ReturnUrl.StartsWith('/') ? ReturnUrl : "/");
 
     private string LoginHref => "/auth/login?returnUrl=" + Uri.EscapeDataString(
         !string.IsNullOrEmpty(ReturnUrl) && ReturnUrl.StartsWith('/') ? ReturnUrl : "/");

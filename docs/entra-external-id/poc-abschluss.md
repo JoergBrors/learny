@@ -70,3 +70,7 @@ Reihenfolge (jeweils mit eigener ADR gegenüber den Learny-ADRs 0005, 0011, 0012
 5. **Claims und Rechte:** `learny_*` aus den Learny-Berechtigungen (Module/Themen/Zuweisungen) ableiten; Marke und Ungültigmachen über gemeinsamen Speicher; Zugriffsprüfung bleibt in der Datenbank.
 6. **Entscheidungen vorab:** Passkeys (Passwortkonten ja/nein), B2B über Entra-Föderation, Sperre der Registrierung außerhalb der Einladung, eigene Anmeldedomäne statt `ciamlogin.com`, Rolle `themen_admin`/Auditor für Externe, Aufbewahrung des Ereignisprotokolls.
 7. **Betrieb:** Terraform-Stacks und Bootstrap-Skripte aus `infra/entra-external-id/` als Grundlage für Test-/Produktionstenant übernehmen; kein `apply` ohne geprüften Plan.
+
+## Nachtrag 2026-11-08: Stand der Learny-Integration
+
+Der PoC bleibt als Referenz unverändert. In Learny sind Phase A (zweiter Anbieter, Bestandsschutz) und Phase B (Einladungen, Lernprofile, Zuweisungen, atomare Einlösung) umgesetzt, siehe [learny-integration.md](learny-integration.md) und ADR [0048](../adr/0048-multi-issuer-authentifizierung-und-bestandsschutz.md)/[0049](../adr/0049-einladungs-und-lernberechtigungsmodell.md). Abweichungen vom PoC: lokale Konten gelten nicht als bestätigte E-Mail, Einlösung in einer Transaktion statt Kompensation, Zuweisungen auf die Learny-Module und -Themen, keine Rollen aus Profilen.

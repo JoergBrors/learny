@@ -36,6 +36,10 @@ public class AppConfig
     public string OidcClientSecret { get; set; } = "";
     public string OidcAudience { get; set; } = "";
     public string OidcScope { get; set; } = "openid profile email";
+    /// <summary>Zweiter Identitätsanbieter für externe Lernende (ADR 0048); der Workforce-Zugang oben bleibt unverändert.</summary>
+    public ExternalIdSettings ExternalId { get; set; } = new();
+    /// <summary>Einladungspflichtige Registrierung (ADR 0049): HMAC-Schlüssel der Einladungslinks, Basisadresse, Gültigkeit.</summary>
+    public InviteSettings Invitations { get; set; } = new();
 
     // OpenAI
     public string OpenAiApiKey { get; set; } = "";
@@ -188,6 +192,9 @@ public class AppConfig
             if (authMode == "oidc" && (!oidcComplete || cfg.OidcClientSecret.Length == 0))
                 throw new InvalidOperationException("AUTH_MODE=oidc, aber OIDC_ISSUER, OIDC_CLIENT_ID oder OIDC_CLIENT_SECRET fehlt.");
         }
+        // ── Entra External ID als zweiter Identitätsanbieter (ADR 0048): Standard aus; wenn aktiv, vollständig und strikt getrennt vom Workforce-Zugang ──
+        cfg.ExternalId = ExternalIdSettings.Load(k => E(k), cfg.OidcIssuer, cfg.OidcClientId, isDevelopment);
+        cfg.Invitations = InviteSettings.Resolve(k => E(k), cfg.ExternalId.Enabled, isDevelopment, Path.GetFullPath("data"), cfg.Blockchain.PublicBaseUrl);   // Pflicht, solange External ID aktiv ist
         if (cfg.McpPublicUrls.Count == 0 && cfg.AuthMode == "dev")
             cfg.McpPublicUrls = new() { "http://127.0.0.1:8787", "http://localhost:8787" };
 

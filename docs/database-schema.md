@@ -165,6 +165,65 @@ Protokoll administrativer Aktionen (Rollen, Sperren, Zuweisung, Benutzeranlage).
 | detail | TEXT NOT NULL | |
 | created_at | TEXT NOT NULL | Index `ix_audit_log_created` |
 
+### user_identities — Ergänzung `kind` (ADR 0049)
+`kind TEXT NOT NULL DEFAULT 'workforce'`: `workforce` (Altbestand, Dev-Login) | `external` (Entra External ID, nur durch die Einladungseinlösung). Spalte per `ALTER TABLE … ADD COLUMN` mit Standardwert (SQLite und PostgreSQL, idempotent); bestehende Zeilen werden nicht verändert und gelten als `workforce`.
+
+### user_profiles
+Externes Lernprofil (ADR 0049). **Kein Eintrag = Bestandsprofil** (bisherige Berechtigungslogik). Kein administratives Recht, keine Rolle.
+
+| Spalte | Typ | Hinweis |
+|---|---|---|
+| user_id | UUID PK → users ON DELETE CASCADE | |
+| profile | TEXT NOT NULL | `B2B_LEARNER` \| `B2C_LEARNER` |
+| source_invitation_id | UUID NULL | Einladung, aus der das Profil stammt |
+| created_at | TEXT NOT NULL | |
+
+### invitations
+| Spalte | Typ | Hinweis |
+|---|---|---|
+| invitation_id | UUID PK | |
+| recipient_email | TEXT NOT NULL | normalisiert (klein); Index `ix_invitations_email (recipient_email, status)` |
+| token_hash | TEXT NOT NULL UNIQUE | HMAC-SHA256(Token) mit `INVITE_TOKEN_KEY`; nie der Token |
+| target_profile | TEXT NOT NULL | `B2B_LEARNER` \| `B2C_LEARNER` |
+| status | TEXT NOT NULL DEFAULT 'pending' | `pending` \| `accepted` \| `revoked`; `expired` wird aus `expires_at` abgeleitet |
+| created_by | UUID NOT NULL | Administrator |
+| created_at, expires_at | TEXT NOT NULL | |
+| accepted_at, revoked_at | TEXT NULL | |
+| accepted_user_id | UUID NULL | |
+| token_version | INTEGER NOT NULL DEFAULT 1 | steigt bei Rotation |
+
+### invitation_module_grants / invitation_topic_grants
+`invitation_module_grants (invitation_id → invitations, module_id → modules, PK beide)`. `invitation_topic_grants (invitation_id, topic_id → topics, topic_version INTEGER NULL, mandatory INTEGER DEFAULT 0, due_at TEXT NULL, PK (invitation_id, topic_id))`. Beide kaskadieren mit der Einladung; die Zuweisungen werden bei der Einlösung in `module_grants` bzw. `topic_assignments` übernommen.
+
+### invitation_deliveries / invitation_meta / invitation_events
+- `invitation_deliveries (invitation_id PK, status 'pending'|'submitted'|'failed'|'unknown', attempts, lease_until, last_attempt_at, submitted_at, last_error_code, updated_at)` — Versandstatus getrennt vom Einladungsstatus (ADR 0044); der Versand folgt in Phase C.
+- `invitation_meta (invitation_id PK, display_name, description, note)` — Verwaltungsangaben; der Anzeigename wird beim Anlegen des Benutzers verwendet.
+- `invitation_events (id PK, invitation_id NULL, user_id NULL, event_type, category NULL, actor_user_id NULL, at)` — Ereignisprotokoll mit festem Typkatalog (`InviteEventTypes`), Kategorie nur `[A-Za-z0-9_.:-]{1,64}`; nie Codes, Links, Tokens. Indizes `ix_invitation_events_inv (invitation_id, at)`, `ix_invitation_events_at (at)`.
+
+### module_grants
+Ausdrückliche Modulzuweisung je Benutzer (ADR 0049). Für externe Lernprofile die einzige Quelle des Zugriffs auf globale Module, für das Bestandsprofil informativ.
+
+| Spalte | Typ | Hinweis |
+|---|---|---|
+| user_id | UUID → users ON DELETE CASCADE | PK (user_id, module_id) |
+| module_id | UUID → modules ON DELETE CASCADE | |
+| publication_id | UUID NULL | bei globalen Modulen: die Zuweisung folgt der Veröffentlichung auf die aktive Version; Index `ix_module_grants_publication` |
+| source_invitation_id | UUID NULL | |
+| granted_by, granted_at | UUID NULL, TEXT NOT NULL | |
+| revoked_at, revoked_by | TEXT NULL, UUID NULL | Widerruf bleibt nachvollziehbar; wirksam ist nur `revoked_at IS NULL` |
+
+Atomare Anweisungsgruppen (`IDatabase.ExecuteBatchAsync`, ADR 0049) bündeln die Einlösung einer Einladung in einer Transaktion. **PostgreSQL ist für diese Tabellen und die Transaktionsgruppe nicht live geprüft** (offener Prüfpunkt, Phase F).
+
+### oidc_consumed_states
+Einmaligkeit des OIDC-`state` über alle Instanzen für den External-ID-Rücksprung (ADR 0048). Es wird nur der Hash gespeichert; abgelaufene Einträge werden bei jedem Verbrauch entfernt.
+
+| Spalte | Typ | Hinweis |
+|---|---|---|
+| state_hash | TEXT PK | SHA-256 (hex) des `state`; Anspruch per `INSERT … ON CONFLICT (state_hash) DO NOTHING` (atomar) |
+| expires_at | TEXT NOT NULL | Ablauf (ISO-8601); nur zur Bereinigung |
+
+Die Tabelle entsteht idempotent in `Schema.cs` (SQLite und PostgreSQL, `CREATE TABLE IF NOT EXISTS`); bestehende Daten werden nicht berührt.
+
 ### modules
 | Spalte | Typ | Hinweis |
 |---|---|---|

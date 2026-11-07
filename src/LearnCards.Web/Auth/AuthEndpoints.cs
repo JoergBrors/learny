@@ -151,7 +151,7 @@ public static class AuthEndpoints
 
     /// <summary>Setzt die Cookie-Session. "uid" (interne Benutzer-ID) wird ausschließlich hier serverseitig gesetzt;
     /// Rollen kommen nicht aus dem Cookie, sondern werden bei jeder Anfrage frisch aus der Datenbank geladen (siehe Program.cs).</summary>
-    private static async Task SignInAsync(HttpContext http, AppUser user, string externalSubject)
+    internal static async Task SignInAsync(HttpContext http, AppUser user, string externalSubject)
     {
         var claims = new List<Claim>
         {
@@ -188,12 +188,12 @@ public static class AuthEndpoints
     }
 
     /// <summary>Öffentliche Callback-Adresse (PUBLIC_BASE_URL hat Vorrang); außerhalb der Entwicklung nur HTTPS, sonst null.</summary>
-    private static string? BuildRedirectUri(HttpContext http, AppConfig cfg) =>
+    internal static string? BuildRedirectUri(HttpContext http, AppConfig cfg, string path = OidcCallback.CallbackPath) =>
         OidcCallback.ResolveRedirectUri(cfg.Blockchain.PublicBaseUrl, http.Request.Scheme, http.Request.Host,
-            allowHttp: http.RequestServices.GetRequiredService<IWebHostEnvironment>().IsDevelopment());
+            allowHttp: http.RequestServices.GetRequiredService<IWebHostEnvironment>().IsDevelopment(), path);
 
     /// <summary>303 See Other nach dem POST, ohne Zwischenspeicherung; die Ziel-URL enthält nie Codes.</summary>
-    private static IResult NoStoreRedirect(HttpContext http, string url)
+    internal static IResult NoStoreRedirect(HttpContext http, string url)
     {
         http.Response.Headers.CacheControl = "no-store";
         http.Response.Headers.Pragma = "no-cache";
@@ -202,6 +202,6 @@ public static class AuthEndpoints
         return Results.Empty;
     }
 
-    private static string SafeReturnUrl(string? url) =>
+    internal static string SafeReturnUrl(string? url) =>
         !string.IsNullOrEmpty(url) && url.StartsWith('/') && !url.StartsWith("//") ? url : "/";
 }

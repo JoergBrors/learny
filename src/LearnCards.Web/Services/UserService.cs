@@ -89,6 +89,22 @@ public class UserService
     }
 
     /// <summary>
+    /// Meldet eine <b>bereits bekannte</b> externe Identität an (Entra External ID, ADR 0048): legt nie einen Benutzer an, gleicht keine Rollen
+    /// des Identity Providers ab, ändert weder E-Mail noch Anzeigename und verknüpft nie anhand der E-Mail-Adresse. Unbekannte Identität → null
+    /// (die Registrierung läuft ausschließlich über eine gültige Einladung). Nur die Login-Zeit wird fortgeschrieben.
+    /// </summary>
+    public async Task<AppUser?> SignInKnownIdentityAsync(string provider, string subject)
+    {
+        if (string.IsNullOrWhiteSpace(provider) || string.IsNullOrWhiteSpace(subject)) return null;
+        var userId = await FindUserIdByIdentityAsync(provider, subject);
+        if (userId is null) return null;
+        var user = await GetAsync(userId);
+        if (user is null || !user.IsActive) return user;
+        await _db.ExecuteAsync("UPDATE users SET last_login_at=@now WHERE id=@id", new (string, object?)[] { ("now", DateTime.UtcNow), ("id", userId) });
+        return user;
+    }
+
+    /// <summary>
     /// Gleicht die vom Identity Provider gelieferten App-Rollen mit den internen Rollen ab (ADR 0012).
     /// Nur Rollen aus <see cref="AppConfig.RoleMap"/> werden verwaltet. Vergeben wird mit granted_by = 'idp'; entzogen wird nur, was
     /// ebenfalls vom IdP vergeben wurde — manuell (Admin-UI) oder per Bootstrap vergebene Rollen bleiben unangetastet.
@@ -137,6 +153,17 @@ public class UserService
                 new (string, object?)[] { ("new", userId), ("old", subject) });
 
         await _db.ExecuteAsync("UPDATE users SET legacy_migrated=1 WHERE id=@id", new[] { ("id", (object?)userId) });
+    }
+
+    /// <summary>Existiert die Identität (Issuer + Subject)? Nur lesend; legt nichts an und verändert nichts.</summary>
+    public async Task<bool> HasIdentityAsync(string provider, string subject) =>
+        !string.IsNullOrWhiteSpace(provider) && !string.IsNullOrWhiteSpace(subject) && await FindUserIdByIdentityAsync(provider, subject) is not null;
+
+    /// <summary>Art der Identität (<see cref="IdentityKinds"/>) oder null, wenn sie nicht existiert.</summary>
+    public async Task<string?> GetIdentityKindAsync(string provider, string subject)
+    {
+        var rows = await _db.QueryAsync("SELECT kind FROM user_identities WHERE provider=@p AND subject=@s", new (string, object?)[] { ("p", provider), ("s", subject) });
+        return rows.FirstOrDefault()?.GetValueOrDefault("kind");
     }
 
     private async Task<string?> FindUserIdByIdentityAsync(string provider, string subject)

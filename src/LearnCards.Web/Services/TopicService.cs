@@ -92,6 +92,7 @@ public partial class TopicService
 
     public async Task<TopicInfo> CreateAsync(string ownerId, string name, string? description, string? newId = null)
     {
+        await RequireNotRestrictedAsync(ownerId);
         var owner = await _users.GetAsync(ownerId);
         if (owner is null || !owner.IsActive) throw new UnauthorizedAccessException("Benutzer nicht aktiv.");
         name = CleanName(name);
@@ -138,6 +139,7 @@ public partial class TopicService
     /// </summary>
     public async Task<TopicInfo> DuplicateAsync(string ownerId, string topicId)
     {
+        await RequireNotRestrictedAsync(ownerId);
         var source = await RequireOwnTopicAsync(ownerId, topicId, allowArchived: true);
         var baseName = source.Name.Length > MaxNameLength - 12 ? source.Name[..(MaxNameLength - 12)] : source.Name;
         var name = baseName + " (Kopie)";
@@ -516,13 +518,20 @@ public partial class TopicService
         public List<TopicSummary> MandatoryDone { get; set; } = new();
     }
 
+    /// <summary>ADR 0049: externe Lernprofile legen keine eigenen Themen an.</summary>
+    private async Task RequireNotRestrictedAsync(string ownerId)
+    {
+        if (await _repo.IsRestrictedLearnerAsync(ownerId)) throw new UnauthorizedAccessException("Externe Lernprofile dürfen keine eigenen Themen anlegen.");
+    }
+
     /// <summary>Vier Bereiche: meine Themen, mit mir geteilte, mir zugewiesene und globale Themen. Archivierte Themen erscheinen nur mit <paramref name="includeArchived"/>.</summary>
     public async Task<TopicOverview> ListOverviewAsync(string userId, bool includeArchived = false)
     {
         var overview = new TopicOverview();
         var archivedFilter = includeArchived ? "" : " AND t.status = 'active'";
+        var restricted = await _repo.IsRestrictedLearnerAsync(userId);   // ADR 0049: externe Lernprofile sehen nur ausdrücklich zugewiesene Themen
 
-        foreach (var r in await _db.QueryAsync(TopicSelect + " WHERE t.owner_user_id = @u" + archivedFilter + " ORDER BY t.name", new[] { ("u", (object?)userId) }))
+        foreach (var r in restricted ? new List<Dictionary<string, string?>>() : await _db.QueryAsync(TopicSelect + " WHERE t.owner_user_id = @u" + archivedFilter + " ORDER BY t.name", new[] { ("u", (object?)userId) }))
         {
             var topic = MapTopic(r);
             var summary = new TopicSummary { Topic = topic, Section = TopicSections.Own, Version = topic.LatestVersion, GlobalStatus = await LatestGlobalStatusAsync(topic.Id) };
@@ -543,12 +552,12 @@ public partial class TopicService
         }
         var ownAssigned = new List<TopicSummary>();
         // Pflicht auch für Themen, die der Benutzer selbst besitzt oder die global sind: eine ausdrückliche Zuweisung bleibt eine Zuweisung
-        foreach (var r in await _db.QueryAsync(TopicSelect + " JOIN topic_assignments a ON a.topic_id = t.id AND a.user_id = @u AND a.status = 'active' WHERE t.owner_user_id = @u" + archivedFilter, new[] { ("u", (object?)userId) }))
+        foreach (var r in restricted ? new List<Dictionary<string, string?>>() : await _db.QueryAsync(TopicSelect + " JOIN topic_assignments a ON a.topic_id = t.id AND a.user_id = @u AND a.status = 'active' WHERE t.owner_user_id = @u" + archivedFilter, new[] { ("u", (object?)userId) }))
         {
             var s = await LearnerSummaryAsync(userId, MapTopic(r), TopicSections.Assigned);
             if (s is not null) { assignedIds.Add(s.Topic.Id); ownAssigned.Add(s); }   // erscheint in „Meine Themen“, zusätzlich nur als Pflicht
         }
-        foreach (var r in await _db.QueryAsync(TopicSelect + " JOIN topic_shares sh ON sh.topic_id = t.id AND sh.target_user_id = @u AND sh.revoked_at IS NULL WHERE t.owner_user_id <> @u" + archivedFilter + " ORDER BY t.name",
+        foreach (var r in restricted ? new List<Dictionary<string, string?>>() : await _db.QueryAsync(TopicSelect + " JOIN topic_shares sh ON sh.topic_id = t.id AND sh.target_user_id = @u AND sh.revoked_at IS NULL WHERE t.owner_user_id <> @u" + archivedFilter + " ORDER BY t.name",
                      new[] { ("u", (object?)userId) }))
         {
             var topic = MapTopic(r);
@@ -556,7 +565,7 @@ public partial class TopicService
             var s = await LearnerSummaryAsync(userId, topic, TopicSections.Shared);
             if (s is not null) overview.Shared.Add(s);
         }
-        foreach (var r in await _db.QueryAsync(TopicSelect + " WHERE EXISTS (SELECT 1 FROM topic_versions gv WHERE gv.topic_id = t.id AND gv.global_status = 'active' AND gv.status = 'published') ORDER BY t.name"))
+        foreach (var r in restricted ? new List<Dictionary<string, string?>>() : await _db.QueryAsync(TopicSelect + " WHERE EXISTS (SELECT 1 FROM topic_versions gv WHERE gv.topic_id = t.id AND gv.global_status = 'active' AND gv.status = 'published') ORDER BY t.name"))
         {
             var s = await LearnerSummaryAsync(userId, MapTopic(r), TopicSections.Global, globalOnly: true);
             if (s is not null) overview.Global.Add(s);

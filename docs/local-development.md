@@ -55,6 +55,14 @@ Nützliche Tasks (`Strg+Shift+P` → „Tasks: Run Task“):
 Hinweis MCP: Der gemeinsame `MCP_API_KEY` (in den Starten `change-me-mcp-key`) ist nur ein Dienstschlüssel des MCP-Servers und gewährt keinen Datenzugriff.
 Jeder Benutzer meldet sich selbst an — siehe Abschnitt „5. MCP-Anmeldung pro Benutzer“ ([ADR 0013](adr/0013-mcp-benutzergebundene-anmeldung.md)).
 
+## 2b. Zweiter Anmeldeweg: Entra External ID (optional, ADR 0048)
+
+Standard aus. Zum Ausprobieren in `.env` `EXTID_ENABLED=1`, `EXTID_AUTHORITY`, `EXTID_TENANT_ID`, `EXTID_CLIENT_ID` und `EXTID_CLIENT_SECRET` des External Tenants setzen (eigene App-Registrierung, Redirect-URI `http://localhost:5000/auth/external/callback`; Werte siehe `.env.example`). Die Anmeldeseite zeigt dann zusätzlich „Externe Anmeldung“. Es melden sich nur bereits bekannte externe Identitäten an; neue Benutzer entstehen erst mit der Einladungseinlösung (Phase B). Der Workforce-Login und der Dev-Login ändern sich nicht. Automatisierter Nachweis: `OidcFlowTests` startet dafür einen zweiten Test-Identity-Provider.
+
+### Einladungen lokal (ADR 0049, Phase B)
+
+Mit `EXTID_ENABLED=1` erzeugt die Entwicklungsumgebung einmalig `data/invite-token.key` (nie committen; in Produktion `INVITE_TOKEN_KEY` aus der `.env`). Einladungslinks entstehen in Phase B nur über `InvitationService.CreateAsync` (Administrator); die Oberfläche folgt in Phase C. Der Ablauf (Link → Entra → Einlösung → Profil und Zuweisungen) ist durch `OidcFlowTests` (zweiter Test-Identity-Provider) und `InvitationUnitTests` belegt.
+
 ## 3. MCP-Server lokal testen
 
 ```bash

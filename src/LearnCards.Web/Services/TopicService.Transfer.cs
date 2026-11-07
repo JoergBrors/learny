@@ -172,6 +172,7 @@ public partial class TopicService
     /// <summary>Erstellt aus einer Definition ein neues privates Thema (Entwurf; keine Veröffentlichung). Bei jedem Fehler bleibt nichts zurück.</summary>
     public async Task<TopicInfo> CreateFromDefinitionAsync(string ownerId, string json)
     {
+        await RequireNotRestrictedAsync(ownerId);
         var def = ParseDefinition(json);
         var createdModules = new List<string>();
         var newId = Guid.NewGuid().ToString();   // vorab bekannt: das Aufräumen trifft nie ein fremdes Thema

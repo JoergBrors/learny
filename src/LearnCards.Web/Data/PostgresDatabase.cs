@@ -36,6 +36,7 @@ public sealed class PostgresDatabase : IDatabase
             await MigrateLegacySchemaAsync(ct);
             await MigrateCardContentColumnsAsync(ct);
             await MigrateQuizResultColumnsAsync(ct);
+            await EnsureTableColumnAsync("user_identities", "kind", "TEXT NOT NULL DEFAULT 'workforce'", ct);   // ADR 0049: Altbestand = workforce
             await EnsureTableColumnAsync("mcp_links", "hash_alg", "TEXT NOT NULL DEFAULT 'sha256'", ct);   // ADR 0025
             await EnsureTableColumnAsync("mcp_links", "key_id", "TEXT NOT NULL DEFAULT ''", ct);
             await EnsureTableColumnAsync("mcp_links", "row_mac", "TEXT NOT NULL DEFAULT ''", ct);
@@ -61,6 +62,42 @@ public sealed class PostgresDatabase : IDatabase
     {
         await _gate.WaitAsync(ct);
         try { return (await RunWithRetryAsync(sql, args, ct)).Affected; }
+        finally { _gate.Release(); }
+    }
+
+    /// <summary>Atomare Gruppe in einer Transaktion (BEGIN … COMMIT, bei Fehler ROLLBACK). Nach Verbindungsverlust mitten in der Transaktion wird <b>nicht</b> wiederholt:
+    /// der Server verwirft die offene Transaktion; der Aufrufer prüft den Zustand idempotent nach.</summary>
+    public async Task<int[]> ExecuteBatchAsync(IReadOnlyList<DbStatement> statements, CancellationToken ct = default)
+    {
+        await _gate.WaitAsync(ct);
+        try
+        {
+            try { await EnsureConnectedAsync(ct); await ExecCoreAsync("BEGIN", null, ct); }
+            catch (Exception ex) when (ex is IOException or SocketException or ObjectDisposedException)
+            {
+                CloseSilently();   // veraltete Verbindung: vor Beginn der Transaktion einmal neu verbinden
+                await EnsureConnectedAsync(ct);
+                await ExecCoreAsync("BEGIN", null, ct);
+            }
+            var affected = new int[statements.Count];
+            try
+            {
+                for (var i = 0; i < statements.Count; i++)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    affected[i] = (await ExecCoreAsync(statements[i].Sql, statements[i].Args, ct)).Affected;
+                    if (statements[i].ExpectedRows is int expected && expected != affected[i]) throw new DbBatchConflictException(i, expected, affected[i]);
+                }
+                await ExecCoreAsync("COMMIT", null, ct);
+                return affected;
+            }
+            catch
+            {
+                try { await ExecCoreAsync("ROLLBACK", null, CancellationToken.None); }
+                catch { CloseSilently(); }   // Verbindung verwerfen: der Server rollt die Transaktion beim Trennen zurück
+                throw;
+            }
+        }
         finally { _gate.Release(); }
     }
 

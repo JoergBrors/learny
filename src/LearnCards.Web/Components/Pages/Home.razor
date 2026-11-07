@@ -304,7 +304,7 @@
         _modules = await Repo.ListModulesAsync(_userId);
         _latestVersions = await ModuleVersions.ListLatestVersionNumbersAsync(_userId);
         _shared = await Repo.ListSharedWithMeAsync(_userId);
-        _global = await Repo.ListGlobalModulesAsync();
+        _global = await Repo.ListGlobalModulesAsync(_userId);
         // bestandene Module: jüngstes Zertifikat je Modul (bei globalen Modulen gehört es zur jeweiligen Version)
         try
         {

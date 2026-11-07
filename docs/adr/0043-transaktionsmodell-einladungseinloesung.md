@@ -40,3 +40,7 @@ Die Entscheidung wurde erneut geprüft und ist **unverändert**. Der Livetest ge
 ## Nachtrag 2026-11-08 (Portal)
 
 Entscheidung unverändert. `module_grants.source_invitation_id` ist jetzt nullbar (administrative Zuweisungen haben keine Einladung; zusätzlich `granted_by`). Der atomare Anspruch, die Kompensation und der fail-closed-Zustand sind unberührt; neu getestet: zwei Portalinstanzen auf derselben Datenbankdatei, 12 parallele Einlösungen → genau ein Erfolg.
+
+## Nachtrag 2026-11-08 (Learny-Integration, Phase B)
+
+In Learny ersetzt `IDatabase.ExecuteBatchAsync` (eine atomare Transaktion) die Kompensation: Die Frage dieser ADR nach einer Transaktionsunterstützung ist durch [0049](0049-einladungs-und-lernberechtigungsmodell.md) entschieden. Der PoC bleibt unverändert; die Kompensationsstrategie gilt für Learny nicht als produktionsreif. PostgreSQL ist noch nicht live geprüft.

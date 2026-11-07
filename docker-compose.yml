@@ -50,6 +50,15 @@ services:
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET}
       OIDC_AUDIENCE: ${OIDC_AUDIENCE}
       OIDC_WEB_SCOPE: ${OIDC_SCOPE:-openid profile email}
+      # Entra External ID als zweiter Anmeldeweg (ADR 0048); Standard aus, Workforce-Anmeldung bleibt unverändert
+      EXTID_ENABLED: ${EXTID_ENABLED:-0}
+      EXTID_AUTHORITY: ${EXTID_AUTHORITY:-}
+      EXTID_TENANT_ID: ${EXTID_TENANT_ID:-}
+      EXTID_CLIENT_ID: ${EXTID_CLIENT_ID:-}
+      EXTID_CLIENT_SECRET: ${EXTID_CLIENT_SECRET:-}
+      EXTID_SCOPE: ${EXTID_SCOPE:-openid profile email}
+      INVITE_TOKEN_KEY: ${INVITE_TOKEN_KEY:-}   # Pflicht, solange EXTID_ENABLED gesetzt ist (ADR 0049)
+      INVITE_VALIDITY_HOURS: ${INVITE_VALIDITY_HOURS:-72}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
       MCP_API_KEY: ${MCP_API_KEY:-change-me-mcp-key}

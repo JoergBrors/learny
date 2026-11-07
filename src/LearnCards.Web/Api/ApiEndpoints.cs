@@ -167,7 +167,7 @@ public static partial class ApiEndpoints
             var list = new List<ModuleInfo>();
             if (s is "private" or "all") list.AddRange(await repo.ListModulesAsync(uid));
             if (s is "shared" or "all") list.AddRange(await repo.ListSharedWithMeAsync(uid));
-            if (s is "global" or "all") list.AddRange(await repo.ListGlobalModulesAsync());
+            if (s is "global" or "all") list.AddRange(await repo.ListGlobalModulesAsync(uid));
             return Results.Ok(list.Select(ModuleDto));
         });
 

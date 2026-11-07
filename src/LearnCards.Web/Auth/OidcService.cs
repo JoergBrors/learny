@@ -5,14 +5,22 @@ using LearnCards.Web.Infrastructure;
 
 namespace LearnCards.Web.Auth;
 
+/// <summary>Konfiguration eines Identitätsanbieters. Der Workforce-Anbieter wird unverändert aus <c>OIDC_*</c> gebildet (ADR 0005), External ID aus <c>EXTID_*</c> (ADR 0048).</summary>
+/// <param name="Authority">Basis der Discovery (<c>/.well-known/openid-configuration</c>).</param>
+/// <param name="ExpectedTenantId">Wenn gesetzt, muss der Claim <c>tid</c> übereinstimmen (bindet die Identität an genau einen Tenant).</param>
+/// <param name="StrictIssuer">true: nur der Issuer der Discovery gilt (kein Abgleich mit der konfigurierten Adresse).</param>
+public sealed record OidcProviderOptions(string Name, string Authority, string ClientId, string ClientSecret, string Scope, string? ExpectedTenantId = null, bool StrictIssuer = false);
+
 /// <summary>
 /// OpenID-Connect-Client (Authorization Code Flow + PKCE, Confidential Client) —
 /// implementiert direkt gegen Discovery/Token/JWKS-Endpunkte, ohne NuGet-Abhängigkeit.
 /// Funktioniert mit Entra ID und jedem standardkonformen OIDC-Provider.
+/// Diese Klasse ist der Workforce-Anbieter; <see cref="ExternalOidcService"/> ist ein eigener, getrennter Anbieter mit eigener Discovery,
+/// eigenem Schlüsselcache und eigener Client-ID (keine gemeinsamen Zustände).
 /// </summary>
 public class OidcService
 {
-    private readonly AppConfig _cfg;
+    private readonly OidcProviderOptions _opt;
     private readonly IHttpClientFactory _httpFactory;
     private DiscoveryDocument? _discovery;
     private JsonDocument? _jwks;
@@ -20,10 +28,17 @@ public class OidcService
     private readonly SemaphoreSlim _lock = new(1, 1);
 
     public OidcService(AppConfig cfg, IHttpClientFactory httpFactory)
+        : this(new OidcProviderOptions("workforce", cfg.OidcIssuer, cfg.OidcClientId, cfg.OidcClientSecret, cfg.OidcScope), httpFactory)
     {
-        _cfg = cfg;
+    }
+
+    protected OidcService(OidcProviderOptions options, IHttpClientFactory httpFactory)
+    {
+        _opt = options;
         _httpFactory = httpFactory;
     }
+
+    public string ProviderName => _opt.Name;
 
     public record DiscoveryDocument(
         string Issuer,
@@ -40,7 +55,7 @@ public class OidcService
         {
             if (_discovery is not null) return _discovery;
             var http = _httpFactory.CreateClient("oidc");
-            var url = _cfg.OidcIssuer + "/.well-known/openid-configuration";
+            var url = _opt.Authority + "/.well-known/openid-configuration";
             using var doc = JsonDocument.Parse(await http.GetStringAsync(url, ct));
             var root = doc.RootElement;
             _discovery = new DiscoveryDocument(
@@ -70,7 +85,8 @@ public class OidcService
 
     // ─── Authorization Request ──────────────────────────────────────────────
 
-    public record AuthState(string State, string Nonce, string CodeVerifier, string ReturnUrl);
+    /// <summary>Zustand der Anmeldung im verschlüsselten Korrelationscookie. <paramref name="InviteToken"/> nur im External-ID-Registrierungsablauf (ADR 0049), nie in URL oder state-Parameter.</summary>
+    public record AuthState(string State, string Nonce, string CodeVerifier, string ReturnUrl, string? InviteToken = null);
 
     public static AuthState CreateState(string returnUrl) => new(
         State: RandomToken(24),
@@ -81,7 +97,7 @@ public class OidcService
     public async Task<string> BuildAuthorizeUrlAsync(AuthState state, string redirectUri, CancellationToken ct = default)
     {
         var disco = await GetDiscoveryAsync(ct);
-        return BuildAuthorizeUrl(disco.AuthorizationEndpoint, _cfg.OidcClientId, _cfg.OidcScope, state, redirectUri);
+        return BuildAuthorizeUrl(disco.AuthorizationEndpoint, _opt.ClientId, _opt.Scope, state, redirectUri);
     }
 
     /// <summary>Authorization Code Flow mit PKCE (S256). <c>response_mode=form_post</c>: der Code kommt per POST-Body zurück, nie in der URL (ADR 0036).</summary>
@@ -113,8 +129,8 @@ public class OidcService
         var http = _httpFactory.CreateClient("oidc");
         var form = new Dictionary<string, string>
         {
-            ["client_id"] = _cfg.OidcClientId,
-            ["client_secret"] = _cfg.OidcClientSecret,
+            ["client_id"] = _opt.ClientId,
+            ["client_secret"] = _opt.ClientSecret,
             ["grant_type"] = "authorization_code",
             ["code"] = code,
             ["redirect_uri"] = redirectUri,
@@ -166,13 +182,19 @@ public class OidcService
         var iss = payload.GetProperty("iss").GetString();
         var expectedIssuer = disco.Issuer;
         if (!string.Equals(iss?.TrimEnd('/'), expectedIssuer.TrimEnd('/'), StringComparison.Ordinal) &&
-            !string.Equals(iss?.TrimEnd('/'), _cfg.OidcIssuer.TrimEnd('/'), StringComparison.Ordinal))
+            (_opt.StrictIssuer || !string.Equals(iss?.TrimEnd('/'), _opt.Authority.TrimEnd('/'), StringComparison.Ordinal)))
             throw new InvalidOperationException($"Issuer stimmt nicht: {iss}");
+
+        // Tenant-Bindung (External ID): die Identität muss aus genau dem konfigurierten Tenant stammen.
+        if (_opt.ExpectedTenantId is { } expectedTid
+            && (!payload.TryGetProperty("tid", out var tid) || tid.ValueKind != JsonValueKind.String
+                || !string.Equals(tid.GetString(), expectedTid, StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("Tenant stimmt nicht.");
 
         var audOk = payload.TryGetProperty("aud", out var aud) && aud.ValueKind switch
         {
-            JsonValueKind.String => aud.GetString() == _cfg.OidcClientId,
-            JsonValueKind.Array => aud.EnumerateArray().Any(x => x.GetString() == _cfg.OidcClientId),
+            JsonValueKind.String => aud.GetString() == _opt.ClientId,
+            JsonValueKind.Array => aud.EnumerateArray().Any(x => x.GetString() == _opt.ClientId),
             _ => false,
         };
         if (!audOk) throw new InvalidOperationException("Audience stimmt nicht mit der Client-ID überein.");
@@ -226,5 +248,18 @@ public class OidcService
         var b = s.Replace('-', '+').Replace('_', '/');
         switch (b.Length % 4) { case 2: b += "=="; break; case 3: b += "="; break; }
         return Convert.FromBase64String(b);
+    }
+}
+
+/// <summary>
+/// Entra External ID als zweiter Identitätsanbieter (ADR 0048): eigene Authority, Client-ID, eigenes Secret, eigener Tenant (<c>tid</c>), Issuer nur aus der Discovery.
+/// Wird nie für Rollen herangezogen und ersetzt den Workforce-Zugang nicht.
+/// </summary>
+public sealed class ExternalOidcService : OidcService
+{
+    public ExternalOidcService(AppConfig cfg, IHttpClientFactory httpFactory)
+        : base(new OidcProviderOptions("external", cfg.ExternalId.Authority, cfg.ExternalId.ClientId, cfg.ExternalId.ClientSecret, cfg.ExternalId.Scope,
+            ExpectedTenantId: cfg.ExternalId.TenantId, StrictIssuer: true), httpFactory)
+    {
     }
 }

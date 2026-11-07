@@ -42,3 +42,7 @@ Unter IIS lieferte der Rücksprung `GET /auth/callback?code=…` HTTP 404.15 (Re
 - **Forwarded Headers** vertrauen weiterhin jeder Quelle; das ist **nicht behoben** (siehe [Sicherheitsdokument](../security-update-cve-2026-111497.md), Abschnitt 8, mit ADR-Vorschlag „Vertrauenswürdige Proxys“).
 - **Wiederholungssperre des state:** prozesslokal, nur bei Einzelinstanz vollständig wirksam; für mehrere Instanzen wäre gemeinsamer Zustand und eine neue ADR nötig.
 - Docker: automatischer Mindestversions-Check der .NET-Laufzeit vor der Veröffentlichung statt fester Image-Digests (`tools/docker/RuntimeCheck.cs`, `publish-docker.yml`; ergänzt [0024](0024-docker-hub-veroeffentlichung.md)).
+
+## Nachtrag 2026-11-08 (ADR 0048)
+
+Es gibt einen zweiten, getrennten Identitätsanbieter (Entra External ID, `EXTID_*`, `/auth/external/*`). Der hier beschriebene Workforce-Ablauf bleibt unverändert (Bestandsschutz); Identitäten werden nie über die E-Mail-Adresse zusammengeführt, Rollen kommen weiter nur aus dem Workforce-Token bzw. von Administratoren. Siehe [0048](0048-multi-issuer-authentifizierung-und-bestandsschutz.md).

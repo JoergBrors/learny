@@ -17,6 +17,9 @@ using Microsoft.AspNetCore.HttpOverrides;
 EnvLoader.Load();
 
 var builder = WebApplication.CreateBuilder(args);
+// ADR 0049: Einladungslinks (/invite/<token>) dürfen nicht in Anwendungslogs landen. Die Anfragezeilen des Hosts (Pfad inkl. Token) werden unabhängig von appsettings.json
+// erst ab Warning geschrieben; Fehler bleiben sichtbar. Zugriffsprotokolle von IIS/Proxy sind getrennt zu behandeln (docs/entra-external-id/learny-integration.md).
+builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
 var cfg = AppConfig.Load();
 
 // ─── Dienste ────────────────────────────────────────────────────────────────
@@ -36,7 +39,9 @@ builder.Services.AddSingleton<CardRepository>();
 builder.Services.AddSingleton<OpenAiClient>();
 builder.Services.AddSingleton<QuizService>();
 builder.Services.AddSingleton<ChatService>();
-builder.Services.AddSingleton<OidcService>();
+builder.Services.AddSingleton<OidcService>();   // Workforce (ADR 0005), unverändert
+builder.Services.AddSingleton<ExternalOidcService>();   // Entra External ID als zweiter, getrennter Anbieter (ADR 0048)
+builder.Services.AddSingleton<OidcStateStore>();   // Einmaligkeit des state über alle Instanzen (ADR 0048)
 builder.Services.AddSingleton<UserService>();
 builder.Services.AddSingleton<McpTokenProtector>();   // ADR 0025
 builder.Services.AddSingleton<McpLinkService>();
@@ -57,6 +62,9 @@ builder.Services.AddSingleton<CompetencyService>();   // Kompetenzmodell und Pr�
 builder.Services.AddSingleton<ModuleVersionService>();   // Modulversionen (ADR 0030)
 builder.Services.AddSingleton<ModuleTransferService>();   // Modul-JSON, Klonen (ADR 0028)
 builder.Services.AddSingleton<TopicService>();   // Themen (ADR 0027)
+builder.Services.AddSingleton<InviteEvents>();   // Ereignisprotokoll der Einladungen (ADR 0046/0049)
+builder.Services.AddSingleton<InvitationService>();   // einladungspflichtige Registrierung, atomare Einlösung (ADR 0042/0043/0049)
+builder.Services.AddSingleton<LearnerAdminService>();   // Lernprofile, ausdrückliche Modul-/Themenzuweisungen für die Verwaltung (ADR 0049)
 // Zertifikate, Open Badges und Blockchain-Verankerung (ADR 0021/0022)
 builder.Services.AddSingleton<BadgeSigner>();
 builder.Services.AddSingleton<ChainSettingsStore>();
@@ -164,6 +172,7 @@ app.UseAntiforgery();
 
 app.MapStaticAssets();
 app.MapAuthEndpoints();
+app.MapExternalAuthEndpoints();   // nur wenn EXTID_ENABLED (ADR 0048)
 app.MapLearnCardsApi();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();

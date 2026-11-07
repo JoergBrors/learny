@@ -61,6 +61,7 @@ public partial class CardRepository
 
     public async Task<ModuleInfo> CreateModuleAsync(ModuleCreateRequest req, string ownerId)
     {
+        if (await IsRestrictedLearnerAsync(ownerId)) throw new UnauthorizedAccessException("Externe Lernprofile dürfen keine eigenen Module anlegen.");   // ADR 0049
         var m = new ModuleInfo
         {
             Name = req.Name.Trim(),

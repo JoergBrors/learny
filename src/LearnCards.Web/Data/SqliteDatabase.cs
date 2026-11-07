@@ -69,6 +69,7 @@ public sealed class SqliteDatabase : IDatabase
             EnsureColumn("modules", "reference_id", "TEXT NULL");   // ADR 0028: stabile Modulreferenz für portable JSON-Definitionen
             ExecRaw("CREATE UNIQUE INDEX IF NOT EXISTS ux_modules_owner_reference ON modules(owner_user_id, reference_id)");
             ExecRaw("CREATE INDEX IF NOT EXISTS ix_certificates_test ON certificates(is_test, status)");   // erst nach dem Ergänzen der Spalte (Altdatenbanken)
+            EnsureColumn("user_identities", "kind", "TEXT NOT NULL DEFAULT 'workforce'");   // ADR 0049: 'workforce' (Bestand, Dev) | 'external' (Entra External ID); Altbestand = workforce
             EnsureColumn("topic_assignments", "topic_version", "INTEGER NULL");   // ADR 0029: Zuweisung an eine konkrete Themenversion (NULL = Altbestand: neueste veröffentlichte)
             EnsureColumn("topic_assignments", "mandatory", "INTEGER NOT NULL DEFAULT 1");   // 1 = verpflichtend (Altbestand = Lernaufgabe)
             EnsureColumn("topic_assignments", "due_at", "TEXT NULL");
@@ -89,6 +90,35 @@ public sealed class SqliteDatabase : IDatabase
     {
         await _gate.WaitAsync(ct);
         try { Run(sql, args, wantRows: false); return Native.sqlite3_changes(_db); }
+        finally { _gate.Release(); }
+    }
+
+    /// <summary>Atomare Gruppe: <c>BEGIN IMMEDIATE</c> sperrt Schreiber (auch anderer Prozesse), alles oder nichts.</summary>
+    public async Task<int[]> ExecuteBatchAsync(IReadOnlyList<DbStatement> statements, CancellationToken ct = default)
+    {
+        await _gate.WaitAsync(ct);
+        try
+        {
+            ExecRaw("BEGIN IMMEDIATE");
+            var affected = new int[statements.Count];
+            try
+            {
+                for (var i = 0; i < statements.Count; i++)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    Run(statements[i].Sql, statements[i].Args, wantRows: false);
+                    affected[i] = Native.sqlite3_changes(_db);
+                    if (statements[i].ExpectedRows is int expected && expected != affected[i]) throw new DbBatchConflictException(i, expected, affected[i]);
+                }
+                ExecRaw("COMMIT");
+                return affected;
+            }
+            catch
+            {
+                try { ExecRaw("ROLLBACK"); } catch { /* Verbindung bleibt nutzbar; eine offene Transaktion wird beim nächsten BEGIN gemeldet */ }
+                throw;
+            }
+        }
         finally { _gate.Release(); }
     }
 

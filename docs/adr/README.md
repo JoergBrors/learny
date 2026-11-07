@@ -55,6 +55,8 @@ Referenz dafür, *wie das System funktioniert und warum* — für Menschen und f
 | [0045](0045-external-id-branding-und-eigener-otp-mailprovider.md) | External-ID-Branding und eigener OTP-Mailprovider (Custom Authentication Extension OnOtpSend, Exchange) | Akzeptiert (PoC) |
 | [0046](0046-administrationsportal-externe-registrierung.md) | Administrationsportal für externe Registrierung und Benutzer-Lebenszyklus (PoC) | Akzeptiert (PoC) |
 | [0047](0047-token-anreicherung-mit-lernrechten.md) | Token-Anreicherung mit Lernrechten (Custom Claims Provider, PoC) | Akzeptiert (PoC) |
+| [0048](0048-multi-issuer-authentifizierung-und-bestandsschutz.md) | Multi-Issuer-Authentifizierung und Bestandsschutz (Workforce + Entra External ID) | Akzeptiert |
+| [0049](0049-einladungs-und-lernberechtigungsmodell.md) | Produktives Einladungs- und Lernberechtigungsmodell (Lernprofile, Zuweisungen, atomare Einlösung) | **Vorgeschlagen** |
 | [0025](0025-sichere-speicherung-von-mcp-tokens.md) | Sichere Speicherung von MCP-Tokens, Codes und OAuth-Clients (Schutz bei Datenbankzugriff) | Akzeptiert und umgesetzt |
 
 Prüfberichte, die Anlass für ADRs sind, liegen unter [docs/reviews/](../reviews/) (aktuell: [Mehrbenutzer-Prüfbericht](../reviews/2026-10-24-mehrbenutzer-pruefbericht.md)).

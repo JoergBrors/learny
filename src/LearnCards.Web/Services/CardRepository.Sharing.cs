@@ -34,6 +34,9 @@ public partial class CardRepository
         var module = await GetModuleRawAsync(moduleId);
         if (module is null) return null;
 
+        // ADR 0049: externe Lernprofile erhalten nur ausdrücklich zugewiesene Inhalte; das Bestandsprofil läuft unverändert durch die Logik unten.
+        if (await IsRestrictedLearnerAsync(userId)) return await ResolveRestrictedAccessAsync(userId, module);
+
         if (module.Scope == "private")
         {
             if (string.Equals(module.OwnerUserId, userId, StringComparison.OrdinalIgnoreCase))
@@ -87,6 +90,8 @@ public partial class CardRepository
             ORDER BY m.name
             """, new[] { ("u", (object?)userId) });
         var modules = rows.Select(MapModule).ToList();
+        if (await IsRestrictedLearnerAsync(userId))   // ADR 0049: freigegeben allein genügt externen Profilen nicht
+            modules = (await Task.WhenAll(modules.Select(async m => (m, ok: await HasModuleGrantAsync(userId, m))))).Where(x => x.ok).Select(x => x.m).ToList();
         foreach (var m in modules)
         {
             m.Context = ContextShared;
