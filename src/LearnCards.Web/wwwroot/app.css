@@ -1204,3 +1204,4 @@ body { background-image: var(--bg-grad); }
 /* Icons im Profilmenü: gleiche Linien-Icons wie in der Seitenleiste */
 .user-panel svg { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .user-panel a, .user-panel button { justify-content: flex-start; }
+.user-panel[hidden], .nav-secondary-wrap[hidden] { display: none !important; }
