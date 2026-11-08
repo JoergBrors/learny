@@ -58,7 +58,9 @@ if (Get-Command gh -ErrorAction SilentlyContinue) {
   if (-not $haveVars.Count -and -not $haveSec.Count) { Warn 'gh nicht angemeldet oder kein Zugriff (gh auth login)' }
   else {
     $mv = @($needVars | Where-Object { $_ -notin $haveVars }); $ms = @($needSec | Where-Object { $_ -notin $haveSec })
-    if ($ms.Count) { Fail "Fehlende Secrets: $($ms -join ', ')" } else { Ok 'Alle Secrets des Workflows vorhanden' }
+    $hard = @($ms | Where-Object { $_ -in 'MCP_API_KEY', 'MCP_TOKEN_KEY' })   # der Workflow bricht ohne diese beiden ab
+    if ($hard.Count) { Fail "Workflow bricht ab ohne Secret(s): $($hard -join ', ') (MCP_TOKEN_KEY: openssl rand -base64 32)" }
+    if ($ms.Count) { Warn "Weitere nicht gesetzte Secrets (leere Werte werden in die web.env übernommen): $(($ms | Where-Object { $_ -notin $hard }) -join ', ')" } if (-not $ms.Count) { Ok 'Alle Secrets des Workflows vorhanden' }
     if ($mv.Count) { Warn "Nicht gesetzte Variablen (Vorgabewerte des Workflows gelten, falls vorhanden): $($mv -join ', ')" } else { Ok 'Alle Variablen vorhanden' }
   }
 } else { Warn 'gh CLI nicht installiert' }
@@ -78,7 +80,7 @@ if ($CheckEntra) {
         $want = "$PlatformBaseUrl/auth/external/callback"
         if ($app.web.redirectUris -contains $want) { Ok "Redirect-URI vorhanden: $want" } else { Fail "Redirect-URI fehlt: $want (infra/entra-external-id/bootstrap/learny-targets.ps1 -Apply)" }
         if ($app.web.redirectUris | Where-Object { $_ -match '^http://(?!localhost)' }) { Fail 'Unsichere http-Redirect-URI (außer localhost)' }
-        if ($app.web.implicitGrantSettings.enableIdTokenIssuance) { Ok 'ID-Token-Ausstellung aktiv' } else { Warn 'ID-Token-Ausstellung (implicit grant) nicht aktiv — prüfen' }
+        # Hinweis: Learny nutzt Authorization Code + PKCE mit form_post — implizite ID-Token-Ausstellung ist NICHT nötig und sollte aus bleiben.
       }
       try {
         $ext = (Invoke-RestMethod -Headers $h -Uri 'https://graph.microsoft.com/beta/identity/customAuthenticationExtensions').value
