@@ -10,6 +10,12 @@ window.lcTheme = (function () {
     function resolve(mode) { return mode === 'system' ? (mq && mq.matches ? 'dark' : 'light') : mode; }
     function apply(mode) { root.dataset.themeMode = mode; root.dataset.theme = resolve(mode); }
     function onSystemChange() { if (stored() === 'system') apply('system'); }
+    // Blazor-Navigation (enhanced) ersetzt die <html>-Attribute durch die des Servers (ohne data-theme): gewählte Darstellung sofort wiederherstellen.
+    function reapply() { if (root.dataset.themeMode !== stored() || !root.dataset.theme) apply(stored()); }
+    new MutationObserver(reapply).observe(root, { attributes: true, attributeFilter: ['data-theme', 'data-theme-mode'] });
+    document.addEventListener('DOMContentLoaded', reapply);
+    window.lcOnEnhanced = function (fn) { var n = 0, t = setInterval(function () { if (window.Blazor && Blazor.addEventListener) { clearInterval(t); Blazor.addEventListener('enhancedload', fn); } else if (++n > 100) clearInterval(t); }, 100); };
+    window.lcOnEnhanced(reapply);
     if (mq) { if (mq.addEventListener) mq.addEventListener('change', onSystemChange); else if (mq.addListener) mq.addListener(onSystemChange); }
     return {
         mode: stored,
@@ -77,5 +83,5 @@ window.lcDash = { hour: function () { return new Date().getHours(); } };
     function init() { syncTheme(); }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
     // Nach Blazor-Navigation/Enhanced-Updates Beschriftungen angleichen
-    if (window.Blazor && Blazor.addEventListener) Blazor.addEventListener('enhancedload', init);
+    window.lcOnEnhanced(init);
 })();
