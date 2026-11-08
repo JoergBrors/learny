@@ -196,7 +196,7 @@ Externes Lernprofil (ADR 0049). **Kein Eintrag = Bestandsprofil** (bisherige Ber
 `invitation_module_grants (invitation_id → invitations, module_id → modules, PK beide)`. `invitation_topic_grants (invitation_id, topic_id → topics, topic_version INTEGER NULL, mandatory INTEGER DEFAULT 0, due_at TEXT NULL, PK (invitation_id, topic_id))`. Beide kaskadieren mit der Einladung; die Zuweisungen werden bei der Einlösung in `module_grants` bzw. `topic_assignments` übernommen.
 
 ### invitation_deliveries / invitation_meta / invitation_events
-- `invitation_deliveries (invitation_id PK, status 'pending'|'submitted'|'failed'|'unknown', attempts, lease_until, last_attempt_at, submitted_at, last_error_code, updated_at)` — Versandstatus getrennt vom Einladungsstatus (ADR 0044); der Versand folgt in Phase C.
+- `invitation_deliveries (invitation_id PK, status 'pending'|'submitted'|'failed'|'unknown', attempts, lease_until, last_attempt_at, submitted_at, last_error_code, updated_at)` — Versandstatus getrennt vom Einladungsstatus (ADR 0044/0050, Phase C): der Anspruch setzt `unknown` + `last_error_code='in_progress'` (Lease) **vor** dem Graph-Aufruf; das Ergebnis (`submitted`/`failed`/`unknown`) wird nur geschrieben, solange es zum aktuellen `invitations.token_version` gehört; `submitted` heißt „angenommen“, nie „zugestellt“; nie ein Link oder Token. Keine Schemaänderung in Phase C.
 - `invitation_meta (invitation_id PK, display_name, description, note)` — Verwaltungsangaben; der Anzeigename wird beim Anlegen des Benutzers verwendet.
 - `invitation_events (id PK, invitation_id NULL, user_id NULL, event_type, category NULL, actor_user_id NULL, at)` — Ereignisprotokoll mit festem Typkatalog (`InviteEventTypes`), Kategorie nur `[A-Za-z0-9_.:-]{1,64}`; nie Codes, Links, Tokens. Indizes `ix_invitation_events_inv (invitation_id, at)`, `ix_invitation_events_at (at)`.
 
@@ -298,6 +298,8 @@ Nur für den Provider `database`: `storage_key` TEXT PK, `data_base64` TEXT NOT 
 |---|---|---|
 | user_sub | TEXT PK | |
 | theme | TEXT NOT NULL | Default `''` |
+| avatar | TEXT NOT NULL | Default `''` (Initialen); Voreinstellungs-Kennung oder `custom:Haut\|Haar\|Frisur\|Kleidung\|Accessoire` (nur geprüfte Hexfarben/feste Listen, ADR 0051) |
+| avatar_hidden | INTEGER NOT NULL | Default 0 |
 | updated_at | TEXT NOT NULL | |
 
 ### user_card_states
@@ -479,3 +481,7 @@ Eingefrorene Modulkopien liegen in `modules`/`cards` mit `scope='topic'` und ohn
 - **certificates** (Ergänzungen ADR 0037, alle `DEFAULT`/`NULL`, idempotent in `Schema.cs`, `PostgresDatabase.InitAsync`, `SqliteDatabase.InitAsync`): `is_test` (INTEGER, 0/1), `issued_by` (TEXT NULL, Aussteller-Benutzer-ID, nur bei Administratorausstellung), `issued_by_name` (TEXT, Name zum Ausstellungszeitpunkt), `issue_source` (`exam` | `admin` | `unknown` = Altbestand), `parent_id` (TEXT NULL, Test-Modulnachweis → Test-Themenabschluss). Indizes: `ix_certificates_issued (issued_at)`, `ix_certificates_badge_hash`, `ix_certificates_clr_hash` (in `Schema.cs`) und `ix_certificates_test (is_test, status)` (erst **nach** dem Ergänzen der Spalte in den Provider-Migrationen, damit bestehende Datenbanken starten; unter PostgreSQL 17 mit einer Altdatenbank geprüft). Das Ausstellungsregister ist eine Sicht auf `certificates` ⟕ `certificate_pdfs` (+ `pki_certificates`, `audit_log`), keine eigene Tabelle. Fingerprint = `badge_hash`/`clr_hash`/`pdf_sha256` (SHA-256 der Originalbytes), X.509-Thumbprint = `certificate_pdfs.signer_thumbprint`.
 
 - **integrity_proofs** — ADR 0039: Integritätsmanifest und OpenTimestamps je Zertifikat und Proof-Version (PK `certificate_id` + `proof_version`; `manifest_sha256`, `jws_sha256`, `jws`, `ots_base64` NULL, `calendar_status`, `anchor_status` = `none|pending|anchored|confirmed|failed|unverifiable`, `bitcoin_height`/`bitcoin_block_hash`/`bitcoin_block_time` NULL, `confirmations`, `last_checked_at`, `last_verified_at`, `error`, `ots_client_version`, `pdf_sha256`, `created_at`). Zeilen werden nur angefügt, nie überschrieben; Idempotenz über `CREATE TABLE IF NOT EXISTS` in `Schema.cs` (SQLite und PostgreSQL).
+
+### user_favorites / mail_settings (Phase C)
+- `user_favorites (user_id → users, kind 'module'|'topic'|'credential', item_id, created_at, PK (user_id, kind, item_id))` — Favoriten (Stern) je Benutzer; nur Kennungen, höchstens 500 je Benutzer, `ON DELETE CASCADE`. Ein Favorit gewährt nie Zugriff (die Oberfläche zeigt nur ohnehin sichtbare Einträge).
+- `mail_settings (id=1, allowed_recipients, updated_at, updated_by)` — in der Plattform gepflegte erlaubte Mailempfänger (ADR 0050); eine Zeile überschreibt `MAIL_ALLOWED_RECIPIENTS`, keine Zeile = Umgebungswert; leerer Wert = niemand. Beide Tabellen sind additiv (`CREATE TABLE IF NOT EXISTS`); PostgreSQL nicht live geprüft.

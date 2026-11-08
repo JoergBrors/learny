@@ -1,0 +1,78 @@
+@inject IJSRuntime JS
+
+@* Gemeinsame Werkzeugleiste für Listen (Module, Themen, Nachweise): Suche, zusätzliche Filter, Favoriten, Sortierung und Ansicht (Kacheln/Liste).
+   Die Ansicht wird je Seite im Browser gemerkt (localStorage, nur Komfort; ohne Speicher gilt „Kacheln“). Keine Geschäftslogik. *@
+<div class="list-toolbar" role="search">
+    <input class="input search" type="search" placeholder="@Placeholder" value="@Query" @oninput="OnQuery" aria-label="@Placeholder" />
+    @Filters
+    <button type="button" class="chip fav-filter @(FavoritesOnly ? "chip-active" : "")" aria-pressed="@(FavoritesOnly ? "true" : "false")" @onclick="ToggleFavorites">★ Favoriten@(FavoriteCount > 0 ? $" ({FavoriteCount})" : "")</button>
+    <span class="spacer"></span>
+    @if (SortOptions.Count > 0)
+    {
+        <select class="input compact" @onchange="OnSort" aria-label="Sortierung">
+            @foreach (var o in SortOptions) { <option value="@o.Value" selected="@(o.Value == Sort)">@o.Label</option> }
+        </select>
+    }
+    @if (GroupOptions.Count > 0)
+    {
+        <select class="input compact" @onchange="OnGroup" aria-label="Gruppierung">
+            @foreach (var o in GroupOptions) { <option value="@o.Value" selected="@(o.Value == Group)">@(o.Value == "" ? "Gruppieren: keine" : "Gruppiert nach " + o.Label)</option> }
+        </select>
+    }
+    <div class="view-toggle" role="group" aria-label="Ansicht">
+        <button type="button" class="@(View == "tiles" ? "is-on" : "")" aria-pressed="@(View == "tiles" ? "true" : "false")" title="Kacheln" aria-label="Kachelansicht" @onclick='() => SetView("tiles")'>▦</button>
+        <button type="button" class="@(View == "list" ? "is-on" : "")" aria-pressed="@(View == "list" ? "true" : "false")" title="Liste" aria-label="Listenansicht" @onclick='() => SetView("list")'>☰</button>
+    </div>
+</div>
+@if (Total > 0)
+{
+    <p class="muted list-count" aria-live="polite">@(Shown == Total ? $"{Total} Einträge" : $"{Shown} von {Total} Einträgen")</p>
+}
+
+@code {
+    [Parameter] public string Placeholder { get; set; } = "Suchen";
+    [Parameter] public string Query { get; set; } = "";
+    [Parameter] public EventCallback<string> QueryChanged { get; set; }
+    [Parameter] public string Sort { get; set; } = "";
+    [Parameter] public EventCallback<string> SortChanged { get; set; }
+    [Parameter] public IReadOnlyList<(string Value, string Label)> SortOptions { get; set; } = Array.Empty<(string, string)>();
+    /// <summary>Gruppierungen (Wert "" = keine). Leer = keine Auswahl.</summary>
+    [Parameter] public IReadOnlyList<(string Value, string Label)> GroupOptions { get; set; } = Array.Empty<(string, string)>();
+    [Parameter] public string Group { get; set; } = "";
+    [Parameter] public EventCallback<string> GroupChanged { get; set; }
+    [Parameter] public bool FavoritesOnly { get; set; }
+    [Parameter] public EventCallback<bool> FavoritesOnlyChanged { get; set; }
+    [Parameter] public int FavoriteCount { get; set; }
+    [Parameter] public string View { get; set; } = "tiles";
+    [Parameter] public EventCallback<string> ViewChanged { get; set; }
+    /// <summary>Schlüssel im Browser-Speicher für die gemerkte Ansicht, z. B. „view.modules“.</summary>
+    [Parameter] public string? StorageKey { get; set; }
+    [Parameter] public int Total { get; set; }
+    [Parameter] public int Shown { get; set; }
+    /// <summary>Zusätzliche Filter (Chips, Auswahllisten) der jeweiligen Seite.</summary>
+    [Parameter] public RenderFragment? Filters { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || StorageKey is null) return;
+        try
+        {
+            var saved = await JS.InvokeAsync<string?>("localStorage.getItem", StorageKey);
+            if (saved is "tiles" or "list" && saved != View) { View = saved; await ViewChanged.InvokeAsync(saved); StateHasChanged(); }
+        }
+        catch (Exception) { /* ohne Browser-Speicher bleibt „Kacheln“ */ }
+    }
+
+    private Task OnQuery(ChangeEventArgs e) => QueryChanged.InvokeAsync(e.Value?.ToString() ?? "");
+    private Task OnGroup(ChangeEventArgs e) => GroupChanged.InvokeAsync(e.Value?.ToString() ?? "");
+    private Task OnSort(ChangeEventArgs e) => SortChanged.InvokeAsync(e.Value?.ToString() ?? "");
+    private Task ToggleFavorites() => FavoritesOnlyChanged.InvokeAsync(!FavoritesOnly);
+
+    private async Task SetView(string v)
+    {
+        if (v == View) return;
+        View = v;
+        await ViewChanged.InvokeAsync(v);
+        if (StorageKey is not null) { try { await JS.InvokeVoidAsync("localStorage.setItem", StorageKey, v); } catch (Exception) { } }
+    }
+}

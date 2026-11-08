@@ -1,0 +1,198 @@
+@page "/dashboard"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject DashboardService Dash
+@inject AuthenticationStateProvider AuthState
+@inject UserUiState UiState
+@inject AppConfig Config
+@inject IJSRuntime JS
+@implements IDisposable
+
+<PageTitle>Mein Dashboard — Learny</PageTitle>
+
+<div class="container wide dash">
+    <div class="page-head">
+        <div>
+            <h1>Mein Dashboard</h1>
+            <p class="muted">@Greeting</p>
+        </div>
+    </div>
+
+    @if (_error is not null)
+    {
+        <div class="alert alert-error" role="status">@_error</div>
+    }
+    else if (_data is null)
+    {
+        <div class="spinner-wrap" aria-busy="true"><div class="spinner" role="status"></div></div>
+    }
+    else
+    {
+        <div class="dash-grid">
+            <section class="dcard dcard-hero" aria-labelledby="d-greet">
+                <div class="hero-text">
+                    <h2 id="d-greet">@(_hourWord), @FirstName!</h2>
+                    <p>@(_data.HasOverdue ? "Ein Pflichtthema ist überfällig — ein kurzer Einstieg genügt." : _data.Progress is { Percent: 100 } ? "Alles abgeschlossen — stark!" : "Bereit für deine nächste Lerneinheit?")</p>
+                    <div class="hero-actions">
+                        <a class="btn btn-primary btn-lg" href="@(_data.HasContinue ? _data.ContinueUrl : "/")">@(_data.HasContinue ? "Weiterlernen" : "Module ansehen")</a>
+                        <a class="btn btn-ghost" href="/">Meine Lernkarten</a>
+                        <a class="btn btn-ghost" href="/topics">Meine Themen</a>
+                    </div>
+                </div>
+                <div class="hero-avatar" aria-hidden="@(!ShowAvatar)">
+                    @if (ShowAvatar) { <Avatar Preset="@UiState.AvatarPreset" Name="@_name" Size="132" State="@AvatarState" /> }
+                </div>
+            </section>
+
+            <section class="dcard" aria-labelledby="d-progress">
+                <div class="dcard-head"><h2 id="d-progress">Mein Lernfortschritt</h2></div>
+                @if (_data.Progress is { } pr)
+                {
+                    <div class="progress-card">
+                        <div class="ring" role="img" aria-label="@($"{pr.Percent} Prozent der Module abgeschlossen")">
+                            <svg viewBox="0 0 120 120" aria-hidden="true"><circle class="ring-track" cx="60" cy="60" r="52" /><circle class="ring-fill" cx="60" cy="60" r="52" stroke-dasharray="@Circ" stroke-dashoffset="@Offset(pr.Percent)" /></svg>
+                            <span class="ring-value">@pr.Percent<small>%</small></span>
+                        </div>
+                        <div class="progress-facts">
+                            <p><strong>@pr.Completed</strong> von <strong>@pr.Total</strong> Modulen abgeschlossen</p>
+                            <ul class="mini-bars">
+                                @foreach (var t in _data.Topics.Where(t => t.ModulesTotal > 0).Take(3))
+                                {
+                                    <li><span>@t.Name</span><span class="bar" aria-hidden="true"><span style="width:@(t.Percent)%"></span></span><span class="pct">@t.Percent %</span></li>
+                                }
+                            </ul>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="empty-state">Noch kein Fortschritt zu berechnen. Sobald dir Themen zugewiesen sind, erscheint er hier.</div>
+                }
+            </section>
+
+            <section class="dcard dcard-wide" aria-labelledby="d-next">
+                <div class="dcard-head"><h2 id="d-next">Meine nächsten Lerninhalte</h2></div>
+                @if (_data.Next.Count == 0)
+                {
+                    <div class="empty-state">Noch keine Lerninhalte vorhanden. <a href="/">Module ansehen</a></div>
+                }
+                else
+                {
+                    <ul class="dlist">
+                        @foreach (var n in _data.Next)
+                        {
+                            <li>
+                                <div class="dlist-main">
+                                    <strong>@n.Title</strong>
+                                    <small>@(n.Kind == "topic" ? "Thema" : "Modul") · @n.Meta</small>
+                                    @if (n.Percent is int p) { <span class="bar" aria-label="@($"{p} Prozent")"><span style="width:@(p)%"></span></span> }
+                                </div>
+                                <a class="btn btn-primary btn-sm" href="@n.Url" aria-label="@($"{n.Title} fortsetzen")">Fortsetzen</a>
+                            </li>
+                        }
+                    </ul>
+                }
+            </section>
+
+            <section class="dcard" aria-labelledby="d-topics">
+                <div class="dcard-head"><h2 id="d-topics">Meine zugewiesenen Themen</h2><a href="/topics?tab=assigned">Alle</a></div>
+                @if (_data.Topics.Count == 0)
+                {
+                    <div class="empty-state">Dir sind aktuell keine Themen zugewiesen.</div>
+                }
+                else
+                {
+                    <ul class="dlist">
+                        @foreach (var t in _data.Topics)
+                        {
+                            <li>
+                                <div class="dlist-main">
+                                    <strong>@t.Name</strong>
+                                    <small>
+                                        <span class="badge @(t.Mandatory ? "badge-danger" : "badge-muted")">@(t.Mandatory ? "Pflicht" : "freiwillig")</span>
+                                        <span class="badge @(t.Status == "completed" ? "badge-ok" : "badge-muted")">@StatusLabel(t.Status)</span>
+                                        @if (t.Due is DateTime due) { <span class="badge @(t.Overdue ? "badge-danger" : "badge-muted")">@(t.Overdue ? "überfällig · " : "fällig ")@due.ToLocalTime().ToString("dd.MM.yyyy")</span> }
+                                    </small>
+                                </div>
+                                <a class="btn btn-ghost btn-sm" href="/topics/@t.Id?version=@t.Version" aria-label="@($"{t.Name} öffnen")">Öffnen</a>
+                            </li>
+                        }
+                    </ul>
+                }
+            </section>
+
+            <section class="dcard" aria-labelledby="d-certs">
+                <div class="dcard-head"><h2 id="d-certs">Meine Abschlüsse</h2><a href="/achievements">Alle (@_data.CertificateCount)</a></div>
+                @if (_data.Certificates.Count == 0)
+                {
+                    <div class="empty-state">Noch keine Abschlüsse. Nach einem bestandenen Modulquiz bzw. abgeschlossenen Thema erscheinen sie hier.</div>
+                }
+                else
+                {
+                    <ul class="dlist">
+                        @foreach (var c in _data.Certificates)
+                        {
+                            <li>
+                                <div class="dlist-main"><strong>@(c.IsTopic ? "🎓" : "📘") @c.Name</strong><small>@(c.IsTopic ? "Themenabschluss" : "Modulabschluss") · @c.At.ToLocalTime().ToString("dd.MM.yyyy")</small></div>
+                                <a class="btn btn-ghost btn-sm" href="/achievements?open=@c.Id" aria-label="@($"Details zu {c.Name}")">Details</a>
+                            </li>
+                        }
+                    </ul>
+                }
+            </section>
+
+            <section class="dcard dcard-assistant" aria-labelledby="d-ai">
+                <div class="dcard-head"><h2 id="d-ai">KI-Lernassistent</h2><span class="badge @(string.IsNullOrEmpty(Config.OpenAiApiKey) ? "badge-muted" : "badge-ok")">@(string.IsNullOrEmpty(Config.OpenAiApiKey) ? "Offline-Hilfe" : "KI aktiv")</span></div>
+                <p>Der Assistent beantwortet Fragen zur Lernkarte, die du gerade lernst. Du findest ihn als <strong>💬 Chat</strong> in jeder Lernkarte@(string.IsNullOrEmpty(Config.OpenAiApiKey) ? " — ohne konfigurierte KI mit der eingebauten Offline-Hilfe" : "").</p>
+                <div class="hero-actions"><a class="btn btn-primary btn-sm" href="@(_data.HasContinue ? _data.ContinueUrl : "/")">Zur Lernkarte</a></div>
+            </section>
+        </div>
+    }
+</div>
+
+@code {
+    private DashboardData? _data;
+    private string? _error;
+    private string _name = "";
+    private string _hourWord = "Hallo";
+
+    private string FirstName => string.IsNullOrWhiteSpace(_name) ? "" : _name.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0];
+    private string Greeting => _hourWord == "Hallo" ? "Dein Überblick über Lernstand, Zuweisungen und Abschlüsse." : $"{_hourWord}! Dein Überblick über Lernstand, Zuweisungen und Abschlüsse.";
+    private bool ShowAvatar => !UiState.AvatarHidden;
+    private string AvatarState => _data is null ? "neutral" : _data.HasOverdue ? "motivating" : _data.Progress is { Percent: 100 } ? "success" : "happy";
+    private const double Circumference = 2 * Math.PI * 52;
+    private string Circ => Circumference.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+    private string Offset(int percent) => (Circumference * (1 - Math.Clamp(percent, 0, 100) / 100.0)).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+    private static string StatusLabel(string s) => s switch { "completed" => "abgeschlossen", "in_progress" => "in Bearbeitung", _ => "nicht begonnen" };
+
+    protected override async Task OnInitializedAsync()
+    {
+        UiState.Changed += OnUi;
+        try
+        {
+            var auth = await AuthState.GetAuthenticationStateAsync();
+            var uid = auth.User.GetUserId() ?? throw new UnauthorizedAccessException();
+            _name = auth.User.Identity?.Name ?? "";
+            _data = await Dash.LoadAsync(uid);   // nur Daten des angemeldeten Benutzers
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or InvalidOperationException or KeyNotFoundException)
+        {
+            _error = "Das Dashboard konnte nicht geladen werden. Bitte die Seite neu laden.";
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            var h = await JS.InvokeAsync<int>("lcDash.hour");
+            _hourWord = h < 5 ? "Hallo" : h < 11 ? "Guten Morgen" : h < 17 ? "Guten Tag" : "Guten Abend";
+            StateHasChanged();
+        }
+        catch (Exception) { /* Begrüßung ohne Tageszeit */ }
+    }
+
+    private void OnUi() => InvokeAsync(StateHasChanged);
+    public void Dispose() => UiState.Changed -= OnUi;
+}

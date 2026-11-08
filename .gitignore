@@ -31,3 +31,7 @@ data/pki/
 *.pfx
 *.p12
 tests/TESTFILES/*
+.env.bak
+
+# Mail-Zertifikat (privater Schlüssel, verschlüsselt) — nie committen
+src/LearnCards.Web/Data/mail/

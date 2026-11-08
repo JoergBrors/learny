@@ -22,15 +22,7 @@ public partial class CardRepository
     /// true = eingeschränkt (externes Lernprofil oder externe Identität ohne gültiges Profil): nur ausdrückliche Zuweisungen. Eine externe Identität ohne Profileintrag
     /// erhält nie die Bestandsberechtigung. Ungültige Benutzer-IDs gelten als eingeschränkt (kein Zugriff).
     /// </summary>
-    public async Task<bool> IsRestrictedLearnerAsync(string userId)
-    {
-        if (!UserService.IsGuid(userId)) return true;
-        var rows = await _db.QueryAsync("""
-            SELECT (SELECT COUNT(*) FROM user_profiles WHERE user_id = @u) AS p,
-                   (SELECT COUNT(*) FROM user_identities WHERE user_id = @u AND kind = 'external') AS e
-            """, new[] { ("u", (object?)userId) });
-        return DbValue.ToInt(rows[0]["p"]) > 0 || DbValue.ToInt(rows[0]["e"]) > 0;
-    }
+    public Task<bool> IsRestrictedLearnerAsync(string userId) => LearnerRestriction.IsRestrictedAsync(_db, userId);
 
     /// <summary>Besteht eine wirksame (nicht widerrufene) Zuweisung für dieses Modul? Globale Module folgen der Veröffentlichung (<c>publication_id</c>), nicht einer einzelnen Version.</summary>
     public async Task<bool> HasModuleGrantAsync(string userId, ModuleInfo module)

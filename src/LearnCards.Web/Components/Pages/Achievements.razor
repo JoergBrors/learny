@@ -6,6 +6,7 @@
 @inject CompetencyService Competencies
 @inject TopicCredentialService TopicCreds
 @inject AuthenticationStateProvider AuthState
+@inject FavoritesService Favs
 
 <PageTitle>Meine Abschlüsse und Nachweise — LearnCards</PageTitle>
 
@@ -27,68 +28,141 @@
     }
     else
     {
-        <section class="card panel" aria-label="Abschlüsse">
-            <div class="form-row">
-                <label for="kind">Anzeigen</label>
-                <select id="kind" class="input" @bind="_filter">
-                    <option value="">Alle (@_items.Count)</option>
+        var shown = Shown();
+        var groups = ListGrouping.By(shown, GroupKey());
+        <ListToolbar Placeholder="Abschlüsse suchen" @bind-Query="_q" @bind-Sort="_sort" SortOptions="SortOpts" @bind-Group="_group" GroupOptions="GroupOpts" @bind-FavoritesOnly="_favOnly" FavoriteCount="@_items.Count(x => _favs.Contains(x.Cert.Id))"
+                     @bind-View="_view" StorageKey="view.achievements" Total="@_items.Count" Shown="@shown.Count">
+            <Filters>
+                <select class="input compact" @bind="_filter" aria-label="Art">
+                    <option value="">Alle Arten (@_items.Count)</option>
                     <option value="topic">Themenabschlüsse (@_items.Count(i => i.Cert.IsTopic))</option>
                     <option value="module">Modulabschlüsse (@_items.Count(i => !i.Cert.IsTopic))</option>
                 </select>
+                <select class="input compact" @bind="_status" aria-label="Status">
+                    <option value="">Jeder Status</option>
+                    <option value="valid">gültig</option>
+                    <option value="revoked">widerrufen</option>
+                </select>
+            </Filters>
+        </ListToolbar>
+
+        @if (shown.Count == 0)
+        {
+            <div class="empty-state">Keine Treffer. Suche oder Filter anpassen@(_favOnly ? " bzw. „Favoriten“ ausschalten" : "").</div>
+        }
+        else if (_view == "list")
+        {
+            <div class="card table-wrap list-view">
+                <table class="table">
+                    <caption class="sr-only">Abschlüsse und Nachweise</caption>
+                    <thead><tr><th class="sr-only">Favorit</th><th>Abschluss</th><th>Art</th><th>Datum</th><th>Ergebnis</th><th>Status</th><th><span class="sr-only">Aktionen</span></th></tr></thead>
+                    <tbody>
+                        @foreach (var g in groups)
+                        {
+                        @if (g.Title.Length > 0) { <tr class="group-row"><th colspan="7" scope="colgroup">@g.Title (@g.Items.Count)</th></tr> }
+                        @foreach (var i in g.Items)
+                        {
+                            var c = i.Cert;
+                            <tr class="clickable" tabindex="0" @onclick="() => _open = c.Id" @onkeydown='e => { if (e.Key == "Enter") _open = c.Id; }'>
+                                <td><FavoriteButton Active="_favs.Contains(c.Id)" Label="@c.ModuleName" OnToggle="() => ToggleFav(c.Id)" /></td>
+                                <td><div class="name-cell"><span class="icon" aria-hidden="true">@(c.IsTopic ? "🎓" : "📘")</span><div><strong>@c.ModuleName</strong><small>Nr. @c.Number@(c.ModuleVersion > 0 ? $" · Version {c.ModuleVersion}" : "")</small></div></div></td>
+                                <td>@(c.IsTopic ? "Thema" : "Modul")</td>
+                                <td>@((c.CompletedAt ?? c.IssuedAt).ToLocalTime().ToString("dd.MM.yyyy"))</td>
+                                <td>@c.ScorePercent.ToString("0.#") %</td>
+                                <td><span class="badge @(c.IsRevoked ? "badge-danger" : "badge-pass")">@(c.IsRevoked ? "widerrufen" : "gültig")</span></td>
+                                <td class="actions">
+                                    <a class="btn btn-primary btn-sm" href="/api/certificates/@c.Id/certificate.pdf" download @onclick:stopPropagation="true">PDF</a>
+                                    <button class="btn btn-ghost btn-sm" @onclick:stopPropagation="true" @onclick="() => _open = c.Id">Details</button>
+                                </td>
+                            </tr>
+                        }
+                        }
+                    </tbody>
+                </table>
             </div>
-            @foreach (var i in _items.Where(x => _filter == "" || (_filter == "topic") == x.Cert.IsTopic))
+        }
+        else
+        {
+            @foreach (var g in groups)
             {
-                var c = i.Cert;
-                <article class="card panel" style="margin-top:1rem" aria-label="@c.ModuleName">
-                    <header style="display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;align-items:flex-start">
-                        <div>
-                            <h2 style="margin:0;font-size:1.15rem">@(c.IsTopic ? "🎓" : "📘") @c.ModuleName @(c.ModuleVersion > 0 ? $"(Version {c.ModuleVersion})" : "")</h2>
-                            <p class="muted" style="margin:.2rem 0">@(c.IsTopic ? "Themenabschluss · Master-Badge + CLR" : (c.ModuleScope == "topic" ? "Modulabschluss im Thema" : "Modulabschluss")) · Nr. <code>@c.Number</code> · <span title="@CertificateFormat.Label(CertificateFormat.Of(c.BadgeJws))">Format @CertificateFormat.Of(c.BadgeJws)</span></p>
+            @if (g.Title.Length > 0) { <h3 class="group-head">@g.Title <span class="count">(@g.Items.Count)</span></h3> }
+            <div class="tile-grid">
+                @foreach (var i in g.Items)
+                {
+                    var c = i.Cert;
+                    <article class="tile" aria-label="@c.ModuleName">
+                        <FavoriteButton Active="_favs.Contains(c.Id)" Label="@c.ModuleName" OnToggle="() => ToggleFav(c.Id)" />
+                        <h3>@(c.IsTopic ? "🎓" : "📘") @c.ModuleName</h3>
+                        <p><span class="badge @(c.IsRevoked ? "badge-danger" : "badge-pass")">@(c.IsRevoked ? "widerrufen" : "gültig")</span> <span class="badge badge-muted">@(c.IsTopic ? "Themenabschluss" : "Modulabschluss")@(c.ModuleVersion > 0 ? $" · V{c.ModuleVersion}" : "")</span></p>
+                        <dl class="facts">
+                            <dt>Abschluss</dt><dd>@((c.CompletedAt ?? c.IssuedAt).ToLocalTime().ToString("dd.MM.yyyy"))</dd>
+                            <dt>Ergebnis</dt><dd>@c.ScorePercent.ToString("0.#") % (Grenze @c.PassPercent %)</dd>
+                            <dt>Nummer</dt><dd><code>@c.Number</code></dd>
+                        </dl>
+                        <div class="tile-actions">
+                            <a class="btn btn-primary btn-sm" href="/api/certificates/@c.Id/certificate.pdf" download>PDF</a>
+                            <button class="btn btn-ghost btn-sm" @onclick="() => _open = c.Id">Details</button>
+                            <a class="btn btn-ghost btn-sm" href="/verify/@c.Id">Prüfen</a>
                         </div>
-                        <div>
-                            <span class="@(c.IsRevoked ? "badge" : "badge badge-pass")">@(c.IsRevoked ? "✖ widerrufen" : "✔ gültig")</span>
-                            <img src="/brand/learny-verified.svg" alt="Learny Verified – Digitally Signed Credential" height="36" style="vertical-align:middle;margin-left:.5rem" />
-                        </div>
-                    </header>
-                    <dl style="display:grid;grid-template-columns:max-content 1fr;gap:.2rem 1rem;margin:.6rem 0">
-                        <dt>Abschlussdatum</dt><dd>@((c.CompletedAt ?? c.IssuedAt).ToLocalTime().ToString("dd.MM.yyyy"))</dd>
-                        <dt>Ausgestellt</dt><dd>@c.IssuedAt.ToLocalTime().ToString("dd.MM.yyyy")</dd>
-                        <dt>Ergebnis</dt><dd>@c.ScorePercent.ToString("0.#") % (Bestehensgrenze @c.PassPercent %)</dd>
-                        @if (i.Demonstrated.Count > 0) { <dt>Nachgewiesene Kompetenzen</dt><dd>@string.Join(", ", i.Demonstrated)</dd> }
-                        @if (c.IsTopic && i.ModuleCount > 0) { <dt>Enthaltene Module</dt><dd>@i.ModuleCount mit Einzelnachweis</dd> }
-                        <dt>Verifikation</dt><dd><a href="/verify/@c.Id">@(i.VerifyUrl)</a></dd>
-                    </dl>
-                    <p class="muted" style="font-size:.85rem;margin:.5rem 0">Zum Prüfen (z. B. im 1EdTech-Validator) das <strong>signierte JWT</strong> verwenden. Die JSON-Datei ist nur die lesbare Darstellung desselben Inhalts und trägt bewusst keine Signatur – ein externer Prüfer meldet dort „missing a proof“.</p>
-                    <div class="actions" style="display:flex;gap:.5rem;flex-wrap:wrap">
-                        <a class="btn btn-primary btn-sm" href="/api/certificates/@c.Id/certificate.pdf" download>@(c.IsTopic ? "Themenabschluss als PDF" : "Modulzertifikat als PDF")</a>
-                        @* Maßgeblich ist das signierte JWT (Open Badges 3.0 / CLR 2.0, ADR 0038); das JSON ist die lesbare Darstellung ohne Signatur und enthält bewusst keinen Proof *@
-                        @if (c.IsTopic) { <a class="btn btn-ghost btn-sm" href="/api/certificates/@c.Id/clr.jwt" download title="Signierter Nachweis (JWT) – diese Datei prüfen lassen">CLR (signiert, JWT)</a> }
-                        <a class="btn btn-ghost btn-sm" href="/api/certificates/@c.Id/badge.jwt" download title="Signierter Nachweis (JWT) – diese Datei prüfen lassen">@(c.IsTopic ? "Master-Badge (signiert, JWT)" : "Open Badge (signiert, JWT)")</a>
-                        @if (c.IsTopic) { <a class="btn btn-ghost btn-sm" href="/api/certificates/@c.Id/clr" download title="Lesbare Darstellung ohne Signatur (kein Proof) – zum Prüfen das JWT verwenden">CLR (JSON, ohne Signatur)</a> }
-                        <a class="btn btn-ghost btn-sm" href="/api/certificates/@c.Id/badge" download title="Lesbare Darstellung ohne Signatur (kein Proof) – zum Prüfen das JWT verwenden">@(c.IsTopic ? "Master-Badge (JSON, ohne Signatur)" : "Open Badge (JSON, ohne Signatur)")</a>
-                        <a class="btn btn-ghost btn-sm" href="/verify/@c.Id">Zertifikat prüfen</a>
-                        <button class="btn btn-ghost btn-sm" @onclick="() => ToggleLinkedIn(c.Id)" aria-expanded="@(_linkedIn == c.Id)">Auf LinkedIn hinzufügen</button>
-                    </div>
-                    @if (_linkedIn == c.Id)
-                    {
-                        var li = Certs.LinkedInShare(c);
-                        <div class="card panel" role="group" aria-label="Auf LinkedIn hinzufügen" style="margin-top:.8rem">
-                            <p class="muted">Es wird nichts automatisch veröffentlicht. Mit dem Button öffnest du LinkedIn in einem neuen Tab; dort bestätigst du die Angaben selbst. LinkedIn übernimmt die Vorbelegung nicht immer — dann trägst du die folgenden Werte ein:</p>
-                            <dl style="display:grid;grid-template-columns:max-content 1fr;gap:.2rem 1rem">
-                                <dt>Name des Zertifikats</dt><dd><code>@li.Name</code></dd>
-                                <dt>Aussteller</dt><dd><code>@li.Organization</code></dd>
-                                <dt>Zertifikats-ID</dt><dd><code>@li.CertificateId</code></dd>
-                                <dt>Ausstellungsdatum</dt><dd><code>@li.IssueMonth/@li.IssueYear</code></dd>
-                                <dt>Zertifikats-URL</dt><dd><code style="word-break:break-all">@li.VerifyUrl</code></dd>
-                            </dl>
-                            <p><a class="btn btn-primary btn-sm" href="@li.AddUrl" target="_blank" rel="noopener noreferrer">LinkedIn öffnen</a>
-                               <a class="btn btn-ghost btn-sm" href="/brand/learny-verified-share.png" download>Freigabegrafik (PNG)</a></p>
-                            <p class="muted">Die Zertifikats-URL führt zur öffentlichen Prüfseite mit den freigegebenen Kompetenzen und Nachweisen (ohne private Lerninhalte).</p>
-                        </div>
-                    }
-                </article>
+                    </article>
+                }
+            </div>
             }
-        </section>
+        }
+
+        @if (_open is not null && _items.FirstOrDefault(x => x.Cert.Id == _open) is { } sel)
+        {
+            var i = sel; var c = i.Cert;
+            <DetailDrawer Title="@($"{(c.IsTopic ? "🎓" : "📘")} {c.ModuleName}")" Wide="true" OnClose="() => _open = null">
+
+                <header style="display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;align-items:flex-start">
+                    <div>
+                        <h2 style="margin:0;font-size:1.15rem">@(c.IsTopic ? "🎓" : "📘") @c.ModuleName @(c.ModuleVersion > 0 ? $"(Version {c.ModuleVersion})" : "")</h2>
+                        <p class="muted" style="margin:.2rem 0">@(c.IsTopic ? "Themenabschluss · Master-Badge + CLR" : (c.ModuleScope == "topic" ? "Modulabschluss im Thema" : "Modulabschluss")) · Nr. <code>@c.Number</code> · <span title="@CertificateFormat.Label(CertificateFormat.Of(c.BadgeJws))">Format @CertificateFormat.Of(c.BadgeJws)</span></p>
+                    </div>
+                    <div>
+                        <span class="@(c.IsRevoked ? "badge" : "badge badge-pass")">@(c.IsRevoked ? "✖ widerrufen" : "✔ gültig")</span>
+                        <img src="/brand/learny-verified.svg" alt="Learny Verified – Digitally Signed Credential" height="36" style="vertical-align:middle;margin-left:.5rem" />
+                    </div>
+                </header>
+                <dl style="display:grid;grid-template-columns:max-content 1fr;gap:.2rem 1rem;margin:.6rem 0">
+                    <dt>Abschlussdatum</dt><dd>@((c.CompletedAt ?? c.IssuedAt).ToLocalTime().ToString("dd.MM.yyyy"))</dd>
+                    <dt>Ausgestellt</dt><dd>@c.IssuedAt.ToLocalTime().ToString("dd.MM.yyyy")</dd>
+                    <dt>Ergebnis</dt><dd>@c.ScorePercent.ToString("0.#") % (Bestehensgrenze @c.PassPercent %)</dd>
+                    @if (i.Demonstrated.Count > 0) { <dt>Nachgewiesene Kompetenzen</dt><dd>@string.Join(", ", i.Demonstrated)</dd> }
+                    @if (c.IsTopic && i.ModuleCount > 0) { <dt>Enthaltene Module</dt><dd>@i.ModuleCount mit Einzelnachweis</dd> }
+                    <dt>Verifikation</dt><dd><a href="/verify/@c.Id">@(i.VerifyUrl)</a></dd>
+                </dl>
+                <p class="muted" style="font-size:.85rem;margin:.5rem 0">Zum Prüfen (z. B. im 1EdTech-Validator) das <strong>signierte JWT</strong> verwenden. Die JSON-Datei ist nur die lesbare Darstellung desselben Inhalts und trägt bewusst keine Signatur – ein externer Prüfer meldet dort „missing a proof“.</p>
+                <div class="actions" style="display:flex;gap:.5rem;flex-wrap:wrap">
+                    <a class="btn btn-primary btn-sm" href="/api/certificates/@c.Id/certificate.pdf" download>@(c.IsTopic ? "Themenabschluss als PDF" : "Modulzertifikat als PDF")</a>
+                    @* Maßgeblich ist das signierte JWT (Open Badges 3.0 / CLR 2.0, ADR 0038); das JSON ist die lesbare Darstellung ohne Signatur und enthält bewusst keinen Proof *@
+                    @if (c.IsTopic) { <a class="btn btn-ghost btn-sm" href="/api/certificates/@c.Id/clr.jwt" download title="Signierter Nachweis (JWT) – diese Datei prüfen lassen">CLR (signiert, JWT)</a> }
+                    <a class="btn btn-ghost btn-sm" href="/api/certificates/@c.Id/badge.jwt" download title="Signierter Nachweis (JWT) – diese Datei prüfen lassen">@(c.IsTopic ? "Master-Badge (signiert, JWT)" : "Open Badge (signiert, JWT)")</a>
+                    @if (c.IsTopic) { <a class="btn btn-ghost btn-sm" href="/api/certificates/@c.Id/clr" download title="Lesbare Darstellung ohne Signatur (kein Proof) – zum Prüfen das JWT verwenden">CLR (JSON, ohne Signatur)</a> }
+                    <a class="btn btn-ghost btn-sm" href="/api/certificates/@c.Id/badge" download title="Lesbare Darstellung ohne Signatur (kein Proof) – zum Prüfen das JWT verwenden">@(c.IsTopic ? "Master-Badge (JSON, ohne Signatur)" : "Open Badge (JSON, ohne Signatur)")</a>
+                    <a class="btn btn-ghost btn-sm" href="/verify/@c.Id">Zertifikat prüfen</a>
+                    <button class="btn btn-ghost btn-sm" @onclick="() => ToggleLinkedIn(c.Id)" aria-expanded="@(_linkedIn == c.Id)">Auf LinkedIn hinzufügen</button>
+                </div>
+                @if (_linkedIn == c.Id)
+                {
+                    var li = Certs.LinkedInShare(c);
+                    <div class="card panel" role="group" aria-label="Auf LinkedIn hinzufügen" style="margin-top:.8rem">
+                        <p class="muted">Es wird nichts automatisch veröffentlicht. Mit dem Button öffnest du LinkedIn in einem neuen Tab; dort bestätigst du die Angaben selbst. LinkedIn übernimmt die Vorbelegung nicht immer — dann trägst du die folgenden Werte ein:</p>
+                        <dl style="display:grid;grid-template-columns:max-content 1fr;gap:.2rem 1rem">
+                            <dt>Name des Zertifikats</dt><dd><code>@li.Name</code></dd>
+                            <dt>Aussteller</dt><dd><code>@li.Organization</code></dd>
+                            <dt>Zertifikats-ID</dt><dd><code>@li.CertificateId</code></dd>
+                            <dt>Ausstellungsdatum</dt><dd><code>@li.IssueMonth/@li.IssueYear</code></dd>
+                            <dt>Zertifikats-URL</dt><dd><code style="word-break:break-all">@li.VerifyUrl</code></dd>
+                        </dl>
+                        <p><a class="btn btn-primary btn-sm" href="@li.AddUrl" target="_blank" rel="noopener noreferrer">LinkedIn öffnen</a>
+                           <a class="btn btn-ghost btn-sm" href="/brand/learny-verified-share.png" download>Freigabegrafik (PNG)</a></p>
+                        <p class="muted">Die Zertifikats-URL führt zur öffentlichen Prüfseite mit den freigegebenen Kompetenzen und Nachweisen (ohne private Lerninhalte).</p>
+                    </div>
+                }
+            </DetailDrawer>
+        }
     }
 </div>
 
@@ -96,13 +170,61 @@
     private sealed record Item(Certificate Cert, List<string> Demonstrated, int ModuleCount, string VerifyUrl);
     private List<Item> _items = new();
     private bool _loading = true;
-    private string _filter = "";
+    private string _filter = "", _status = "", _q = "", _sort = "new", _view = "tiles";
+    /// <summary>Direktlink auf eine Ansicht: <c>?view=list</c> bzw. <c>?view=tiles</c> (überschreibt die gemerkte Ansicht beim Start).</summary>
+    [SupplyParameterFromQuery(Name = "view")] public string? ViewQuery { get; set; }
+    /// <summary>Direktlink auf die Detailansicht eines Nachweises: <c>?open=&lt;Nachweis-ID&gt;</c>.</summary>
+    [SupplyParameterFromQuery(Name = "open")] public string? OpenQuery { get; set; }
+    private string? _open;
+    private bool _favOnly;
+    private HashSet<string> _favs = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly (string Value, string Label)[] SortOpts = { ("new", "Neueste zuerst"), ("old", "Älteste zuerst"), ("name", "Name A–Z"), ("fav", "Favoriten zuerst"), ("status", "Status") };
+    private static readonly (string Value, string Label)[] GroupOpts = { ("", "keine"), ("type", "Art (Thema/Modul)"), ("date", "Abschlussmonat"), ("status", "Status (gültig/widerrufen)") };
+    private string _group = "";
+
+    private Func<Item, (int Order, string Title)>? GroupKey() => _group switch
+    {
+        "type" => x => x.Cert.IsTopic ? (0, "Themenabschlüsse") : (1, "Modulabschlüsse"),
+        "date" => x => ListGrouping.Month(x.Cert.CompletedAt ?? x.Cert.IssuedAt),
+        "status" => x => x.Cert.IsRevoked ? (1, "Widerrufen") : (0, "Gültig"),
+        _ => null,
+    };
+
+    private List<Item> Shown()
+    {
+        var q = _q.Trim();
+        IEnumerable<Item> r = _items.Where(x =>
+            (_filter == "" || (_filter == "topic") == x.Cert.IsTopic)
+            && (_status == "" || (_status == "revoked") == x.Cert.IsRevoked)
+            && (_favOnly == false || _favs.Contains(x.Cert.Id))
+            && (q.Length == 0 || x.Cert.ModuleName.Contains(q, StringComparison.CurrentCultureIgnoreCase) || x.Cert.Number.Contains(q, StringComparison.OrdinalIgnoreCase)));
+        r = _sort switch
+        {
+            "old" => r.OrderBy(x => x.Cert.CompletedAt ?? x.Cert.IssuedAt),
+            "name" => r.OrderBy(x => x.Cert.ModuleName, StringComparer.CurrentCultureIgnoreCase),
+            "status" => r.OrderBy(x => x.Cert.IsRevoked).ThenByDescending(x => x.Cert.CompletedAt ?? x.Cert.IssuedAt),
+            "fav" => r.OrderByDescending(x => _favs.Contains(x.Cert.Id)).ThenByDescending(x => x.Cert.CompletedAt ?? x.Cert.IssuedAt),
+            _ => r.OrderByDescending(x => x.Cert.CompletedAt ?? x.Cert.IssuedAt),
+        };
+        return r.ToList();
+    }
+
+    private string _userId = "";
+
+    private async Task ToggleFav(string id)
+    {
+        try { if (await Favs.ToggleAsync(_userId, "credential", id)) _favs.Add(id); else _favs.Remove(id); }
+        catch (Exception e) when (e is InvalidOperationException or ArgumentException) { /* Grenze erreicht: Anzeige bleibt unverändert */ }
+    }
     private string? _linkedIn;
 
     protected override async Task OnInitializedAsync()
     {
+        if (ViewQuery is "tiles" or "list") _view = ViewQuery;
         var auth = await AuthState.GetAuthenticationStateAsync();
         var uid = auth.User.GetUserId() ?? throw new UnauthorizedAccessException();
+        _userId = uid;
+        _favs = await Favs.ListAsync(uid, "credential");
         await TopicCreds.EnsureAllForUserAsync(uid);   // erfüllte, noch nicht ausgestellte Themenabschlüsse nachziehen (idempotent)
         foreach (var c in await Certs.ListForUserAsync(uid))
         {
@@ -114,6 +236,7 @@
             }
             _items.Add(new Item(c, demonstrated, modules, $"{Certs.BaseUrl}/verify/{c.Id}"));
         }
+        if (OpenQuery is { } oq && _items.Any(x => string.Equals(x.Cert.Id, oq, StringComparison.OrdinalIgnoreCase))) _open = _items.First(x => string.Equals(x.Cert.Id, oq, StringComparison.OrdinalIgnoreCase)).Cert.Id;
         _loading = false;
     }
 

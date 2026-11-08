@@ -57,3 +57,7 @@ Status unverändert. Neben der Anmeldung per E-Mail-Einmalcode (`idp = mail`) gi
 ## Nachtrag 2026-11-08 (Learny-Integration, Phase B)
 
 Für Learny gilt die Umsetzung aus [0049](0049-einladungs-und-lernberechtigungsmodell.md): Einladungen und Einlösung in `InvitationService`, Profil und Rechte nur aus dem Einladungsdatensatz, B2B und B2C mit ausdrücklichen Zuweisungen, Bestandsprofil für Workforce-Benutzer unverändert. Die im PoC zusätzlich zugelassenen **lokalen Konten** als „bestätigte E-Mail“ gelten in Learny nicht (siehe [0048](0048-multi-issuer-authentifizierung-und-bestandsschutz.md), Vertrauensregel).
+
+## Nachtrag 2026-11-08 (Phase C)
+
+In Learny steht der Einladungstoken nicht mehr im Linkpfad, sondern im URL-Fragment (`<base>/invite#<token>`) und wird per POST-Body übergeben ([ADR 0050](0050-administration-einladungsversand-und-otp-in-learny.md)); Zugriffsprotokolle von IIS, Proxy und Cloudflare sehen ihn damit nicht. Versand und Verwaltung laufen über die Administration in Learny, nicht über das PoC-Portal.

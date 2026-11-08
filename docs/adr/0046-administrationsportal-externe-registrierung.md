@@ -52,3 +52,7 @@ Status unverändert. Administratoren richten den Mailversand unter `/admin/mail`
 ## Nachtrag 2026-11-08 (Learny-Integration, Phase B)
 
 Die fachlichen Operationen des Portals (Einladungen verwalten, Module/Themen zuweisen und widerrufen, Status) stehen in Learny als `InvitationService` und `LearnerAdminService` bereit ([0049](0049-einladungs-und-lernberechtigungsmodell.md)); die Oberfläche folgt in Phase C im vorhandenen `Admin.razor`. Es gibt keine zweite Admin-App und keinen Administrator aus dem External-Token.
+
+## Nachtrag 2026-11-08 (Phase C)
+
+Die Funktionen des PoC-Portals (Einladungen, Versand, Lernrechte, Ereignisprotokoll) sind als Tabs der bestehenden Learny-Seite `/admin` umgesetzt (`AdminInvitationsPanel`, `AdminLearnersPanel`, `AdminEventsPanel`); es gibt keine zweite Admin-Anwendung. Die Mail-Einrichtung im Portal (Zertifikatserzeugung) entfällt in Learny, siehe [ADR 0050](0050-administration-einladungsversand-und-otp-in-learny.md).

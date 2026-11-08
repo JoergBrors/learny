@@ -2,6 +2,8 @@
 @attribute [Authorize]
 @rendermode InteractiveServer
 @inject TopicService TopicApi
+@inject CardRepository Repo
+@inject FavoritesService Favs
 @inject NavigationManager Nav
 @inject AuthenticationStateProvider AuthState
 
@@ -15,11 +17,14 @@
         </div>
         <div class="page-head-actions">
             <a class="btn btn-ghost" href="/">← Module</a>
+            @if (!_restricted)
+            {
             <label class="btn btn-ghost file-btn" title="Neues privates Thema aus einer learny-topic-Definition (Entwurf, keine Veröffentlichung)">
                 ⬆ Thema aus JSON erstellen
                 <InputFile OnChange="ImportJsonAsync" accept=".json" disabled="@_importing" />
             </label>
             <button class="btn btn-primary" @onclick="() => _showCreate = !_showCreate">＋ Neues Thema</button>
+            }
         </div>
     </div>
 
@@ -65,10 +70,67 @@
     }
     else
     {
+        var shown = Shown();
+        var groups = ListGrouping.By(shown, GroupKey());
+        <ListToolbar Placeholder="Themen suchen" @bind-Query="_q" @bind-Sort="_sort" SortOptions="SortOpts" @bind-Group="_group" GroupOptions="GroupOpts" @bind-FavoritesOnly="_favOnly" FavoriteCount="@Current.Count(t => _favs.Contains(t.Topic.Id))"
+                     @bind-View="_view" StorageKey="view.topics" Total="@Current.Count" Shown="@shown.Count">
+            <Filters>
+                <select class="input compact" @bind="_flt" aria-label="Filter">
+                    <option value="">Alle Stände</option>
+                    <option value="mandatory">Nur Pflicht</option>
+                    <option value="open">Nicht abgeschlossen</option>
+                    <option value="done">Abgeschlossen</option>
+                    <option value="global">Global</option>
+                </select>
+            </Filters>
+        </ListToolbar>
+        @if (shown.Count == 0)
+        {
+            <div class="empty-state"><p class="empty-title">Keine Treffer.</p><p class="muted">Suche oder Filter anpassen@(_favOnly ? " bzw. „Favoriten“ ausschalten" : "").</p></div>
+        }
+        else if (_view == "list")
+        {
+            <div class="card table-wrap list-view">
+                <table class="table">
+                    <caption class="sr-only">Themen</caption>
+                    <thead><tr><th class="sr-only">Favorit</th><th>Thema</th><th>Stand</th><th>Umfang</th><th>Fortschritt</th><th>Fällig</th><th><span class="sr-only">Aktionen</span></th></tr></thead>
+                    <tbody>
+                        @foreach (var g in groups)
+                        {
+                        @if (g.Title.Length > 0) { <tr class="group-row"><th colspan="7" scope="colgroup">@g.Title (@g.Items.Count)</th></tr> }
+                        @foreach (var t in g.Items)
+                        {
+                            var pct = t.Progress is { ModulesTotal: > 0 } pr ? pr.ModulesCompleted * 100 / pr.ModulesTotal : 0;
+                            <tr class="clickable" tabindex="0" @onclick='() => Nav.NavigateTo("/topics/" + t.Topic.Id)' @onkeydown='e => { if (e.Key == "Enter") Nav.NavigateTo("/topics/" + t.Topic.Id); }'>
+                                <td><FavoriteButton Active="_favs.Contains(t.Topic.Id)" Label="@t.Topic.Name" OnToggle="() => ToggleFav(t.Topic.Id)" /></td>
+                                <td><div class="name-cell"><div><strong>@t.Topic.Name</strong>@if (t.Topic.Description.Length > 0) { <small>@t.Topic.Description</small> }</div></div></td>
+                                <td>
+                                    @if (t.Version > 0) { <span class="badge">v@(t.Version)</span> } else { <span class="badge badge-draft">Entwurf</span> }
+                                    @if (t.GlobalStatus == "active") { <span class="badge badge-pass">global</span> }
+                                    @if (t.Mandatory) { <span class="badge badge-warn">Pflicht</span> }
+                                    @if (t.NewerVersionAvailable) { <span class="badge badge-warn">neue Version</span> }
+                                </td>
+                                <td>@t.Stats.Modules Module · @t.Stats.Cards Karten</td>
+                                <td>@if (t.Progress is not null) { <span class="progress-mini" aria-hidden="true"><span style="width:@(pct)%"></span></span><span>@pct %</span> } else { <span class="muted">—</span> }</td>
+                                <td>@(t.DueAt is DateTime due ? due.ToLocalTime().ToString("dd.MM.yyyy") + (t.Overdue ? " · überfällig" : "") : "")</td>
+                                <td class="actions"><a class="btn btn-ghost btn-sm" href="/topics/@t.Topic.Id" @onclick:stopPropagation="true">Öffnen</a></td>
+                            </tr>
+                        }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+        else
+        {
+        @foreach (var g in groups)
+        {
+        @if (g.Title.Length > 0) { <h3 class="group-head">@g.Title <span class="count">(@g.Items.Count)</span></h3> }
         <div class="module-grid">
-            @foreach (var t in Current)
+            @foreach (var t in g.Items)
             {
                 <a class="module-card topic-card" href="/topics/@t.Topic.Id" aria-label="@($"Thema {t.Topic.Name} öffnen")">
+                    <FavoriteButton Active="_favs.Contains(t.Topic.Id)" Label="@t.Topic.Name" OnToggle="() => ToggleFav(t.Topic.Id)" />
                     <h2>@t.Topic.Name</h2>
                     @if (t.Topic.Description.Length > 0)
                     {
@@ -117,6 +179,8 @@
                 </a>
             }
         </div>
+        }
+        }
     }
 </div>
 
@@ -125,6 +189,58 @@
     private string _tab = "own";
     private bool _loading = true;
     private bool _showCreate;
+    private string _q = "", _sort = "fav", _view = "tiles", _flt = "";
+    /// <summary>Direktlink auf eine Ansicht: <c>?view=list</c> bzw. <c>?view=tiles</c> (überschreibt die gemerkte Ansicht beim Start).</summary>
+    [SupplyParameterFromQuery(Name = "view")] public string? ViewQuery { get; set; }
+    /// <summary>Direktlink auf einen Bereich: <c>?tab=own|shared|assigned|global</c> (z. B. Startziel nach der Anmeldung).</summary>
+    [SupplyParameterFromQuery(Name = "tab")] public string? TabQuery { get; set; }
+    private bool _favOnly;
+    private HashSet<string> _favs = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly (string Value, string Label)[] SortOpts = { ("fav", "Favoriten zuerst"), ("name", "Name A–Z"), ("name_desc", "Name Z–A"), ("due", "Fälligkeit"), ("updated", "Zuletzt geändert") };
+    private static readonly (string Value, string Label)[] GroupOpts = { ("", "keine"), ("status", "Lernstatus"), ("pub", "Veröffentlichung"), ("due", "Fälligkeit"), ("date", "Änderungsmonat") };
+    private string _group = "";
+
+    private Func<TopicSummary, (int Order, string Title)>? GroupKey() => _group switch
+    {
+        "status" => t => t.Overdue ? (0, "Pflicht überfällig") : t.Mandatory && t.Progress?.Status != "completed" ? (1, "Pflicht offen") : t.Progress?.Status == "in_progress" ? (2, "In Bearbeitung") : t.Progress?.Status == "completed" ? (4, "Abgeschlossen") : (3, "Nicht begonnen"),
+        "pub" => t => t.GlobalStatus == "pending_approval" ? (0, "Veröffentlichung offen (Freigabe ausstehend)") : t.GlobalStatus == "rejected" ? (1, "Global abgelehnt") : t.Version == 0 ? (2, "Entwurf") : t.Section == "own" && t.Topic.HasUnpublishedChanges ? (3, "Veröffentlicht, mit unveröffentlichten Änderungen") : t.GlobalStatus == "active" ? (5, "Global veröffentlicht") : (4, "Veröffentlicht"),
+        "due" => t => t.DueAt is not DateTime d ? (3, "Ohne Frist") : t.Overdue ? (0, "Überfällig") : d.ToUniversalTime() < DateTime.UtcNow.AddDays(7) ? (1, "Diese Woche fällig") : (2, "Später fällig"),
+        "date" => t => ListGrouping.Month(t.Topic.UpdatedAt),
+        _ => null,
+    };
+
+    private List<TopicSummary> Shown()
+    {
+        var q = _q.Trim();
+        IEnumerable<TopicSummary> r = Current.Where(t =>
+            (q.Length == 0 || t.Topic.Name.Contains(q, StringComparison.CurrentCultureIgnoreCase) || t.Topic.Description.Contains(q, StringComparison.CurrentCultureIgnoreCase))
+            && (!_favOnly || _favs.Contains(t.Topic.Id))
+            && (_flt switch
+            {
+                "mandatory" => t.Mandatory,
+                "open" => t.Progress is null || t.Progress.Status != "completed",
+                "done" => t.Progress is { Status: "completed" },
+                "global" => t.GlobalStatus == "active",
+                _ => true,
+            }));
+        var cmp = StringComparer.CurrentCultureIgnoreCase;
+        r = _sort switch
+        {
+            "name" => r.OrderBy(t => t.Topic.Name, cmp),
+            "name_desc" => r.OrderByDescending(t => t.Topic.Name, cmp),
+            "due" => r.OrderBy(t => t.DueAt ?? DateTime.MaxValue).ThenBy(t => t.Topic.Name, cmp),
+            "updated" => r.OrderByDescending(t => t.Topic.UpdatedAt).ThenBy(t => t.Topic.Name, cmp),
+            _ => r.OrderByDescending(t => _favs.Contains(t.Topic.Id)).ThenBy(t => t.Topic.Name, cmp),
+        };
+        return r.ToList();
+    }
+
+    private async Task ToggleFav(string id)
+    {
+        try { if (await Favs.ToggleAsync(_userId, "topic", id)) _favs.Add(id); else _favs.Remove(id); }
+        catch (Exception e) when (e is InvalidOperationException or ArgumentException) { _message = e.Message; _error = true; }
+    }
+    private bool _restricted;
     private bool _archived;
     private string _newName = "", _newDescription = "";
     private string? _message;
@@ -165,8 +281,12 @@
 
     protected override async Task OnInitializedAsync()
     {
+        if (ViewQuery is "tiles" or "list") _view = ViewQuery;
+        if (TabQuery is "own" or "shared" or "assigned" or "global") _tab = TabQuery;
         var auth = await AuthState.GetAuthenticationStateAsync();
         _userId = auth.User.GetUserId() ?? throw new UnauthorizedAccessException();
+        _restricted = await Repo.IsRestrictedLearnerAsync(_userId);   // externe Lernprofile: kein Anlegen, kein Import
+        _favs = await Favs.ListAsync(_userId, "topic");
         await LoadAsync();
     }
 

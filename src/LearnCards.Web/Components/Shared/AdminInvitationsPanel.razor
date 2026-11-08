@@ -1,0 +1,365 @@
+@inject InvitationService Invites
+@inject InvitationDeliveryService Delivery
+@inject TopicService Topics
+@inject SharingService Sharing
+@inject InviteEvents Events
+@inject AppConfig Config
+
+@* Einladungen externer Lernender (ADR 0042/0049): erstellen (ohne Versand), Versand ausdrücklich bestätigen, verfolgen, widerrufen, Link neu ausstellen.
+   Der Klartextlink existiert nur im Speicher dieser Sitzung (direkt nach Erstellung/Neuausstellung) und wird weder gespeichert noch protokolliert. *@
+
+@if (_denied)
+{
+    <div class="alert alert-error" role="status">@_message</div>
+}
+else if (!Invites.Enabled || !Config.ExternalId.Enabled)
+{
+    <div class="alert alert-error" role="status">
+        Einladungen sind nicht aktiv. Voraussetzungen: <code>EXTID_ENABLED=1</code> mit vollständiger External-ID-Konfiguration, <code>INVITE_TOKEN_KEY</code> und <code>PUBLIC_BASE_URL</code> (siehe docs/entra-external-id/learny-integration.md).
+    </div>
+}
+else
+{
+    <section class="admin-section" aria-labelledby="inv-title">
+        <div class="section-head">
+            <div>
+                <h2 id="inv-title">Einladungen</h2>
+                <p class="muted">Externe Lernende registrieren sich nur mit persönlicher Einladung. Erstellen speichert nur; versendet wird erst nach Ihrer ausdrücklichen Bestätigung.</p>
+            </div>
+            <button class="btn btn-primary" @onclick="() => _showCreate = !_showCreate" aria-expanded="@(_showCreate ? "true" : "false")">@(_showCreate ? "Abbrechen" : "＋ Neue Einladung")</button>
+        </div>
+
+        @if (_message is not null)
+        {
+            <div class="alert @(_error ? "alert-error" : "alert-ok")" role="status">@_message</div>
+        }
+        @if (!Config.Mail.Enabled)
+        {
+            <div class="alert alert-info" role="status">Der Mailversand ist nicht aktiviert (<code>MAIL_ENABLED</code>). Einladungen können erstellt, aber nicht versendet werden.</div>
+        }
+
+        @if (_showCreate)
+        {
+            <div class="card panel">
+                <h3>Neue Einladung</h3>
+                <div class="form-grid">
+                    <div><label class="field-label" for="inv-email">E-Mail-Adresse</label><input id="inv-email" class="input" type="email" @bind="_email" placeholder="name@beispiel.de" /></div>
+                    <div><label class="field-label" for="inv-name">Anzeigename (optional)</label><input id="inv-name" class="input" @bind="_displayName" maxlength="80" /></div>
+                    <div><label class="field-label" for="inv-profile">Lernprofil</label>
+                        <select id="inv-profile" class="input" @bind="_profile">
+                            <option value="@LearnerProfiles.B2cLearner">B2C — einzelne Lernende</option>
+                            <option value="@LearnerProfiles.B2bLearner">B2B — Lernende einer Organisation</option>
+                        </select></div>
+                    <div><label class="field-label" for="inv-hours">Gültigkeit (Stunden, 1–720)</label><input id="inv-hours" class="input" type="number" min="1" max="720" @bind="_hours" /></div>
+                </div>
+
+                <span class="field-label">Module (aktive globale Module)</span>
+                @if (_modules.Count == 0) { <p class="muted">Keine aktiven globalen Module.</p> }
+                <div class="pick-list">
+                    @foreach (var m in _modules)
+                    {
+                        <label class="pick"><input type="checkbox" checked="@_pickedModules.Contains(m.Id)" @onchange="e => ToggleModule(m.Id, e.Value is true)" /> @m.Name</label>
+                    }
+                </div>
+
+                <span class="field-label">Themen und Pflichtschulungen</span>
+                <div class="form-row">
+                    <select class="input" @bind="_topicId" @bind:after="OnTopicChanged" aria-label="Thema">
+                        <option value="">Thema wählen …</option>
+                        @foreach (var t in _topics) { <option value="@t.TopicId">@t.Name</option> }
+                    </select>
+                    <select class="input compact" @bind="_version" aria-label="Themenversion" disabled="@(_versions.Count == 0)">
+                        @foreach (var v in _versions) { <option value="@v.Version">Version @v.Version@(v.GlobalStatus == "active" ? " · global" : "")</option> }
+                    </select>
+                    <input class="input compact" type="date" @bind="_due" aria-label="Fälligkeitsdatum (optional)" title="Fälligkeitsdatum (optional)" />
+                    <label class="pick"><input type="checkbox" @bind="_mandatory" /> verpflichtend</label>
+                    <button class="btn btn-ghost btn-sm" @onclick="AddTopic" disabled="@string.IsNullOrEmpty(_topicId)">Hinzufügen</button>
+                </div>
+                @if (_pickedTopics.Count > 0)
+                {
+                    <div class="pick-list">
+                        @foreach (var g in _pickedTopics)
+                        {
+                            <span class="badge @(g.Mandatory ? "badge-danger" : "badge-external")">@TopicName(g.TopicId) · v@(g.Version)@(g.Mandatory ? " · Pflicht" : "")@(g.DueAt is { } d ? " · bis " + d.ToLocalTime().ToString("dd.MM.yyyy") : "")
+                                <button class="btn btn-ghost btn-sm" aria-label="Entfernen" @onclick="() => _pickedTopics.Remove(g)">✕</button></span>
+                        }
+                    </div>
+                }
+                <p class="muted">Pflicht entsteht nur durch ausdrücklich „verpflichtend“. Externe Lernende sehen ausschließlich die hier ausgewählten Inhalte.</p>
+                <div class="actions"><button class="btn btn-primary" @onclick="CreateAsync" disabled="@_busy">Einladung erstellen (ohne Versand)</button></div>
+            </div>
+        }
+
+        <div class="toolbar">
+            <input class="input" type="search" placeholder="E-Mail suchen" @bind="_filter" @bind:event="oninput" @bind:after="ReloadAsync" aria-label="Einladungen suchen" />
+            <select class="input compact" @bind="_statusFilter" @bind:after="ReloadAsync" aria-label="Status filtern">
+                <option value="">Alle Status</option>
+                <option value="pending">offen</option>
+                <option value="accepted">eingelöst</option>
+                <option value="revoked">widerrufen</option>
+                <option value="expired">abgelaufen</option>
+            </select>
+            <select class="input compact" @bind="_sort" aria-label="Sortierung">
+                <option value="new">Neueste zuerst</option>
+                <option value="old">Älteste zuerst</option>
+                <option value="email">Empfänger A–Z</option>
+                <option value="expires">Läuft zuerst ab</option>
+            </select>
+            <select class="input compact" @bind="_group" aria-label="Gruppierung">
+                <option value="">Gruppieren: keine</option>
+                <option value="status">Gruppiert nach Einladungsstatus</option>
+                <option value="delivery">Gruppiert nach Versand</option>
+                <option value="profile">Gruppiert nach Profil</option>
+            </select>
+        </div>
+
+        <div class="card table-wrap">
+            <table class="table table-users">
+                <caption class="sr-only">Einladungen</caption>
+                <thead><tr><th>Empfänger</th><th>Profil</th><th>Einladung</th><th>Versand</th><th>Inhalte</th><th>Gültig bis</th><th><span class="sr-only">Aktionen</span></th></tr></thead>
+                <tbody>
+                    @foreach (var g in ListGrouping.By(Sorted(), GroupKey()))
+                    {
+                    @if (g.Title.Length > 0) { <tr class="group-row"><th colspan="7" scope="colgroup">@g.Title (@g.Items.Count)</th></tr> }
+                    @foreach (var r in g.Items)
+                    {
+                        <tr class="@(_openId == r.InvitationId ? "row-open" : "")">
+                            <td><div class="user-cell"><strong>@r.RecipientEmail</strong>@if (r.DisplayName is { Length: > 0 } n) { <small>@n</small> }</div></td>
+                            <td><span class="badge badge-profile">@(r.TargetProfile == LearnerProfiles.B2bLearner ? "B2B" : "B2C")</span></td>
+                            <td><span class="badge @InvitationBadge(r.Status)">@AdminEventLabels.InvitationLabel(r.Status)</span></td>
+                            <td><span class="badge @DeliveryBadge(r.DeliveryStatus)">@ShortDelivery(r.DeliveryStatus)</span></td>
+                            <td>@r.ModuleCount Module · @r.TopicCount Themen</td>
+                            <td>@r.ExpiresAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                            <td class="actions"><button class="btn btn-ghost btn-sm" aria-expanded="@(_openId == r.InvitationId ? "true" : "false")" @onclick="() => OpenAsync(r.InvitationId)">Details</button></td>
+                        </tr>
+                    }
+                    }
+                </tbody>
+            </table>
+            @if (_rows.Count == 0) { <div class="empty-state">Keine Einladungen.</div> }
+        </div>
+        @if (_openId != "" && _info is { } i)
+        {
+            <DetailDrawer Title="@($"Einladung · {i.RecipientEmail}")" OnClose="CloseDetail">
+                <div class="detail-grid">
+                    <div class="subpanel">
+                        <h3>Stand</h3>
+                        <dl class="kv">
+                            <dt>Empfänger</dt><dd>@i.RecipientEmail</dd>
+                            <dt>Einladung</dt><dd><span class="badge @InvitationBadge(i.Status)">@AdminEventLabels.InvitationLabel(i.Status)</span></dd>
+                            <dt>Versand</dt><dd><span class="badge @DeliveryBadge(_delivery?.Status ?? "pending")">@AdminEventLabels.DeliveryLabel(_delivery?.Status ?? "pending")</span></dd>
+                            @if (_delivery is { } d)
+                            {
+                                <dt>Versuche</dt><dd>@d.Attempts@(d.LastAttemptAt is { } la ? " · zuletzt " + la.ToLocalTime().ToString("dd.MM.yyyy HH:mm") : "")</dd>
+                                @if (d.SubmittedAt is { } sa) { <dt>Angenommen</dt><dd>@sa.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</dd> }
+                                @if (!string.IsNullOrEmpty(d.LastErrorCode)) { <dt>Hinweis</dt><dd>@AdminEventLabels.ErrorLabel(d.LastErrorCode)</dd> }
+                            }
+                        </dl>
+                    </div>
+
+                    <div class="subpanel">
+                        <h3>Versand und Link</h3>
+                        @if (_fresh.TryGetValue(i.InvitationId, out var fresh))
+                        {
+                            <div class="alert alert-ok" role="status">
+                                <strong>Einmalanzeige:</strong> Der Link wird nur jetzt angezeigt und nirgends gespeichert. Er ist ein Geheimnis — nicht in Tickets oder Chats weitergeben.
+                                <div class="link-box">@fresh.Link</div>
+                            </div>
+                        }
+                        @if (i.Status == "pending")
+                        {
+                            @if (_fresh.ContainsKey(i.InvitationId))
+                            {
+                                <label class="pick"><input type="checkbox" @bind="_confirmSend" /> Versand an @i.RecipientEmail bestätigen</label>
+                                @if (_delivery?.Status == DeliveryStatus.Unknown)
+                                {
+                                    <label class="pick"><input type="checkbox" @bind="_ackUnknown" /> Letzter Versuch unklar — trotzdem erneut senden</label>
+                                }
+                                <div class="actions"><button class="btn btn-primary btn-sm" @onclick="() => SendAsync(i.InvitationId)" disabled="@(_busy || !_confirmSend || !Config.Mail.Enabled)">Einladung jetzt senden</button></div>
+                            }
+                            else
+                            {
+                                <p class="muted">Der Link liegt aus Sicherheitsgründen nicht mehr vor. Für einen (erneuten) Versand muss er neu ausgestellt werden; der bisherige Link wird sofort ungültig.</p>
+                            }
+                            <div class="actions">
+                                <button class="btn btn-ghost btn-sm" @onclick="() => RotateAsync(i.InvitationId)" disabled="@_busy">Link neu ausstellen</button>
+                                <button class="btn btn-ghost btn-sm" @onclick="() => RevokeAsync(i.InvitationId)" disabled="@_busy">Widerrufen</button>
+                            </div>
+                        }
+                        else { <p class="muted">Diese Einladung ist @(AdminEventLabels.InvitationLabel(i.Status)); es sind keine Aktionen möglich.</p> }
+                    </div>
+
+                    <div class="subpanel">
+                        <h3>Verlauf</h3>
+                        @if (_events.Count == 0) { <p class="muted">Keine Ereignisse.</p> }
+                        else
+                        {
+                            <table class="table">
+                                <tbody>
+                                    @foreach (var e in _events.OrderBy(x => x.At))
+                                    {
+                                        <tr><td>@e.At.ToLocalTime().ToString("dd.MM. HH:mm:ss")</td><td>@AdminEventLabels.Label(e.Type)@(string.IsNullOrEmpty(e.Category) ? "" : " · " + e.Category)</td></tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+                    </div>
+                </div>
+            </DetailDrawer>
+        }
+    </section>
+}
+
+@code {
+    [Parameter, EditorRequired] public string ActorId { get; set; } = "";
+    /// <summary>Formular „Neue Einladung“ beim Start geöffnet (z. B. für Tests/Direktlinks).</summary>
+    [Parameter] public bool InitiallyOpen { get; set; }
+
+    private string _email = "", _displayName = "", _profile = LearnerProfiles.B2cLearner, _filter = "", _statusFilter = "", _topicId = "", _openId = "";
+    private int _hours = 72, _version;
+    private DateTime? _due;
+    private bool _mandatory, _busy, _error, _confirmSend, _ackUnknown, _denied, _showCreate;
+    private string? _message;
+    private List<InvitationRow> _rows = new();
+    private List<ModuleInfo> _modules = new();
+    private List<AssignableTopic> _topics = new();
+    private List<AssignableVersion> _versions = new();
+    private readonly HashSet<string> _pickedModules = new();
+    private readonly List<InvitationTopicGrant> _pickedTopics = new();
+    private readonly Dictionary<string, CreatedInvitation> _fresh = new();   // nur im Speicher dieser Sitzung
+    private InvitationInfo? _info;
+    private DeliveryInfo? _delivery;
+    private List<InvitationEventRow> _events = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Invites.Enabled || !Config.ExternalId.Enabled) return;
+        _hours = Config.Invitations.ValidityHours;
+        _showCreate = InitiallyOpen;
+        try
+        {
+            _modules = (await Sharing.ListGlobalModulesForReviewAsync(ActorId)).Where(m => m.GlobalStatus == "active").OrderBy(m => m.Name).ToList();
+            _topics = await Topics.ListAssignableTopicsAsync(ActorId);
+            await ReloadAsync();
+        }
+        catch (UnauthorizedAccessException ex) { _denied = true; Fail(ex.Message); }
+    }
+
+    private async Task ReloadAsync() =>
+        _rows = await Invites.ListAsync(ActorId, new InvitationFilter(string.IsNullOrEmpty(_statusFilter) ? null : _statusFilter, _filter));
+
+    private void ToggleModule(string id, bool on) { if (on) _pickedModules.Add(id); else _pickedModules.Remove(id); }
+
+    private void OnTopicChanged()
+    {
+        _versions = _topics.FirstOrDefault(t => t.TopicId == _topicId)?.Versions ?? new();
+        _version = _versions.FirstOrDefault()?.Version ?? 0;
+    }
+
+    private void AddTopic()
+    {
+        if (string.IsNullOrEmpty(_topicId) || _pickedTopics.Any(g => g.TopicId == _topicId)) return;
+        _pickedTopics.Add(new InvitationTopicGrant(_topicId, _version > 0 ? _version : null, _mandatory, _due?.ToUniversalTime()));
+        _topicId = ""; _versions = new(); _mandatory = false; _due = null;
+    }
+
+    private string TopicName(string id) => _topics.FirstOrDefault(t => t.TopicId == id)?.Name ?? id;
+
+    private async Task RunAsync(Func<Task<string>> action)
+    {
+        _busy = true; _message = null; _error = false;
+        try { var m = await action(); if (!_error) _message = "✅ " + m; }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException or UnauthorizedAccessException)
+        {
+            Fail(ex is AccountExistsException ? "Für diese Adresse existiert bereits ein Konto; eine Einladung ist nicht möglich." : ex.Message);
+        }
+        finally { _busy = false; }
+    }
+
+    private string _sort = "new", _group = "";
+
+    private List<InvitationRow> Sorted() => (_sort switch
+    {
+        "old" => _rows.OrderBy(r => r.CreatedAt),
+        "email" => _rows.OrderBy(r => r.RecipientEmail, StringComparer.CurrentCultureIgnoreCase),
+        "expires" => _rows.OrderBy(r => r.ExpiresAt),
+        _ => _rows.OrderByDescending(r => r.CreatedAt),
+    }).ToList();
+
+    private Func<InvitationRow, (int Order, string Title)>? GroupKey() => _group switch
+    {
+        "status" => r => r.Status switch { "pending" => (0, "Offen"), "accepted" => (1, "Eingelöst"), "expired" => (2, "Abgelaufen"), _ => (3, "Widerrufen") },
+        "delivery" => r => r.DeliveryStatus switch { DeliveryStatus.Unknown => (0, "Versand unklar"), DeliveryStatus.Failed => (1, "Versand fehlgeschlagen"), DeliveryStatus.Pending => (2, "Nicht versendet"), _ => (3, "Versand angenommen") },
+        "profile" => r => r.TargetProfile == LearnerProfiles.B2bLearner ? (1, "B2B") : (0, "B2C"),
+        _ => null,
+    };
+
+    private static string InvitationBadge(string status) => status switch { "pending" => "badge-external", "accepted" => "badge-ok", "revoked" => "badge-danger", _ => "badge-muted" };
+    private static string DeliveryBadge(string status) => status switch { DeliveryStatus.Submitted => "badge-ok", DeliveryStatus.Failed => "badge-danger", DeliveryStatus.Unknown => "badge-warn", _ => "badge-muted" };
+    private static string ShortDelivery(string status) => status switch { DeliveryStatus.Submitted => "angenommen", DeliveryStatus.Failed => "fehlgeschlagen", DeliveryStatus.Unknown => "unklar", _ => "nicht versendet" };
+
+    private Task CreateAsync() => RunAsync(async () =>
+    {
+        var meta = new InvitationMeta(string.IsNullOrWhiteSpace(_displayName) ? null : _displayName.Trim(), null, null, _hours);
+        var created = await Invites.CreateAsync(ActorId, _email, _profile, _pickedModules.ToList(), _pickedTopics.ToList(), meta);
+        _fresh[created.InvitationId] = created;
+        _showCreate = false;
+        _email = ""; _displayName = ""; _pickedModules.Clear(); _pickedTopics.Clear();
+        await ReloadAsync();
+        await OpenAsync(created.InvitationId, forceOpen: true);
+        return "Einladung erstellt. Es wurde noch nichts versendet.";
+    });
+
+    private void CloseDetail() { _openId = ""; _info = null; }
+
+    private async Task OpenAsync(string id, bool forceOpen = false)
+    {
+        if (_openId == id && !forceOpen) { _openId = ""; _info = null; return; }
+        _openId = id; _confirmSend = false; _ackUnknown = false;
+        _info = await Invites.GetInfoAsync(id);
+        _delivery = await Delivery.GetAsync(ActorId, id);
+        _events = await Events.ListAsync(id, null, 200);
+    }
+
+    private Task SendAsync(string id) => RunAsync(async () =>
+    {
+        if (!_fresh.TryGetValue(id, out var fresh)) return Fail2("Der Link liegt nicht mehr vor — bitte zuerst neu ausstellen.");
+        var r = await Delivery.SendAsync(ActorId, id, fresh.Token, _confirmSend, _ackUnknown);
+        _confirmSend = false; _ackUnknown = false;
+        await ReloadAsync(); await OpenAsync(id, forceOpen: true);
+        return Describe(r);
+    });
+
+    private Task RotateAsync(string id) => RunAsync(async () =>
+    {
+        var created = await Invites.RotateAsync(ActorId, id);
+        if (created is null) return Fail2("Der Link konnte nicht neu ausgestellt werden (Einladung nicht mehr offen).");
+        _fresh[id] = created;
+        await ReloadAsync(); await OpenAsync(id, forceOpen: true);
+        return "Link neu ausgestellt; der bisherige Link ist ungültig. Es wurde noch nichts versendet.";
+    });
+
+    private Task RevokeAsync(string id) => RunAsync(async () =>
+    {
+        var ok = await Invites.RevokeAsync(ActorId, id);
+        _fresh.Remove(id);
+        await ReloadAsync(); await OpenAsync(id, forceOpen: true);
+        return ok ? "Einladung widerrufen." : "Die Einladung konnte nicht widerrufen werden.";
+    });
+
+    private string Describe(SendResult r) => r.Decision switch
+    {
+        SendDecision.Sent => "Von Exchange Online zur Zustellung angenommen (keine Zustellgarantie).",
+        SendDecision.NotConfirmed => Fail2("Bitte den Versand zuerst bestätigen."),
+        SendDecision.NotSendable => Fail2(r.Code == "superseded" ? "Der Link wurde während des Versands erneuert; der Versandstatus gehört zum neuen Link." : "Diese Einladung ist nicht mehr versendbar."),
+        SendDecision.InProgress => Fail2("Ein Versand läuft oder die Wartezeit ist noch nicht abgelaufen."),
+        SendDecision.RequiresRotation => Fail2("Bereits angenommen. Ein weiterer Versand verlangt, den Link ausdrücklich neu auszustellen."),
+        SendDecision.RequiresAcknowledgement => Fail2("Der letzte Versuch war unklar. Zum erneuten Senden bitte die Zusatzbestätigung setzen."),
+        SendDecision.TooManyAttempts => Fail2("Zu viele Versuche. Link neu ausstellen, um einen neuen Versand zu ermöglichen."),
+        SendDecision.Failed => Fail2("Nicht versendet: " + AdminEventLabels.ErrorLabel(r.Code)),
+        _ => Fail2("Ergebnis unklar: " + AdminEventLabels.ErrorLabel(r.Code) + " Es wird nicht automatisch erneut gesendet."),
+    };
+
+    private string Fail2(string m) { _error = true; _message = "❌ " + m; return m; }
+    private void Fail(string m) { _message = "❌ " + m; _error = true; }
+}

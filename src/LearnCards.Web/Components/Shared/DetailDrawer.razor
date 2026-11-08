@@ -1,0 +1,36 @@
+@* Einheitliche Detailansicht als Overlay (seitliche Schublade): Details öffnen nie unter der Liste, sondern über der Seite.
+   Schließen: Schaltfläche, Klick auf den Hintergrund oder Esc. Dialog mit Fokus im Panel (role="dialog", aria-modal). *@
+@if (Open)
+{
+    <div class="drawer-backdrop" @onclick="CloseAsync" aria-hidden="true"></div>
+    <aside class="drawer @(Wide ? "drawer-wide" : "")" role="dialog" aria-modal="true" aria-labelledby="@_titleId" tabindex="-1" @ref="_panel" @onkeydown="OnKey">
+        <header class="drawer-head">
+            <h2 id="@_titleId">@Title</h2>
+            <button type="button" class="btn btn-ghost btn-sm" aria-label="Schließen" @onclick="CloseAsync">✕</button>
+        </header>
+        <div class="drawer-body">@ChildContent</div>
+    </aside>
+}
+
+@code {
+    private readonly string _titleId = "drawer-" + Guid.NewGuid().ToString("N")[..8];
+    private ElementReference _panel;
+    private bool _focus;
+
+    /// <summary>Sichtbar? Standard true: die Komponente wird bedingt gerendert (<c>@if (_detail is not null)</c>).</summary>
+    [Parameter] public bool Open { get; set; } = true;
+    [Parameter] public string Title { get; set; } = "";
+    [Parameter] public bool Wide { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    protected override void OnParametersSet() { if (Open) _focus = true; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (Open && _focus) { _focus = false; try { await _panel.FocusAsync(); } catch (Exception) { /* Fokus ist nur Komfort */ } }
+    }
+
+    private Task CloseAsync() => OnClose.InvokeAsync();
+    private Task OnKey(KeyboardEventArgs e) => e.Key == "Escape" ? CloseAsync() : Task.CompletedTask;
+}

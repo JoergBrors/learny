@@ -58,3 +58,7 @@ Status unverändert („Vorgeschlagen“, Zustimmung steht aus). Der eigene OTP-
 ## Nachtrag 2026-11-08 (Portal)
 
 Status unverändert (Zustimmung steht aus). Das Portal betreibt den OTP-Endpunkt (falls aktiviert) auf einem eigenen Port ohne Zugriff auf die Verwaltung. Der Registrierungsablauf sendet `prompt=login`, damit eine bestehende Entra-Sitzung nicht als frische OTP-Verifikation gilt; die Wirkung bei External ID ist live zu bestätigen. Der Zustand des Listeners im Tenant ist unverändert (Listener aktiv, Test I und Rückbau stehen aus).
+
+## Nachtrag 2026-11-08 (Phase C)
+
+Der OTP-Handler ist als `POST /extensions/otp-send` in Learny integriert (`EXTID_OTP_ENABLED`, `EXTID_OTP_AUDIENCES`); Empfänger sind Adressen mit gültiger Einladung oder aktive externe Benutzer mit Profil, Workforce-Benutzer nicht. Codes werden weder gespeichert noch protokolliert. Einzelheiten und Grenzen (Ratenbegrenzung je Instanz): [ADR 0050](0050-administration-einladungsversand-und-otp-in-learny.md).

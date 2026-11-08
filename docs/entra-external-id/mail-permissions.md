@@ -95,3 +95,7 @@ Das Portal versendet die Einladung über denselben `ExchangeOnlineMailService` (
 - SPF/DKIM/DMARC der Domain `brors.link` sind nicht geprüft.
 - Wirksamkeit von RBAC-Änderungen: 30 Minuten bis 2 Stunden.
 - Zertifikatsrotation und Ablauf sind nicht automatisiert.
+
+## Nutzung durch Learny (Phase C)
+
+Learny verwendet dieselbe Mail-App und denselben RBAC-Scope (`learny@brors.link`) für Einladungen und Anmeldecodes — keine neue App, keine zusätzlichen oder tenantweiten Mailrechte. Konfiguration nur aus der Umgebung: `MAIL_ENABLED`, `MAIL_TENANT_ID` (Workforce-Tenant; der External-ID-Tenant wird abgelehnt), `MAIL_CLIENT_ID`, `MAIL_SENDER`, `MAIL_CLIENT_CERT_PATH` + `MAIL_CLIENT_CERT_PASSWORD` (PFX außerhalb von Webroot und Repository; `MAIL_CLIENT_SECRET` nur in Development), `MAIL_ALLOWED_RECIPIENTS` (Adresse, `@domain` oder `*`; leer = niemand; gilt nicht für Anmeldecodes). Ein 403 von Graph (Postfach außerhalb des Scopes) wird als `permission_denied` angezeigt, nie umgangen. Das Client-Zertifikat entsteht standardmäßig **auf der Plattform** (Administration → Mailversand): der private Schlüssel wird dort erzeugt, verschlüsselt im Schlüsselverzeichnis abgelegt und verlässt sie nie; nur die öffentliche `.cer` wird in der App-Registrierung hochgeladen (mehrere Zertifikate nebeneinander sind möglich, z. B. je eines für Debug und Plattform). Es ist selbstsigniert; die Ausstellung aus der Learny-PKI und die Rotation sind Phase D. Ein Graph-202 heißt „angenommen“; Learny bezeichnet es nie als „zugestellt“.

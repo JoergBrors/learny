@@ -7,6 +7,7 @@ using LearnCards.Web.Infrastructure;
 using LearnCards.Web.Services;
 using LearnCards.Web.Services.Certificates;
 using LearnCards.Web.Services.ImageStorage;
+using LearnCards.Web.Services.Mail;
 using LearnCards.Web.Services.Pki;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -17,7 +18,7 @@ using Microsoft.AspNetCore.HttpOverrides;
 EnvLoader.Load();
 
 var builder = WebApplication.CreateBuilder(args);
-// ADR 0049: Einladungslinks (/invite/<token>) dürfen nicht in Anwendungslogs landen. Die Anfragezeilen des Hosts (Pfad inkl. Token) werden unabhängig von appsettings.json
+// ADR 0049: Einladungstoken dürfen nicht in Anwendungslogs landen (ADR 0050: Token im URL-Fragment, nie im Pfad). Zusätzlich werden die Anfragezeilen des Hosts unabhängig von appsettings.json
 // erst ab Warning geschrieben; Fehler bleiben sichtbar. Zugriffsprotokolle von IIS/Proxy sind getrennt zu behandeln (docs/entra-external-id/learny-integration.md).
 builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
 var cfg = AppConfig.Load();
@@ -39,6 +40,7 @@ builder.Services.AddSingleton<CardRepository>();
 builder.Services.AddSingleton<OpenAiClient>();
 builder.Services.AddSingleton<QuizService>();
 builder.Services.AddSingleton<ChatService>();
+builder.Services.AddSingleton<AvatarGeneratorService>();
 builder.Services.AddSingleton<OidcService>();   // Workforce (ADR 0005), unverändert
 builder.Services.AddSingleton<ExternalOidcService>();   // Entra External ID als zweiter, getrennter Anbieter (ADR 0048)
 builder.Services.AddSingleton<OidcStateStore>();   // Einmaligkeit des state über alle Instanzen (ADR 0048)
@@ -62,8 +64,20 @@ builder.Services.AddSingleton<CompetencyService>();   // Kompetenzmodell und Pr�
 builder.Services.AddSingleton<ModuleVersionService>();   // Modulversionen (ADR 0030)
 builder.Services.AddSingleton<ModuleTransferService>();   // Modul-JSON, Klonen (ADR 0028)
 builder.Services.AddSingleton<TopicService>();   // Themen (ADR 0027)
+builder.Services.AddScoped<UserUiState>();   // Avatar-Voreinstellung je Sitzung (Darstellung)
+builder.Services.AddSingleton<LandingService>();
+builder.Services.AddSingleton<DashboardService>();   // Datenquelle des persönlichen Dashboards (nur benutzerbezogen, nichts Erfundenes)   // Startziel nach der Anmeldung: zugewiesene Themen, sonst aktuellste Lernkarten
+builder.Services.AddSingleton<FavoritesService>();   // Favoriten (Stern) je Benutzer
 builder.Services.AddSingleton<InviteEvents>();   // Ereignisprotokoll der Einladungen (ADR 0046/0049)
 builder.Services.AddSingleton<InvitationService>();   // einladungspflichtige Registrierung, atomare Einlösung (ADR 0042/0043/0049)
+builder.Services.AddSingleton<MailCertificateService>();   // Client-Zertifikat der Mail-App, auf der Plattform erzeugt, privater Schlüssel verschlüsselt (ADR 0050)
+builder.Services.AddSingleton<MailRecipientsService>();   // erlaubte Mailempfänger, in der Plattform änderbar und dauerhaft gespeichert (ADR 0050)
+builder.Services.AddSingleton<PlatformMailer>(sp => new PlatformMailer(sp.GetRequiredService<AppConfig>().Mail, sp.GetRequiredService<MailCertificateService>(), sp.GetRequiredService<MailRecipientsService>(),
+    () => new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false })));   // Exchange Online / Graph, Absender learny@brors.link (ADR 0044); ohne MAIL_ENABLED oder Zertifikat sendet er nichts (fail-closed)
+builder.Services.AddSingleton<IInvitationMailer>(sp => sp.GetRequiredService<PlatformMailer>());
+builder.Services.AddSingleton<IOtpMailer>(sp => sp.GetRequiredService<PlatformMailer>());
+builder.Services.AddSingleton<ITrainingMailer>(sp => sp.GetRequiredService<PlatformMailer>());
+builder.Services.AddSingleton<InvitationDeliveryService>();   // Versandzustand getrennt vom Einladungsstatus (ADR 0044/0049)
 builder.Services.AddSingleton<LearnerAdminService>();   // Lernprofile, ausdrückliche Modul-/Themenzuweisungen für die Verwaltung (ADR 0049)
 // Zertifikate, Open Badges und Blockchain-Verankerung (ADR 0021/0022)
 builder.Services.AddSingleton<BadgeSigner>();
@@ -173,6 +187,8 @@ app.UseAntiforgery();
 app.MapStaticAssets();
 app.MapAuthEndpoints();
 app.MapExternalAuthEndpoints();   // nur wenn EXTID_ENABLED (ADR 0048)
+app.MapStartEndpoint();   // /start: Startziel nach der Anmeldung
+app.MapOtpExtensionEndpoints();   // nur wenn EXTID_OTP_ENABLED (ADR 0045)
 app.MapLearnCardsApi();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();

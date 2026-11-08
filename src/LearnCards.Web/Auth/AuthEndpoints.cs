@@ -44,7 +44,7 @@ public static class AuthEndpoints
                 var devAppUser = await users.SignInAsync(UserService.DevProvider, subject, name, email, simulatedRoles);
                 if (!devAppUser.IsActive) return Results.Redirect("/login?error=Zugang+gesperrt");
                 await SignInAsync(http, devAppUser, subject);
-                return Results.Redirect(returnUrl);
+                return Results.Redirect(AfterLogin(returnUrl));
             }
 
             var redirectUri = BuildRedirectUri(http, cfg);
@@ -121,7 +121,7 @@ public static class AuthEndpoints
                     return NoStoreRedirect(http, "/login?error=Zugang+gesperrt");
 
                 await SignInAsync(http, appUser, sub);
-                return NoStoreRedirect(http, authState.ReturnUrl);
+                return NoStoreRedirect(http, AfterLogin(authState.ReturnUrl));
             }
             catch (Exception ex)
             {
@@ -201,6 +201,9 @@ public static class AuthEndpoints
         http.Response.Headers.Location = url;
         return Results.Empty;
     }
+
+    /// <summary>Nach erfolgreicher Anmeldung: ohne bestimmtes Ziel („/“) auf das Startziel (<c>/start</c>: zugewiesene Themen bzw. aktuellste Lernkarten), sonst auf das gewünschte Ziel.</summary>
+    internal static string AfterLogin(string returnUrl) => returnUrl == "/" ? "/start" : returnUrl;
 
     internal static string SafeReturnUrl(string? url) =>
         !string.IsNullOrEmpty(url) && url.StartsWith('/') && !url.StartsWith("//") ? url : "/";

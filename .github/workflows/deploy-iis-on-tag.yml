@@ -131,11 +131,27 @@ jobs:
       DEPLOY_MCP_OAUTH_TOKEN_LIFETIME_MINUTES: ${{ vars.MCP_OAUTH_TOKEN_LIFETIME_MINUTES }}
       DEPLOY_MCP_OAUTH_CLIENT_ID: ${{ vars.MCP_OAUTH_CLIENT_ID }}
       DEPLOY_MCP_OAUTH_CLIENT_SCOPES_JSON: ${{ vars.MCP_OAUTH_CLIENT_SCOPES_JSON }}
+      DEPLOY_EXTID_ENABLED: ${{ vars.EXTID_ENABLED }}
+      DEPLOY_EXTID_AUTHORITY: ${{ vars.EXTID_AUTHORITY }}
+      DEPLOY_EXTID_TENANT_ID: ${{ vars.EXTID_TENANT_ID }}
+      DEPLOY_EXTID_CLIENT_ID: ${{ vars.EXTID_CLIENT_ID }}
+      DEPLOY_INVITE_VALIDITY_HOURS: ${{ vars.INVITE_VALIDITY_HOURS }}
+      DEPLOY_MAIL_ENABLED: ${{ vars.MAIL_ENABLED }}
+      DEPLOY_MAIL_TENANT_ID: ${{ vars.MAIL_TENANT_ID }}
+      DEPLOY_MAIL_CLIENT_ID: ${{ vars.MAIL_CLIENT_ID }}
+      DEPLOY_MAIL_SENDER: ${{ vars.MAIL_SENDER }}
+      DEPLOY_MAIL_CLIENT_CERT_PATH: ${{ vars.MAIL_CLIENT_CERT_PATH }}
+      DEPLOY_MAIL_ALLOWED_RECIPIENTS: ${{ vars.MAIL_ALLOWED_RECIPIENTS }}
+      DEPLOY_EXTID_OTP_ENABLED: ${{ vars.EXTID_OTP_ENABLED }}
+      DEPLOY_EXTID_OTP_AUDIENCES: ${{ vars.EXTID_OTP_AUDIENCES }}
       DEPLOY_POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
       DEPLOY_OIDC_CLIENT_SECRET: ${{ secrets.OIDC_CLIENT_SECRET }}
       DEPLOY_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       DEPLOY_MCP_API_KEY: ${{ secrets.MCP_API_KEY }}
       DEPLOY_MCP_TOKEN_KEY: ${{ secrets.MCP_TOKEN_KEY }}
+      DEPLOY_EXTID_CLIENT_SECRET: ${{ secrets.EXTID_CLIENT_SECRET }}
+      DEPLOY_INVITE_TOKEN_KEY: ${{ secrets.INVITE_TOKEN_KEY }}
+      DEPLOY_MAIL_CLIENT_CERT_PASSWORD: ${{ secrets.MAIL_CLIENT_CERT_PASSWORD }}
       DEPLOY_MCP_OAUTH_SIGNING_KEY: ${{ secrets.MCP_OAUTH_SIGNING_KEY }}
       DEPLOY_MCP_OAUTH_CLIENT_SECRET: ${{ secrets.MCP_OAUTH_CLIENT_SECRET }}
 
@@ -332,6 +348,22 @@ jobs:
             "__OPENAI_API_KEY__" = $env:DEPLOY_OPENAI_API_KEY
             "__MCP_API_KEY__" = $env:DEPLOY_MCP_API_KEY
             "__MCP_TOKEN_KEY__" = $env:DEPLOY_MCP_TOKEN_KEY
+            "__EXTID_ENABLED__" = $env:DEPLOY_EXTID_ENABLED
+            "__EXTID_AUTHORITY__" = $env:DEPLOY_EXTID_AUTHORITY
+            "__EXTID_TENANT_ID__" = $env:DEPLOY_EXTID_TENANT_ID
+            "__EXTID_CLIENT_ID__" = $env:DEPLOY_EXTID_CLIENT_ID
+            "__INVITE_VALIDITY_HOURS__" = $env:DEPLOY_INVITE_VALIDITY_HOURS
+            "__MAIL_ENABLED__" = $env:DEPLOY_MAIL_ENABLED
+            "__MAIL_TENANT_ID__" = $env:DEPLOY_MAIL_TENANT_ID
+            "__MAIL_CLIENT_ID__" = $env:DEPLOY_MAIL_CLIENT_ID
+            "__MAIL_SENDER__" = $env:DEPLOY_MAIL_SENDER
+            "__MAIL_CLIENT_CERT_PATH__" = $env:DEPLOY_MAIL_CLIENT_CERT_PATH
+            "__MAIL_ALLOWED_RECIPIENTS__" = $env:DEPLOY_MAIL_ALLOWED_RECIPIENTS
+            "__EXTID_OTP_ENABLED__" = $env:DEPLOY_EXTID_OTP_ENABLED
+            "__EXTID_OTP_AUDIENCES__" = $env:DEPLOY_EXTID_OTP_AUDIENCES
+            "__EXTID_CLIENT_SECRET__" = $env:DEPLOY_EXTID_CLIENT_SECRET
+            "__INVITE_TOKEN_KEY__" = $env:DEPLOY_INVITE_TOKEN_KEY
+            "__MAIL_CLIENT_CERT_PASSWORD__" = $env:DEPLOY_MAIL_CLIENT_CERT_PASSWORD
           }
 
           $mcpTemplate = Join-Path $env:GITHUB_WORKSPACE "deploy\iis\mcpsettings.json"
@@ -368,6 +400,16 @@ jobs:
             throw "GitHub Secret 'MCP_TOKEN_KEY' fehlt oder ist ungültig (Base64, mindestens 32 Byte; erzeugen mit: openssl rand -base64 32)."
           }
 
+          # ADR 0048-0050: External ID, Einladungen, Mailversand und OTP sind standardmäßig aus (leere Variablen). Aktiviert, sind die Pflichtwerte nötig; Werte werden nie ausgegeben.
+          function Test-Flag([string]$v) { return ($v -as [string]).Trim() -in @('1','true','True','TRUE') }
+          if (Test-Flag $env:DEPLOY_EXTID_ENABLED) {
+            $inviteKeyBytes = $null
+            try { $inviteKeyBytes = [Convert]::FromBase64String(([string]$env:DEPLOY_INVITE_TOKEN_KEY).Trim()) } catch { }
+            if ($null -eq $inviteKeyBytes -or $inviteKeyBytes.Length -lt 32) {
+              throw "GitHub Secret 'INVITE_TOKEN_KEY' fehlt oder ist ungültig, obwohl EXTID_ENABLED gesetzt ist (Base64, mindestens 32 Byte; erzeugen mit: openssl rand -base64 32)."
+            }
+            if ([string]::IsNullOrWhiteSpace($env:DEPLOY_EXTID_CLIENT_SECRET)) { throw "GitHub Secret 'EXTID_CLIENT_SECRET' fehlt, obwohl EXTID_ENABLED gesetzt ist." }
+          }
           $mcpConfig = Get-Content -LiteralPath $mcpTarget -Raw | ConvertFrom-Json
           if ($mcpConfig.oauth.enabled -eq $true) {
             # Der Issuer ist die öffentliche MCP-URL: Alle Metadaten-URLs (Registrierung, Anmeldung, Token) zeigen darauf. Ein falscher Host bricht die Registrierung in Claude.

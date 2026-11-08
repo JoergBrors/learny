@@ -55,8 +55,12 @@ public class McpLinkService
 
     // ─── Erstellen / Prüfen / Widerrufen ────────────────────────────────────
 
+    /// <summary>false für externe Lernprofile (B2B/B2C): sie dürfen keine MCP-Zugänge anlegen, bestätigen oder nutzen.</summary>
+    public async Task<bool> IsAllowedAsync(string userId) => !await LearnerRestriction.IsRestrictedAsync(_db, userId);
+
     public async Task<(string Token, McpLink Link)> CreateLinkAsync(string userId, string name, string kind, TimeSpan lifetime)
     {
+        if (!await IsAllowedAsync(userId)) throw new UnauthorizedAccessException(LearnerRestriction.Message);
         name = (name ?? "").Trim();
         if (name.Length == 0) name = kind == "oauth" ? "MCP-Client" : "Persönliches Token";
         if (name.Length > 80) name = name[..80];
@@ -90,6 +94,13 @@ public class McpLinkService
     /// Vor allem anderen wird der Zeilen-MAC geprüft: eine in der Datenbank eingeschleuste oder veränderte Zeile ergibt nie einen Zugang.
     /// </summary>
     public async Task<(AppUser User, McpLink Link)?> ValidateAsync(string? token)
+    {
+        var found = await ValidateCoreAsync(token);
+        // Auch bereits ausgestellte Zugänge sind für eingeschränkte Lernende wirkungslos (z. B. Profil erst nachträglich vergeben).
+        return found is { } f && await IsAllowedAsync(f.User.Id) ? found : null;
+    }
+
+    private async Task<(AppUser User, McpLink Link)?> ValidateCoreAsync(string? token)
     {
         if (string.IsNullOrEmpty(token) || !token.StartsWith(TokenPrefix, StringComparison.Ordinal) || token.Length > 200) return null;
         var candidates = _prot.TokenCandidates(token);
@@ -204,6 +215,7 @@ public class McpLinkService
     /// </summary>
     public async Task<string> CompleteConsentAsync(string userId, string returnUrl, string state, string clientName, bool approve)
     {
+        if (approve && !await IsAllowedAsync(userId)) throw new UnauthorizedAccessException(LearnerRestriction.Message);
         if (!IsAllowedReturnUrl(returnUrl)) throw new ArgumentException("Die Rückleitungs-URL ist nicht erlaubt (MCP_PUBLIC_URL).");
         if (string.IsNullOrWhiteSpace(state) || state.Length > 200) throw new ArgumentException("state fehlt oder ist zu lang.");
 

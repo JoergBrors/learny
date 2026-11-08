@@ -59,6 +59,21 @@ services:
       EXTID_SCOPE: ${EXTID_SCOPE:-openid profile email}
       INVITE_TOKEN_KEY: ${INVITE_TOKEN_KEY:-}   # Pflicht, solange EXTID_ENABLED gesetzt ist (ADR 0049)
       INVITE_VALIDITY_HOURS: ${INVITE_VALIDITY_HOURS:-72}
+      # Mailversand über Exchange Online (ADR 0044) und OTP-Extension (ADR 0045); Standard aus. Zertifikat als Datei in den Container einbinden (nie ins Image).
+      MAIL_ENABLED: ${MAIL_ENABLED:-0}
+      MAIL_TENANT_ID: ${MAIL_TENANT_ID:-}
+      MAIL_CLIENT_ID: ${MAIL_CLIENT_ID:-}
+      MAIL_SENDER: ${MAIL_SENDER:-}
+      MAIL_KEY_DIR: ${MAIL_KEY_DIR:-}   # Schlüsselordner des auf der Plattform erzeugten Mail-Zertifikats (Standard data/mail im Daten-Volume)
+      MAIL_CLIENT_CERT_PATH: ${MAIL_CLIENT_CERT_PATH:-}
+      MAIL_CLIENT_CERT_PASSWORD: ${MAIL_CLIENT_CERT_PASSWORD:-}
+      MAIL_CLIENT_SECRET: ${MAIL_CLIENT_SECRET:-}
+      MAIL_ALLOWED_RECIPIENTS: ${MAIL_ALLOWED_RECIPIENTS:-}
+      EXTID_OTP_ENABLED: ${EXTID_OTP_ENABLED:-0}
+      EXTID_OTP_AUDIENCES: ${EXTID_OTP_AUDIENCES:-}
+      EXTID_OTP_AUTHORITY: ${EXTID_OTP_AUTHORITY:-}
+      EXTID_OTP_GLOBAL_PER_MINUTE: ${EXTID_OTP_GLOBAL_PER_MINUTE:-60}
+      EXTID_OTP_PER_RECIPIENT_10MIN: ${EXTID_OTP_PER_RECIPIENT_10MIN:-3}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
       MCP_API_KEY: ${MCP_API_KEY:-change-me-mcp-key}

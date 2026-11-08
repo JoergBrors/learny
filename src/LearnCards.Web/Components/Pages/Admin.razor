@@ -9,13 +9,13 @@
 
 <PageTitle>@(_isAdmin ? "Administration" : "Globale Inhalte") — LearnCards</PageTitle>
 
-<div class="container">
+<div class="container wide">
     <div class="page-head">
         <div>
             <h1>@(_isAdmin ? "Administration" : "Globale Inhalte (Auditor)")</h1>
             @if (_isAdmin)
             {
-                <p class="muted">Benutzer, Rollen, globale Lernmodule und unzugeordneter Altbestand. Über Entra-ID-App-Rollen vergebene Rollen (z. B. Admin.All) werden bei der nächsten Anmeldung wieder gesetzt; manuell vergebene bleiben bestehen.</p>
+                <p class="muted">Benutzer und Zuweisungen, Einladungen, globale Inhalte, Mailversand und Protokolle. Rollen aus Entra-App-Rollen (z. B. Admin.All) werden bei der nächsten Anmeldung wieder gesetzt.</p>
             }
             else
             {
@@ -40,34 +40,56 @@
     }
     else
     {
+        <nav class="admin-nav" role="tablist" aria-label="Administrationsbereiche">
+            @foreach (var t in Tabs())
+            {
+                <button class="admin-tab" role="tab" aria-selected="@(_tab == t.Key ? "true" : "false")" @onclick="() => _tab = t.Key">@t.Label</button>
+            }
+        </nav>
+
+        @if (_isAdmin && _tab == "users")
+        {
+            <AdminLearnersPanel ActorId="@_actorId" UserList="_users" Changed="ReloadAsync" InitiallyOpenUserId="@UserQuery" />
+        }
+        else if (_isAdmin && _tab == "invitations")
+        {
+            <AdminInvitationsPanel ActorId="@_actorId" />
+        }
+        else if (_isAdmin && _tab == "mail")
+        {
+            <AdminMailPanel ActorId="@_actorId" />
+        }
+        else if (_tab == "log")
+        {
+        <div class="card panel">
+            <h2 class="panel-title">@(_isAdmin ? "Administrationsprotokoll (letzte 25 Aktionen)" : "Veröffentlichungsprotokoll (letzte 25 Einträge)")</h2>
+            <table class="table">
+                <thead><tr><th>Zeit</th><th>Aktion</th><th>Ziel</th><th>Detail</th></tr></thead>
+                <tbody>
+                    @foreach (var a in _audit)
+                    {
+                        <tr>
+                            <td>@a.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                            <td>@a.Action</td>
+                            <td><small><code>@a.Target</code></small></td>
+                            <td>@a.Detail</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+            @if (_isAdmin)
+            {
+                <details class="fold">
+                    <summary>Einladungs- und Lernereignisse</summary>
+                    <div class="fold-body"><AdminEventsPanel ActorId="@_actorId" /></div>
+                </details>
+            }
+        }
+        else
+        {
         @if (_isAdmin)
         {
-            <div class="card panel">
-                <h2 class="panel-title">Benutzer</h2>
-                <table class="table">
-                    <thead><tr><th>Name</th><th>E-Mail</th><th>Rollen</th><th>Status</th><th>Aktionen</th></tr></thead>
-                    <tbody>
-                        @foreach (var u in _users)
-                        {
-                            <tr>
-                                <td>@u.DisplayName<br /><small class="muted"><code>@u.Id</code></small></td>
-                                <td>@u.Email</td>
-                                <td>
-                                    @foreach (var r in u.Roles) { <span class="badge badge-@r">@r</span> }
-                                </td>
-                                <td>@(u.IsActive ? "aktiv" : "gesperrt")</td>
-                                <td class="actions">
-                                    <button class="btn btn-ghost btn-sm" @onclick="() => ToggleRole(u, Roles.Admin)">Admin @(u.IsAdmin ? "entziehen" : "vergeben")</button>
-                                    <button class="btn btn-ghost btn-sm" @onclick="() => ToggleRole(u, Roles.Auditor)">Auditor @(u.IsAuditor ? "entziehen" : "vergeben")</button>
-                                    <button class="btn btn-ghost btn-sm" @onclick="() => ToggleRole(u, Roles.TopicAdmin)">Themen-Admin @(u.IsTopicAdmin ? "entziehen" : "vergeben")</button>
-                                    <button class="btn btn-ghost btn-sm" @onclick="() => ToggleStatus(u)">@(u.IsActive ? "Sperren" : "Entsperren")</button>
-                                </td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            </div>
-
             <div class="card panel">
                 <h2 class="panel-title">Veröffentlichungsvorschläge</h2>
                 <p class="muted">
@@ -80,10 +102,24 @@
                 }
                 else
                 {
+                    <div class="toolbar">
+                        <select class="input compact" @bind="_subStatus" aria-label="Status der Einreichungen">
+                            <option value="pending">Offen (@_submissions.Count(x => x.Status == "pending"))</option>
+                            <option value="">Alle (@_submissions.Count)</option>
+                            <option value="approved">Veröffentlicht (@_submissions.Count(x => x.Status == "approved"))</option>
+                            <option value="rejected">Abgelehnt (@_submissions.Count(x => x.Status == "rejected"))</option>
+                        </select>
+                        <select class="input compact" @bind="_subSort" aria-label="Sortierung der Einreichungen">
+                            <option value="new">Neueste zuerst</option>
+                            <option value="old">Älteste zuerst</option>
+                            <option value="name">Modul A–Z</option>
+                            <option value="cards">Meiste Karten</option>
+                        </select>
+                    </div>
                     <table class="table">
                         <thead><tr><th>Modul</th><th>Eingereicht von</th><th>Karten</th><th>Version</th><th>Zeitpunkt</th><th>Status</th><th>Aktionen</th></tr></thead>
                         <tbody>
-                            @foreach (var s in _submissions)
+                            @foreach (var s in SubmissionsShown())
                             {
                                 <tr>
                                     <td>@s.ModuleName<br /><small class="muted">@(s.Kind == "update" ? "Aktualisierung" : "Erstveröffentlichung")</small></td>
@@ -98,7 +134,7 @@
                                     <td class="actions">
                                         @if (s.Status == "pending")
                                         {
-                                            <button class="btn btn-ghost btn-sm" @onclick="() => TogglePreview(s.Id)">@(_previewId == s.Id ? "Vorschau schließen" : "Vorschau")</button>
+                                            <button class="btn btn-ghost btn-sm" @onclick="() => TogglePreview(s.Id)">Vorschau</button>
                                             <select class="input" title="Welche Veröffentlichung soll ersetzt werden?" value="@_replaceTargets.GetValueOrDefault(s.Id, "")" @onchange="e => _replaceTargets[s.Id] = e.Value?.ToString() ?? string.Empty">
                                                 <option value="">@(s.Kind == "update" ? "Frühere Version ersetzen (Standard)" : "Als neue Veröffentlichung (Standard)")</option>
                                                 <option value="new">Als eigenständig neu veröffentlichen</option>
@@ -112,20 +148,6 @@
                                         }
                                     </td>
                                 </tr>
-                                @if (_previewId == s.Id && _previewModule is not null)
-                                {
-                                    <tr>
-                                        <td colspan="7">
-                                            <strong>@_previewModule.Icon @_previewModule.Name</strong> — @_previewCards.Count Karten (eingefrorene Kopie)
-                                            <ul class="preview-cards">
-                                                @foreach (var c in _previewCards)
-                                                {
-                                                    <li><span class="pill pill-muted">@c.Category</span> <strong>@c.Term</strong> — @c.Question@(c.Quiz.Count > 0 ? $" ({c.Quiz.Count} Quizfrage(n))" : "")@(c.Images.Count > 0 ? $" 🖼 {c.Images.Count} Bild(er)" : "")</li>
-                                                }
-                                            </ul>
-                                        </td>
-                                    </tr>
-                                }
                                 @if (_rejectId == s.Id)
                                 {
                                     <tr>
@@ -170,7 +192,7 @@
                                     <td>@v.Stats.Modules Module · @v.Stats.Cards Karten · @v.Stats.ChoiceQuestions MC · Abschluss @v.Stats.FinalExamQuestions</td>
                                     <td>@v.SubmittedAt?.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
                                     <td class="actions">
-                                        <button class="btn btn-ghost btn-sm" @onclick="() => ToggleTopicPreview(v.Id)">@(_topicPreviewId == v.Id ? "Vorschau schließen" : "Prüfen")</button>
+                                        <button class="btn btn-ghost btn-sm" @onclick="() => ToggleTopicPreview(v.Id)">Prüfen</button>
                                         @if (_isAdmin)
                                         {
                                             <button class="btn btn-primary btn-sm" @onclick="() => ApproveTopic(v.Id)">Freigeben</button>
@@ -185,19 +207,6 @@
                                             <input class="input" placeholder="Begründung (optional)" maxlength="500" @bind="_topicRejectReason" aria-label="Begründung der Ablehnung" />
                                             <button class="btn btn-primary btn-sm" @onclick="() => RejectTopic(v.Id)">Ablehnung bestätigen</button>
                                         </div>
-                                    </td></tr>
-                                }
-                                @if (_topicPreviewId == v.Id && _topicPreview is not null)
-                                {
-                                    <tr><td colspan="6">
-                                        <p>@_topicPreview.Topic.Description</p>
-                                        <ol>
-                                            @foreach (var m in _topicPreview.Modules)
-                                            {
-                                                <li>@m.Name — @m.Cards Karten, @m.PoolQuestions Fragen@(m.Exam.Enabled ? $", Modulprüfung ({m.Exam.QuestionCount} Fragen, ab {m.Exam.PassPercent} %)" : "")</li>
-                                            }
-                                        </ol>
-                                        <p class="muted">Abschlussprüfung: @(_topicPreview.FinalExam.Enabled ? $"{_topicPreview.FinalExam.QuestionCount} Fragen, ab {_topicPreview.FinalExam.PassPercent} %" : "nicht vorgesehen")</p>
                                     </td></tr>
                                 }
                             }
@@ -311,32 +320,10 @@
                                 <td class="actions">
                                     @if (r.Attempts > 0)
                                     {
-                                        <button class="btn btn-ghost btn-sm" @onclick="() => ToggleDetails(r.ModuleId)">@(_detailModuleId == r.ModuleId ? "Details schließen" : "Details")</button>
+                                        <button class="btn btn-ghost btn-sm" @onclick="() => ToggleDetails(r.ModuleId)">Details</button>
                                     }
                                 </td>
                             </tr>
-                            @if (_detailModuleId == r.ModuleId)
-                            {
-                                <tr>
-                                    <td colspan="6">
-                                        <table class="table">
-                                            <thead><tr><th>Zeitpunkt</th><th>Lernende(r)</th><th>Kategorie</th><th>Punkte</th><th>Note</th></tr></thead>
-                                            <tbody>
-                                                @foreach (var row in _detailRows)
-                                                {
-                                                    <tr>
-                                                        <td>@row.CompletedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
-                                                        <td>@row.LearnerName</td>
-                                                        <td>@(string.IsNullOrEmpty(row.Category) ? "Alle" : row.Category)</td>
-                                                        <td>@row.Score.ToString("0.#") / @row.MaxScore.ToString("0.#")</td>
-                                                        <td>@row.Grade</td>
-                                                    </tr>
-                                                }
-                                            </tbody>
-                                        </table>
-                                    </td>
-                                </tr>
-                            }
                         }
                     </tbody>
                 </table>
@@ -380,34 +367,97 @@
             </div>
         }
 
-        <div class="card panel">
-            <h2 class="panel-title">@(_isAdmin ? "Protokoll (letzte 25 Aktionen)" : "Veröffentlichungsprotokoll (letzte 25 Einträge)")</h2>
-            <table class="table">
-                <thead><tr><th>Zeit</th><th>Aktion</th><th>Ziel</th><th>Detail</th></tr></thead>
-                <tbody>
-                    @foreach (var a in _audit)
-                    {
-                        <tr>
-                            <td>@a.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
-                            <td>@a.Action</td>
-                            <td><small><code>@a.Target</code></small></td>
-                            <td>@a.Detail</td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
-        </div>
+        @* Detailansichten als Overlay (nie unter der Liste) *@
+        @if (_previewId is not null && _previewModule is not null)
+        {
+            <DetailDrawer Title="@($"Vorschau: {_previewModule.Name}")" Wide="true" OnClose="ClosePreview">
+                                            <strong>@_previewModule.Icon @_previewModule.Name</strong> — @_previewCards.Count Karten (eingefrorene Kopie)
+                                            <ul class="preview-cards">
+                                                @foreach (var c in _previewCards)
+                                                {
+                                                    <li><span class="pill pill-muted">@c.Category</span> <strong>@c.Term</strong> — @c.Question@(c.Quiz.Count > 0 ? $" ({c.Quiz.Count} Quizfrage(n))" : "")@(c.Images.Count > 0 ? $" 🖼 {c.Images.Count} Bild(er)" : "")</li>
+                                                }
+                                            </ul>
+                                        </DetailDrawer>
+        }
+        @if (_topicPreviewId is not null && _topicPreview is not null)
+        {
+            <DetailDrawer Title="@($"Themenversion prüfen: {_topicPreview.Topic.Name}")" Wide="true" OnClose="CloseTopicPreview">
+                                        <p>@_topicPreview.Topic.Description</p>
+                                        <ol>
+                                            @foreach (var m in _topicPreview.Modules)
+                                            {
+                                                <li>@m.Name — @m.Cards Karten, @m.PoolQuestions Fragen@(m.Exam.Enabled ? $", Modulprüfung ({m.Exam.QuestionCount} Fragen, ab {m.Exam.PassPercent} %)" : "")</li>
+                                            }
+                                        </ol>
+                                        <p class="muted">Abschlussprüfung: @(_topicPreview.FinalExam.Enabled ? $"{_topicPreview.FinalExam.QuestionCount} Fragen, ab {_topicPreview.FinalExam.PassPercent} %" : "nicht vorgesehen")</p>
+                                    </DetailDrawer>
+        }
+        @if (_detailModuleId is not null)
+        {
+            <DetailDrawer Title="@($"Ergebnisse: {_results.FirstOrDefault(x => x.ModuleId == _detailModuleId)?.Name}")" Wide="true" OnClose="CloseDetails">
+                                        <table class="table">
+                                            <thead><tr><th>Zeitpunkt</th><th>Lernende(r)</th><th>Kategorie</th><th>Punkte</th><th>Note</th></tr></thead>
+                                            <tbody>
+                                                @foreach (var row in _detailRows)
+                                                {
+                                                    <tr>
+                                                        <td>@row.CompletedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                                                        <td>@row.LearnerName</td>
+                                                        <td>@(string.IsNullOrEmpty(row.Category) ? "Alle" : row.Category)</td>
+                                                        <td>@row.Score.ToString("0.#") / @row.MaxScore.ToString("0.#")</td>
+                                                        <td>@row.Grade</td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </table>
+                                    </DetailDrawer>
+        }
+
+        }
     }
 </div>
 
 @code {
     private string _actorId = "";
+    private string _tab = "";
+
+    [SupplyParameterFromQuery(Name = "tab")] public string? TabQuery { get; set; }
+    /// <summary>Direktlink auf einen Benutzer: <c>/admin?tab=users&amp;user=&lt;id&gt;</c> öffnet dessen Verwaltung.</summary>
+    [SupplyParameterFromQuery(Name = "user")] public string? UserQuery { get; set; }
+
+    private sealed record AdminTab(string Key, string Label);
+    private IEnumerable<AdminTab> Tabs()
+    {
+        if (_isAdmin)
+        {
+            yield return new("users", "Benutzer");
+            yield return new("invitations", "Einladungen");
+        }
+        yield return new("content", "Inhalte");
+        if (_isAdmin) yield return new("mail", "Mailversand");
+        yield return new("log", "Protokoll");
+    }
     private bool _ready;
     private bool _isAdmin;
     private List<AppUser> _users = new();
     private List<ModuleInfo> _unowned = new();
     private List<AuditEntry> _audit = new();
     private List<SubmissionInfo> _submissions = new();
+    private string _subStatus = "pending", _subSort = "new";   // Standard: offene Veröffentlichungen zuerst im Blick
+
+    private List<SubmissionInfo> SubmissionsShown()
+    {
+        IEnumerable<SubmissionInfo> r = _submissions.Where(x => _subStatus == "" || x.Status == _subStatus);
+        r = _subSort switch
+        {
+            "old" => r.OrderBy(x => x.SubmittedAt),
+            "name" => r.OrderBy(x => x.ModuleName, StringComparer.CurrentCultureIgnoreCase),
+            "cards" => r.OrderByDescending(x => x.CardCount).ThenBy(x => x.ModuleName, StringComparer.CurrentCultureIgnoreCase),
+            _ => r.OrderByDescending(x => x.SubmittedAt),
+        };
+        return r.ToList();
+    }
     private List<ModuleInfo> _globalModules = new();
     private List<GlobalResultSummary> _results = new();
     private List<GlobalResultRow> _detailRows = new();
@@ -442,6 +492,7 @@
         var auth = await AuthState.GetAuthenticationStateAsync();
         _actorId = auth.User.GetUserId() ?? throw new UnauthorizedAccessException();
         await ReloadAsync();
+        _tab = Tabs().Any(t => t.Key == TabQuery) ? TabQuery! : Tabs().First().Key;   // Standard: Benutzer (Administrator) bzw. Inhalte (Auditor)
     }
 
     private async Task ReloadAsync()
@@ -474,6 +525,10 @@
             Fail("Administrator- oder Auditorrechte erforderlich.");
         }
     }
+
+    private void ClosePreview() => _previewId = null;
+    private void CloseTopicPreview() => _topicPreviewId = null;
+    private void CloseDetails() => _detailModuleId = null;
 
     private async Task ToggleTopicPreview(string versionId)
     {

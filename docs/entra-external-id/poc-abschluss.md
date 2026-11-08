@@ -74,3 +74,7 @@ Reihenfolge (jeweils mit eigener ADR gegenüber den Learny-ADRs 0005, 0011, 0012
 ## Nachtrag 2026-11-08: Stand der Learny-Integration
 
 Der PoC bleibt als Referenz unverändert. In Learny sind Phase A (zweiter Anbieter, Bestandsschutz) und Phase B (Einladungen, Lernprofile, Zuweisungen, atomare Einlösung) umgesetzt, siehe [learny-integration.md](learny-integration.md) und ADR [0048](../adr/0048-multi-issuer-authentifizierung-und-bestandsschutz.md)/[0049](../adr/0049-einladungs-und-lernberechtigungsmodell.md). Abweichungen vom PoC: lokale Konten gelten nicht als bestätigte E-Mail, Einlösung in einer Transaktion statt Kompensation, Zuweisungen auf die Learny-Module und -Themen, keine Rollen aus Profilen.
+
+## Nachtrag 2026-11-08: Phase C in Learny
+
+Verwaltung (Einladungen, Versand, Lernrechte, Ereignisprotokoll), Mailversand über `learny@brors.link` und die OTP-Extension sind in Learny umgesetzt ([ADR 0050](../adr/0050-administration-einladungsversand-und-otp-in-learny.md), [learny-integration.md](learny-integration.md)). Das PoC-Portal und der PoC-Mailservice bleiben als Referenz unverändert; die Mail-Einrichtung im Portal (Zertifikat erzeugen) wurde nicht übernommen. Der Einladungslink steht in Learny im Fragment (`/invite#<token>`). Die Punkte in Abschnitt 6 (Test I, Secret-Rückbau, User-Flow, Branding, Cloudflare-Route) bleiben offen; der OTP-Listener-Zustand ist vor einem Live-Test erneut zu prüfen.

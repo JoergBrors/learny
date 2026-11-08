@@ -48,3 +48,7 @@ Learny meldet bisher alle Benutzer über Entra ID des Workforce-Tenants an (ein 
 - **Keine Administrator-, Auditor- oder Themen-Admin-Rolle aus dem External-Token**; Einladungen können nie Rollen vergeben, Lernprofile sind keine Rollen (ADR 0049).
 - Der Workforce-Login bleibt unverändert; eine Identität der Art `external` meldet sich nie über den Workforce-Pfad an und umgekehrt (anderer Issuer, `kind`).
 - Die Registrierung (Einladung, Einlösung, Profil, Zuweisungen) ist in [ADR 0049](0049-einladungs-und-lernberechtigungsmodell.md) entschieden.
+
+## Nachtrag 2026-11-08 (Phase C)
+
+Entscheidung 11 nennt `GET /invite/{token}` als Ort der Vorabprüfung. Seit [ADR 0050](0050-administration-einladungsversand-und-otp-in-learny.md) steht der Token im URL-Fragment und die Vorabprüfung erfolgt bei `POST /invite/start`; die Aussage (verbindliche Prüfung in Learny, Entra-Extension nur zusätzliche Schicht) bleibt unverändert.

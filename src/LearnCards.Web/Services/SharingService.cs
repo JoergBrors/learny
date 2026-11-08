@@ -60,6 +60,7 @@ public class SharingService
     /// </summary>
     public async Task GrantShareAsync(string ownerId, string moduleId, string recipientId)
     {
+        if (await _repo.IsRestrictedLearnerAsync(ownerId)) throw new UnauthorizedAccessException(LearnerRestriction.Message);
         var module = await RequireOwnModuleAsync(ownerId, moduleId);
         if (!UserService.IsGuid(recipientId)) throw new KeyNotFoundException("Empfänger nicht gefunden.");
         if (string.Equals(ownerId, recipientId, StringComparison.OrdinalIgnoreCase))
@@ -111,6 +112,7 @@ public class SharingService
     /// </summary>
     public async Task<SubmissionInfo> SubmitAsync(string ownerId, string moduleId)
     {
+        if (await _repo.IsRestrictedLearnerAsync(ownerId)) throw new UnauthorizedAccessException(LearnerRestriction.Message);
         var module = await RequireOwnModuleAsync(ownerId, moduleId);
         var pending = await _db.QueryAsync("SELECT 1 FROM module_submissions WHERE source_module_id = @m AND status = 'pending'",
             new[] { ("m", (object?)module.Id) });

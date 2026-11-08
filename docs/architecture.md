@@ -85,7 +85,7 @@ Zwei Modi, automatisch anhand der Konfiguration gewählt (`AUTH_MODE=auto`, sieh
 
 **Zwei getrennte Identitätsanbieter (ADR 0048):** Der Workforce-Zugang (`OIDC_*`, `/auth/login`) bleibt unverändert. Optional (`EXTID_ENABLED`) gibt es Entra External ID für externe Lernende (`/auth/external/login`, `POST /auth/external/callback`) mit eigenem Tenant, eigener App, eigenem Secret und eigenem Korrelationscookie. Identität ist `(Issuer, sub)`; es gibt keine Zusammenführung über die E-Mail-Adresse, keine Rollen aus dem External-Token und keine Benutzeranlage am External-Pfad (nur über Einladung, ab Phase B). Der `state` wird dort in der Datenbank verbraucht (`oidc_consumed_states`).
 
-**Lernprofile und Einladungen (ADR 0049):** Externe Lernende registrieren sich nur mit Einladung (`GET /invite/{token}` → Entra → atomare Einlösung in einer Datenbanktransaktion). Es gibt das **Bestandsprofil** (kein Profileintrag; bisherige Berechtigungslogik, unverändert) und die externen Profile `B2B_LEARNER`/`B2C_LEARNER` (Tabelle `user_profiles`; keine Rollen). Externe Profile erhalten nur **ausdrücklich zugewiesene** Inhalte: globale Module nur mit `module_grants`, Themen nur mit `topic_assignments` an eine konkrete Version, keine eigenen Module oder Themen; eine Identität der Art `external` ohne Profil erhält nie die Bestandsberechtigung. Die Entscheidung fällt ausschließlich serverseitig in `CardRepository.ResolveModuleAccessAsync` und den Themenpfaden; Token-Claims sind keine Rechtequelle.
+**Lernprofile und Einladungen (ADR 0049):** Externe Lernende registrieren sich nur mit Einladung (`/invite#<token>` → `POST /invite/start` → Entra → atomare Einlösung in einer Datenbanktransaktion). Es gibt das **Bestandsprofil** (kein Profileintrag; bisherige Berechtigungslogik, unverändert) und die externen Profile `B2B_LEARNER`/`B2C_LEARNER` (Tabelle `user_profiles`; keine Rollen). Externe Profile erhalten nur **ausdrücklich zugewiesene** Inhalte: globale Module nur mit `module_grants`, Themen nur mit `topic_assignments` an eine konkrete Version, keine eigenen Module oder Themen; eine Identität der Art `external` ohne Profil erhält nie die Bestandsberechtigung. Die Entscheidung fällt ausschließlich serverseitig in `CardRepository.ResolveModuleAccessAsync` und den Themenpfaden; Token-Claims sind keine Rechtequelle.
 
 Die REST-API unter `/api` akzeptiert zusätzlich `X-MCP-Key` als Alternative zur Cookie-Session —
 das ist der Zugriffsweg für den MCP-Server und andere Automatisierungs-Clients. Der gemeinsame Schlüssel ist nur noch ein Dienstschlüssel (Code-Tausch, Schema) ohne Datenzugriff. Benutzer arbeiten über MCP mit
@@ -230,3 +230,22 @@ Das private Ursprungsmodul bleibt geschützt; Widerruf entfernt nur das abgeleit
 ## Zertifikate, Register und Testnachweise (ADR 0037/0038)
 
 `CertificateService` (Ausstellung, Signatur, Test: `CertificateService.Test.cs`), `CredentialRegisterService` (Suche, Detail, gezielter Widerruf, nur Administratoren), `BadgeSigner.SignCredential` (VC-JWT-Profil). Oberfläche: `/admin/credentials`; API `/api/admin/credentials*` (nie per MCP-Token). Siehe [credential-validation.md](credential-validation.md).
+
+## Administration, Einladungsversand und OTP (ADR 0050, Phase C)
+
+Administratoren verwalten Einladungen, Lernrechte und das Ereignisprotokoll in `/admin` (Tabs; Komponenten ohne Geschäftslogik, die Dienste prüfen die Rolle gegen die Datenbank). `InvitationDeliveryService` steuert den Versandzustand (Slot und Lease in der Datenbank, Ergebnis + Ereignis + Audit atomar), `ExchangeOnlineMailService` ist reiner Transport (Graph `sendMail`, Postfach `learny@brors.link`, Anwendungsberechtigung per Exchange-RBAC begrenzt). `POST /extensions/otp-send` versendet die von Entra erzeugten Einmalcodes über denselben Mailservice (eigene Bearer-Prüfung, Codes nie gespeichert). Einladungslinks tragen den Token im URL-Fragment (`/invite#<token>`) und werden per POST übergeben, damit er in keinem Zugriffsprotokoll steht. Die Workforce-Anmeldung und das Bestandsprofil bleiben unverändert.
+
+## Oberfläche: Listen, Details, Favoriten
+
+Listenseiten (Module, Themen, Abschlüsse) folgen einem gemeinsamen Muster: `ListToolbar` (Suche, seitenspezifische Filter, Favoritenfilter, Sortierung, Gruppierung über `ListGrouping` (Thema, Stand, Veröffentlichung, Fälligkeit, Monat), Umschalter Kacheln/Liste, Trefferzahl), Sterne (`FavoriteButton`, `FavoritesService`) und Details **immer** im Overlay (`DetailDrawer`: seitliche Schublade, Schließen per Schaltfläche, Hintergrund oder Esc). Die Administration ist in fünf Bereiche gegliedert (Benutzer, Einladungen, Inhalte, Mailversand, Protokoll). Gestaltungsbausteine liegen in `wwwroot/app.css` und nutzen die Farbvariablen (Dark Mode inklusive).
+
+## Startziel nach der Anmeldung und Verbindungsanzeige
+
+Nach der Anmeldung ohne bestimmtes Ziel leitet `GET /start` (`LandingService`) dorthin: zuerst zu den **zugewiesenen, noch nicht abgeschlossenen Themen** (`/topics?tab=assigned`; bei eigenen/globalen Pflichtthemen direkt das Thema), sonst zum **Modul mit der zuletzt geänderten aktiven Lernkarte** unter den lernbaren Modulen (externe Lernprofile nur zugewiesene), sonst zur Modulübersicht. `/` (Navigation „Module“) bleibt unverändert die Modulübersicht.
+
+Bei unterbrochener Verbindung (Server-Neustart, Netz) fragt die Verbindungsanzeige (`ReconnectModal`) alle 2 Sekunden `GET /health` ab (anonym, ohne Zwischenspeicher, ohne Daten). Sobald der Server antwortet, wird die Sitzung wieder aufgenommen oder die Seite neu geladen — ohne Klick; beim Zurückkehren in den Tab oder bei wiederkehrendem Netz wird sofort geprüft.
+
+## Darstellung (Hell / Dunkel / Auto)
+
+`data-theme-mode` hält den gewählten Modus (`system` Standard, `light`, `dark`), `data-theme` den aufgelösten Wert für die Farbvariablen in `app.css`. Im Modus `system` folgt die Seite `prefers-color-scheme` live (`window.lcTheme` in `app.js`, früh gesetzt im Kopf von `App.razor`, damit nichts flackert). Der Schalter in `MainLayout` wechselt System → Hell → Dunkel; Tooltip, `aria-label` und eine Textmarke nennen Modus und nächsten Schritt. Die Wahl liegt im Browser (`localStorage`) und im Profil (`user_preferences.theme`, ältere Werte `light`/`dark` bleiben gültig).
+

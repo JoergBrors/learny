@@ -7,6 +7,8 @@
 @inject CardRepository Repo
 @inject CertificateService Certs
 @inject AuthenticationStateProvider AuthState
+@inject UserUiState UiState
+@inject AvatarGeneratorService AvatarGen
 
 <PageTitle>Mein Profil — LearnCards</PageTitle>
 
@@ -36,6 +38,69 @@
     }
     else
     {
+        <div class="card panel" id="avatar">
+            <h2 class="panel-title">Mein Avatar</h2>
+            <p class="muted">Dein freundlicher Lernbegleiter im Dashboard. Die Auswahl ist freiwillig und rein dekorativ: sie ändert keine Rechte, Lernstände oder Bewertungen. Ohne Auswahl siehst du deine Initialen.</p>
+            <div class="avatar-layout">
+                <div class="avatar-preview">
+                    <Avatar Preset="@UiState.AvatarPreset" Hidden="@UiState.AvatarHidden" Name="@_user.DisplayName" Size="120" State="@_avState" />
+                    <div class="role-toggles" role="group" aria-label="Stimmung der Vorschau">
+                        @foreach (var st in new[] { ("neutral", "Neutral"), ("happy", "Freundlich"), ("motivating", "Motivierend"), ("success", "Erfolgreich"), ("encouraging", "Ermutigend") })
+                        {
+                            var key = st.Item1;
+                            <button type="button" class="chip @(_avState == key ? "chip-active" : "")" aria-pressed="@(_avState == key ? "true" : "false")" @onclick="() => _avState = key">@st.Item2</button>
+                        }
+                    </div>
+                </div>
+                <div>
+                    <div class="avatar-picker" role="radiogroup" aria-label="Avatar auswählen">
+                        @foreach (var a in Avatars.All)
+                        {
+                            var id = a.Id;
+                            <button type="button" role="radio" class="avatar-choice" aria-checked="@(UiState.AvatarPreset == id ? "true" : "false")" title="@a.Name" @onclick="() => PickAvatarAsync(id)">
+                                <Avatar Preset="@id" Name="@a.Name" Size="64" Animate="false" /><span>@a.Name</span>
+                            </button>
+                        }
+                    </div>
+                    <div class="avatar-gen" style="margin-top:1rem">
+                        <h3 class="panel-subtitle">Avatar-Generator</h3>
+                        <p class="muted">Beschreibe deinen Avatar in einem Satz. @(AvatarGen.AiAvailable ? "Die KI wählt passende Merkmale aus dem Baukasten; der Text wird dazu an den KI-Dienst gesendet (nicht gespeichert)." : "Die KI ist nicht eingerichtet: Es werden Stichwörter ausgewertet (Offline-Hilfe).") Es entstehen keine Fotos oder freien Bilder.</p>
+                        <div class="actions" role="group" aria-label="Beispielbeschreibungen">
+                            @foreach (var ex in AvatarExamples)
+                            {
+                                var text = ex;
+                                <button type="button" class="chip" @onclick="() => _genText = text">@text</button>
+                            }
+                        </div>
+                        <label class="field" style="margin-top:.5rem"><span class="muted">Beschreibung (änderbar)</span>
+                            <textarea rows="2" maxlength="@AvatarGeneratorService.MaxDescriptionLength" @bind="_genText" @bind:event="oninput" placeholder="z. B. freundliche Person mit roten Locken, Brille und grünem Pullover"></textarea></label>
+                        <div class="actions" style="margin-top:.5rem">
+                            <button type="button" class="btn btn-primary btn-sm" disabled="@(_genBusy || string.IsNullOrWhiteSpace(_genText))" @onclick="GenerateAvatarAsync">@(_genBusy ? "Erstelle …" : "Vorschlag erstellen")</button>
+                        </div>
+                        @if (_genId is not null)
+                        {
+                            <p class="muted" style="margin-top:.6rem" aria-live="polite">@_genSummary</p>
+                            <div class="avatar-moods" role="group" aria-label="Der Vorschlag in allen Stimmungen">
+                                @foreach (var st in new[] { ("neutral", "Neutral"), ("happy", "Freundlich"), ("motivating", "Motivierend"), ("success", "Erfolgreich"), ("encouraging", "Ermutigend") })
+                                {
+                                    <figure class="avatar-mood"><Avatar Preset="@_genId" Name="@st.Item2" Size="72" State="@st.Item1" /><figcaption>@st.Item2</figcaption></figure>
+                                }
+                            </div>
+                            <div class="actions" style="margin-top:.5rem">
+                                <button type="button" class="btn btn-primary btn-sm" @onclick="AcceptGeneratedAsync">Übernehmen</button>
+                                <button type="button" class="btn btn-ghost btn-sm" @onclick="GenerateAvatarAsync" disabled="@_genBusy">Neu erzeugen</button>
+                                <button type="button" class="btn btn-ghost btn-sm" @onclick="() => _genId = null">Verwerfen</button>
+                            </div>
+                        }
+                    </div>
+                    <div class="actions" style="margin-top:.8rem">
+                        <label class="pick"><input type="checkbox" checked="@UiState.AvatarHidden" @onchange="e => HideAvatarAsync(e.Value is true)" /> Avatar ausblenden (nur Initialen)</label>
+                        <button type="button" class="btn btn-ghost btn-sm" @onclick="ResetAvatarAsync">Zurücksetzen</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div class="card panel">
             <h2 class="panel-title">Persönliche Angaben</h2>
             <label class="form-label" for="displayName">Anzeigename</label>
@@ -188,6 +253,8 @@
             }
         </div>
 
+        @if (_mcpAllowed)
+        {
         <div class="card panel">
             <h2 class="panel-title">MCP-Verknüpfungen</h2>
             <p class="muted">
@@ -247,6 +314,11 @@
                 <button class="btn btn-primary" @onclick="CreateToken">Token erzeugen</button>
             </div>
         </div>
+        }
+        else
+        {
+            <div class="card panel"><h2 class="panel-title">MCP-Verknüpfungen</h2><p class="muted">Für externe Lernprofile stehen keine MCP-Zugänge zur Verfügung.</p></div>
+        }
     }
 </div>
 
@@ -260,6 +332,54 @@
     private List<ShareInfo> _outgoing = new();
     private List<ModuleInfo> _incoming = new();
     private List<McpLink> _links = new();
+    private bool _mcpAllowed;
+    private string _avState = "happy";
+
+        private static readonly string[] AvatarExamples =
+    {
+        "freundliche Person mit roten Locken, Brille und grünem Pullover",
+        "ruhiger Mensch mit schwarzem Dutt, Kopfhörern und lila Hoodie",
+        "sportliche Person mit kurzen blonden Haaren, Kappe und blauem Shirt",
+        "Person mit dunkler Haut, langen schwarzen Haaren und gelber Jacke",
+    };
+    private string _genText = "";
+    private string? _genId, _genSummary;
+    private bool _genBusy;
+
+    private async Task GenerateAvatarAsync()
+    {
+        _genBusy = true;
+        try { var r = await AvatarGen.GenerateAsync(_genText); _genId = r.Id; _genSummary = r.Summary; }
+        catch (ArgumentException ex) { _message = "❌ " + ex.Message; _messageOk = false; }
+        finally { _genBusy = false; }
+    }
+
+    private async Task AcceptGeneratedAsync()
+    {
+        if (_genId is null) return;
+        try { await Repo.SaveAvatarAsync(_user!.Id, _genId, false); UiState.SetAvatar(_genId, false); _message = "✅ Avatar gespeichert."; _messageOk = true; _genId = null; }
+        catch (ArgumentException ex) { _message = "❌ " + ex.Message; _messageOk = false; }
+    }
+
+    private async Task PickAvatarAsync(string id)
+    {
+        try { await Repo.SaveAvatarAsync(_user!.Id, id, false); UiState.SetAvatar(id, false); _message = "✅ Avatar gespeichert."; _messageOk = true; }
+        catch (ArgumentException e) { _message = "❌ " + e.Message; _messageOk = false; }
+    }
+
+    private async Task HideAvatarAsync(bool hidden)
+    {
+        await Repo.SaveAvatarAsync(_user!.Id, UiState.AvatarPreset, hidden);
+        UiState.SetAvatar(UiState.AvatarPreset, hidden);
+        _message = hidden ? "✅ Avatar ausgeblendet." : "✅ Avatar wieder eingeblendet."; _messageOk = true;
+    }
+
+    private async Task ResetAvatarAsync()
+    {
+        await Repo.SaveAvatarAsync(_user!.Id, "", false);
+        UiState.SetAvatar("", false);
+        _message = "✅ Avatar zurückgesetzt (Initialen)."; _messageOk = true;
+    }
     private string _tokenName = "";
     private int _tokenDays = 90;
     private string? _newToken;
@@ -279,6 +399,7 @@
         _summary = await Repo.GetOwnedSummaryAsync(uid);
         _results = await Repo.QuizHistoryAsync(uid, limit: 10);
         _certificates = await Certs.ListForUserAsync(uid);
+        _mcpAllowed = await McpLinks.IsAllowedAsync(uid);
         _links = await McpLinks.ListAsync(uid);
         _outgoing = await Sharing.ListOutgoingSharesAsync(uid);
         _incoming = await Repo.ListSharedWithMeAsync(uid);

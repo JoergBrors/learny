@@ -106,8 +106,14 @@ public sealed class InvitationService
         stmts.Add(Events.Statement(InviteEventTypes.Created, invitationId, null, profile, actor.Id));
         stmts.Add(AuditStatement(actor.Id, "invitation.create", invitationId, $"profile={profile} modules={modules.Count} topics={topics.Count}"));
         await _db.ExecuteBatchAsync(stmts, ct);
-        return new CreatedInvitation(invitationId, _s.LinkBaseUrl + "/invite/" + token, expires, token);
+        return new CreatedInvitation(invitationId, LinkFor(token), expires, token);
     }
+
+    /// <summary>
+    /// Einladungslink mit dem Token im <b>Fragment</b> (<c>/invite#token</c>): Fragmente werden vom Browser nie an Server, Proxy, IIS oder Cloudflare gesendet — der Token erscheint
+    /// weder in Zugriffsprotokollen noch im Referrer. Erst eine kleine Seite (<c>wwwroot/invite.js</c>) sendet ihn per POST-Body an <c>/invite/start</c>.
+    /// </summary>
+    public string LinkFor(string token) => _s.LinkBaseUrl + "/invite#" + token;
 
     public async Task<bool> RevokeAsync(string? actorUserId, string invitationId, CancellationToken ct = default)
     {
@@ -139,7 +145,7 @@ public sealed class InvitationService
         await Events.LogAsync(InviteEventTypes.Rotated, invitationId, null, null, actor.Id, ct);
         await _users.WriteAuditAsync(actor.Id, "invitation.rotate", invitationId, "");
         var rows = await _db.QueryAsync("SELECT expires_at FROM invitations WHERE invitation_id=@i", new (string, object?)[] { ("i", invitationId) }, ct);
-        return new CreatedInvitation(invitationId, _s.LinkBaseUrl + "/invite/" + token, DbValue.ToDateTime(rows[0]["expires_at"]), token);
+        return new CreatedInvitation(invitationId, LinkFor(token), DbValue.ToDateTime(rows[0]["expires_at"]), token);
     }
 
     /// <summary>Einladungsübersicht für die Verwaltung (nur Administratoren). Nie Hash oder Token.</summary>
@@ -190,6 +196,34 @@ public sealed class InvitationService
         if (!Enabled) return false;
         var inv = await FindAsync(token, ct);
         return inv is not null && EffectiveStatus(inv) == InvitationStatus.Pending;
+    }
+
+    /// <summary>true, wenn der Token zur Einladung gehört und der aktuelle Stand (nach Rotation) ist. Nur lesend, verbraucht nichts.</summary>
+    public async Task<bool> IsCurrentTokenAsync(string invitationId, string token, CancellationToken ct = default)
+    {
+        var inv = await FindAsync(token, ct);
+        return inv is not null && string.Equals(inv["invitation_id"], invitationId, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Darf diese Adresse einen Anmeldecode (Entra-Einmalcode über die OnOtpSend-Extension) erhalten? Ja bei gültiger Einladung (pending, nicht abgelaufen, nicht widerrufen) oder bei einem
+    /// aktiven Benutzer mit externer Identität und externem Profil. <b>Keine Berechtigung</b>: weder Registrierung noch Zugriff — beides entscheidet allein der Callback (<see cref="RedeemAsync"/>,
+    /// Anmeldung bekannter Identitäten). Benutzer des Workforce-Anbieters sind keine Empfänger (sie melden sich nicht über External ID an); ihre Anmeldung bleibt unberührt. Nur lesend.
+    /// </summary>
+    public async Task<bool> MayReceiveSignInCodeAsync(string email, CancellationToken ct = default)
+    {
+        var e = NormalizeEmail(email);
+        if (e is null) return false;
+        var inv = await _db.QueryAsync("SELECT 1 AS x FROM invitations WHERE recipient_email=@e AND status='pending' AND revoked_at IS NULL AND expires_at>@now",
+            new (string, object?)[] { ("e", e), ("now", Clock()) }, ct);
+        if (inv.Count > 0) return true;
+        var usr = await _db.QueryAsync("""
+            SELECT 1 AS x FROM users u
+            WHERE LOWER(u.email)=@e AND u.status='active'
+              AND EXISTS (SELECT 1 FROM user_identities i WHERE i.user_id=u.id AND i.kind='external')
+              AND EXISTS (SELECT 1 FROM user_profiles p WHERE p.user_id=u.id)
+            """, new (string, object?)[] { ("e", e) }, ct);
+        return usr.Count > 0;
     }
 
     /// <summary>Grund einer abgewiesenen Vorprüfung als Ereigniskategorie (nur Enum-Name, nie Token).</summary>
@@ -331,7 +365,7 @@ public sealed class InvitationService
         return Convert.ToHexString(h.ComputeHash(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
     }
 
-    private DbStatement AuditStatement(string? actor, string action, string target, string detail) =>
+    internal DbStatement AuditStatement(string? actor, string action, string target, string detail) =>
         new("INSERT INTO audit_log (id, actor_user_id, action, target, detail, created_at) VALUES (@id, @actor, @action, @target, @detail, @now)",
             new (string, object?)[] { ("id", Guid.NewGuid().ToString()), ("actor", actor), ("action", action), ("target", target), ("detail", detail), ("now", Clock()) });
 

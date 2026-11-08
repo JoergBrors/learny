@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using LearnCards.Web.Domain;
 using LearnCards.Web.Infrastructure;
 using LearnCards.Web.Services;
+using LearnCards.Web.Services.Mail;
 using LearnCards.Web.Services.Certificates;
 
 namespace LearnCards.Web.Api;
@@ -314,6 +315,11 @@ public static partial class ApiEndpoints
         // Nur Browser-Anmeldung als Administrator (Filter oben); Rolle zusätzlich im Dienst gegen die Datenbank. Der Aussteller kommt nie aus dem Request.
         admin.MapGet("/credentials", (CredentialRegisterService reg, HttpContext http) =>
             Guard(async () => Results.Ok(await reg.SearchAsync(Uid(http), CredentialQuery.From(http.Request.Query)))));
+        // Mail-Zertifikat (ADR 0050): nur das öffentliche Zertifikat; der private Schlüssel verlässt die Plattform nie.
+        admin.MapGet("/mail/certificate.cer", (MailCertificateService mail, HttpContext http) =>
+            Guard(async () => await mail.GetPublicCertificateAsync(Uid(http)) is { } der
+                ? Results.File(der, "application/pkix-cert", "learny-mail-client.cer")
+                : Results.Json(new { detail = "Kein Zertifikat vorhanden." }, statusCode: 404)));
         admin.MapGet("/credentials/{id}", (string id, CredentialRegisterService reg, HttpContext http) =>
             Guard(async () => await reg.GetDetailAsync(Uid(http), id) is { } d ? Results.Ok(d) : Results.Json(new { detail = "Nachweis nicht gefunden." }, statusCode: 404)));
         admin.MapPost("/credentials/test", (CredentialTestRequest req, CertificateService certs, HttpContext http) =>

@@ -61,7 +61,7 @@ Standard aus. Zum Ausprobieren in `.env` `EXTID_ENABLED=1`, `EXTID_AUTHORITY`, `
 
 ### Einladungen lokal (ADR 0049, Phase B)
 
-Mit `EXTID_ENABLED=1` erzeugt die Entwicklungsumgebung einmalig `data/invite-token.key` (nie committen; in Produktion `INVITE_TOKEN_KEY` aus der `.env`). Einladungslinks entstehen in Phase B nur über `InvitationService.CreateAsync` (Administrator); die Oberfläche folgt in Phase C. Der Ablauf (Link → Entra → Einlösung → Profil und Zuweisungen) ist durch `OidcFlowTests` (zweiter Test-Identity-Provider) und `InvitationUnitTests` belegt.
+Mit `EXTID_ENABLED=1` erzeugt die Entwicklungsumgebung einmalig `data/invite-token.key` (nie committen; in Produktion `INVITE_TOKEN_KEY` aus der `.env`). Einladungslinks (`/invite#<token>`) erstellt der Administrator in Administration → Einladungen (ab Phase C; zuvor nur über `InvitationService.CreateAsync`). Der Ablauf (Link → Entra → Einlösung → Profil und Zuweisungen) ist durch `OidcFlowTests` (zweiter Test-Identity-Provider) und `InvitationUnitTests` belegt.
 
 ## 3. MCP-Server lokal testen
 
@@ -222,3 +222,9 @@ Unter `dotnet run`/VS Code gilt `ASPNETCORE_ENVIRONMENT=Development`: Ohne OIDC-
 ## MCP_TOKEN_KEY lokal (ADR 0025)
 
 `MCP_TOKEN_KEY` (Base64, ≥ 32 Byte) ist Pflicht. Unter `dotnet run` (Development) wird ohne Angabe einmalig `data/mcp-token.key` erzeugt und wiederverwendet. Für `Production`-Starts (Container, `dotnet LearnCards.Web.dll`) den Schlüssel selbst setzen: `openssl rand -base64 32`. Die Datei `data/mcp-token.key` nie committen (Verzeichnis `data/` ist ignoriert).
+
+### Administration, Mailversand und OTP lokal (ADR 0050, Phase C)
+
+Mit `EXTID_ENABLED=1` (siehe oben) zeigt `/admin` für Administratoren die Bereiche **Benutzer**, **Einladungen**, **Inhalte**, **Mailversand** und **Protokoll** (Direktlink z. B. `/admin?tab=users`). Einladungen lassen sich ohne Mailversand erstellen; der Link wird einmalig angezeigt (`http://localhost:5000/invite#<token>`). Zum Ausprobieren des Versands `MAIL_ENABLED=1`, `MAIL_TENANT_ID`, `MAIL_CLIENT_ID`, `MAIL_SENDER` und in Development `MAIL_CLIENT_SECRET` (oder ein PFX über `MAIL_CLIENT_CERT_PATH`) sowie `MAIL_ALLOWED_RECIPIENTS` auf **nur eigene Testadressen** setzen — sonst sendet nichts (fail-closed). Die automatisierten Tests senden nie echt. Die OTP-Extension (`EXTID_OTP_ENABLED`, `EXTID_OTP_AUDIENCES`) ist lokal nur über die Tests erreichbar, da Entra einen öffentlichen HTTPS-Endpunkt aufruft.
+
+**Umgebungen und Hilfsskripte (Phase C):** Debug läuft auf `http://localhost:5000`, die Plattform auf `https://learny.brors.date`. Die Entra-App des External Tenants benötigt beide Redirect-URIs (`…/auth/external/callback`); die OTP-Extension ruft nur die Plattform (`/extensions/otp-send`) auf. `tools/env/New-LearnyEnvFromPoc.ps1` ergänzt die lokale `.env` aus den PoC-Daten (Geheimnisse nie angezeigt, nur bei git-ignorierter Datei, Bereiche nur mit vollständigen Pflichtwerten aktiv); `tools/env/Publish-GitHubConfig.ps1` zeigt standardmäßig nur eine Vorschau und schreibt mit `-Apply` die Variablen und Secrets per `gh` nach GitHub (Secrets über Standardeingabe).

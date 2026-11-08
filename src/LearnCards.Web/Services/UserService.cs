@@ -284,6 +284,9 @@ public class UserService
         var wanted = roles.Select(r => r.Trim().ToLowerInvariant()).Where(r => r.Length > 0).ToHashSet();
         if (wanted.Any(r => !Roles.All.Contains(r))) throw new ArgumentException("Unbekannte Rolle.");
         wanted.Add(Roles.User);
+        // ADR 0049: externe Lernende (Profil B2B/B2C oder externe Identität) erhalten nie administrative Rollen; Profile sind keine Rollen
+        if (wanted.Except(target.Roles).Any(r => r != Roles.User) && await LearnerRestriction.IsRestrictedAsync(_db, target.Id))
+            throw new InvalidOperationException("Externe Lernende erhalten keine Rollen; ihr Zugang ist auf zugewiesene Inhalte beschränkt.");
 
         if (target.IsAdmin && !wanted.Contains(Roles.Admin) && await CountActiveAdminsAsync() <= 1)
             throw new InvalidOperationException("Der letzte aktive Administrator kann seine Rolle nicht verlieren.");

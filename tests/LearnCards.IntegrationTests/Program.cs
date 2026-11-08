@@ -227,8 +227,11 @@ try
     AuthModeTests.Run(Check);   // Betriebsmodus fail closed (ADR 0026)
     OidcCallbackTests.Run(Check);   // OIDC form_post, Cookie, Redirect-URI, state (ADR 0036)
     ExternalIdUnitTests.Run(Check);   // Entra External ID als zweiter Anbieter: Konfiguration, Trennung (ADR 0048)
+    AvatarUnitTests.Run(Check);   // Avatar-Baukasten und Generator (ADR 0051)
     await ExternalIdUnitTests.RunAsync(Check, tmp);   // state-Einmaligkeit in der Datenbank, Anmeldung ohne Benutzeranlage (ADR 0048)
     await InvitationUnitTests.RunAsync(Check, tmp);   // Einladungen, Lernprofile, atomare Einlösung, Zugriffsregeln (ADR 0049)
+    await MailDeliveryTests.RunAsync(Check, tmp);   // Mailtransport, Versandzustand, OTP-Extension, Verwaltung der Lernrechte (ADR 0044/0045/0049, Phase C)
+    await PostgresReadinessTests.RunAsync(Check, tmp);   // nur mit LEARNY_TEST_POSTGRES; sonst ausdrücklich „nicht ausgeführt“
     DockerConfigTests.Run(Check, repoRoot);   // Docker-Hub-Veröffentlichung (ADR 0024)
     Console.WriteLine();
 

@@ -530,6 +530,30 @@ public partial class CardRepository
         return rows.FirstOrDefault()?.GetValueOrDefault("theme") ?? "";
     }
 
+    /// <summary>Avatar-Voreinstellung des Benutzers (nur Darstellung): Kennung der Variante (leer = Initialen) und „ausblenden“.</summary>
+    public async Task<(string Preset, bool Hidden)> GetAvatarAsync(string userSub)
+    {
+        var rows = await _db.QueryAsync("SELECT avatar, avatar_hidden FROM user_preferences WHERE user_sub = @u", new[] { ("u", (object?)userSub) });
+        if (rows.Count == 0) return ("", false);
+        var preset = rows[0].GetValueOrDefault("avatar") ?? "";
+        return (Avatars.IsValid(preset) ? preset : "", DbValue.ToInt(rows[0].GetValueOrDefault("avatar_hidden")) == 1);
+    }
+
+    /// <summary>Speichert die Avatar-Voreinstellung. Unbekannte Kennungen werden abgewiesen; leer = zurücksetzen. Verändert nie Rechte oder Lernstände.</summary>
+    public Task SaveAvatarAsync(string userSub, string preset, bool hidden)
+    {
+        if (preset.Length > 0 && !Avatars.IsValid(preset)) throw new ArgumentException("Unbekannter Avatar.");
+        return UpsertAsync("user_preferences",
+            new[]
+            {
+                ("user_sub", (object?)userSub),
+                ("avatar", preset),
+                ("avatar_hidden", hidden ? 1 : 0),
+                ("updated_at", DateTime.UtcNow),
+            },
+            "user_sub");
+    }
+
     public Task SaveThemeAsync(string userSub, string theme) =>
         UpsertAsync("user_preferences",
             new[]

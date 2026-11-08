@@ -1,0 +1,54 @@
+@inject InviteEvents Events
+@inject UserService Users
+
+@* Ereignisprotokoll der Einladungen und Zuweisungen (ADR 0046): nur beobachtete Ereignisse, nie Codes, Links oder Tokens. *@
+
+<section class="admin-section">
+    <div class="section-head"><div><h2>Einladungs- und Lernereignisse</h2><p class="muted">
+        Protokolliert werden nur Ereignisse, die Learny selbst beobachtet. „Link aufgerufen“ ist ein Serveraufruf und kein Beweis, dass die eingeladene Person den Link geöffnet hat
+        (Mail-Scanner, Linkvorschau). Schritte innerhalb des Microsoft-Anmeldeablaufs (z. B. Codeeingabe) sind nicht sichtbar. „Versand angenommen“ heißt: von Exchange Online zur Zustellung angenommen — nicht zugestellt.
+    </p></div></div>
+    <div class="toolbar">
+        <select class="input compact" @bind="_type" @bind:after="LoadAsync" aria-label="Ereignistyp filtern">
+            <option value="">Alle Ereignisse</option>
+            @foreach (var t in InviteEventTypes.All.OrderBy(AdminEventLabels.Label)) { <option value="@t">@AdminEventLabels.Label(t)</option> }
+        </select>
+        <button class="btn btn-ghost btn-sm" @onclick="LoadAsync">Aktualisieren</button>
+    </div>
+    <div class="card table-wrap">
+        <table class="table">
+            <caption class="sr-only">Ereignisse</caption>
+            <thead><tr><th>Zeit</th><th>Ereignis</th><th>Detail</th><th>Einladung</th><th>Benutzer</th></tr></thead>
+            <tbody>
+                @foreach (var e in _rows)
+                {
+                    <tr>
+                        <td>@e.At.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss")</td>
+                        <td>@AdminEventLabels.Label(e.Type)</td>
+                        <td>@e.Category</td>
+                        <td><small><code>@Short(e.InvitationId)</code></small></td>
+                        <td><small><code>@Short(e.UserId)</code></small></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    @if (_rows.Count == 0) { <div class="empty-state">Keine Ereignisse.</div> }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public string ActorId { get; set; } = "";
+    private string _type = "";
+    private List<InvitationEventRow> _rows = new();
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        await Users.RequireRoleAsync(ActorId, Roles.Admin);   // Anzeige nur für Administratoren, serverseitig geprüft
+        var all = await Events.ListAsync(null, null, 500);
+        _rows = (_type == "" ? all : all.Where(r => r.Type == _type).ToList()).Take(200).ToList();
+    }
+
+    private static string Short(string? id) => string.IsNullOrEmpty(id) ? "" : id.Length > 8 ? id[..8] : id;
+}

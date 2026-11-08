@@ -122,6 +122,9 @@ public static class OidcFlowTests
         Env("AUTH_MODE", "oidc"); Env("OIDC_ISSUER", idp.Issuer); Env("OIDC_CLIENT_ID", ClientId); Env("OIDC_CLIENT_SECRET", ClientSecret);
         Env("EXTID_ENABLED", "1"); Env("EXTID_AUTHORITY", ext.Issuer); Env("EXTID_TENANT_ID", ExtTid); Env("EXTID_CLIENT_ID", ExtClient); Env("EXTID_CLIENT_SECRET", ExtSecret);
         var inviteKeyB64 = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)); Env("INVITE_TOKEN_KEY", inviteKeyB64);
+        // Mailversand und OTP-Extension (Phase C): nur die Endpunkt-Authentifizierung wird über HTTP geprüft; es wird nie gesendet
+        Env("MAIL_ENABLED", "1"); Env("MAIL_TENANT_ID", "db88f9b6-c89a-41a3-a21d-b61458e234ff"); Env("MAIL_CLIENT_ID", "aaaaaaaa-0000-4000-8000-000000000001"); Env("MAIL_SENDER", "learny@brors.link");
+        Env("MAIL_CLIENT_SECRET", "mail-secret-nur-test"); Env("MAIL_ALLOWED_RECIPIENTS", "*"); Env("EXTID_OTP_ENABLED", "1"); Env("EXTID_OTP_AUDIENCES", "api-app");
         var dbPath = Path.Combine(dir, "oidc.db");
         Env("DB_PROVIDER", "sqlite"); Env("SQLITE_PATH", dbPath);
         Env("DATA_PROTECTION_DIR", Path.Combine(dir, "keys")); Env("PKI_KEY_DIR", Path.Combine(dir, "pki")); Env("PKI_PUBLIC_URL", url);
@@ -339,6 +342,9 @@ public static class OidcFlowTests
             check(Failed(await Callback_Ext(expBad, "ext-known", c => c["exp"] = DateTimeOffset.UtcNow.AddHours(-2).ToUnixTimeSeconds()), "nicht möglich"), "External ID: abgelaufenes Token abgewiesen");
             var nonceBad = await StartExt();
             check(Failed(await Callback_Ext(nonceBad, "ext-known", c => c["nonce"] = "fremd"), "nicht möglich"), "External ID: falsche nonce abgewiesen");
+            var diag = (await appDb.QueryAsync("SELECT detail FROM audit_log WHERE action='login.external.failed' ORDER BY created_at DESC LIMIT 1"));
+            check(diag.Count == 1 && diag[0]["detail"]!.StartsWith("stage=id_token") && diag[0]["detail"]!.Contains("Nonce") && !diag[0]["detail"]!.Contains("ext-known") && diag[0]["detail"]!.Length < 260,
+                "External ID: der Abweisungsgrund steht mit Stufe im Audit (ohne Subject, Code oder Token) — sichtbar in Administration → Übersicht → Protokoll");
             var foreignCode = await StartExt();   // Code des Workforce-IdP am External-Rücksprung: dem anderen Anbieter unbekannt
             check(Failed(await ExtCallback(foreignCode.Cookie, foreignCode.State, idp.NewCode(NewGrant("x", await StartLogin()))), "nicht möglich"),
                 "External ID: ein Authorization Code des Workforce-Anbieters ist am External-Rücksprung wirkungslos");
@@ -373,7 +379,7 @@ public static class OidcFlowTests
             async Task<(string Authorize, string Cookie, string State, HttpResponseMessage Res)> OpenInvite(string token)
             {
                 codes.Add(token);
-                var r = await http.GetAsync("/invite/" + token);
+                var r = await http.PostAsync("/invite/start", new FormUrlEncodedContent(new[] { new KeyValuePair<string, string>("token", token) }));   // Token nur im POST-Body (ADR 0049)
                 var loc = r.Headers.Location?.OriginalString ?? "";
                 var q = loc.StartsWith("http") ? HttpUtility.ParseQueryString(new Uri(loc).Query) : HttpUtility.ParseQueryString("");
                 return (loc, Cookies(r), q["state"] ?? "", r);
@@ -393,13 +399,29 @@ public static class OidcFlowTests
             var open1 = await OpenInvite(inv1.Token);
             check(open1.Authorize.StartsWith(ext.Base + "/tenant/oauth2/v2.0/authorize?") && open1.Authorize.Contains("prompt=login") && !open1.Authorize.Contains(inv1.Token) && open1.Cookie.Contains("lc.oidc.ext.state=") && !open1.Cookie.Contains(inv1.Token),
                 "Einladung: Link leitet mit prompt=login zu Entra; der Einladungstoken steht weder in der Authorize-URL noch im Cookie im Klartext");
+            // Schutz des Einladungslinks: Token im Fragment, nie in Pfad/Query/Referrer; die Seite selbst enthält keinen Token
+            check(inv1.Link == url + "/invite#" + inv1.Token, "Einladungslink: Token steht im Fragment (/invite#<token>), das nie an Server, IIS oder Proxy gesendet wird");
+            var invPage = await http.GetAsync("/invite");
+            var invPageBody = await invPage.Content.ReadAsStringAsync();
+            check(invPage.StatusCode == HttpStatusCode.OK && invPage.Headers.GetValues("Referrer-Policy").Contains("no-referrer") && invPage.Headers.GetValues("Cache-Control").Any(v => v.Contains("no-store"))
+                  && invPageBody.Contains("/invite.js") && !invPageBody.Contains(inv1.Token) && invPage.Headers.Contains("Content-Security-Policy"),
+                "Einladungsseite: tokenlos, no-store, Referrer-Policy no-referrer, eigene CSP, Skript aus eigener Quelle");
+            var invJs = await (await http.GetAsync("/invite.js")).Content.ReadAsStringAsync();
+            check(invJs.Contains("location.hash") && invJs.Contains("replaceState") && invJs.Contains("/invite/start") && invJs.Contains("'post'"),
+                "invite.js: liest das Fragment, entfernt es aus der Adressleiste und sendet den Token per POST");
+            var eventsBeforeLegacy = await Count("SELECT COUNT(*) AS n FROM invitation_events WHERE invitation_id=@i AND event_type IN ('invitation.opened','registration.started')", ("i", inv1.InvitationId));
+            var legacy = await http.GetAsync("/invite/" + inv1.Token);
+            check(Loc(legacy).StartsWith("/login?error=") && !legacy.Headers.Contains("Set-Cookie") && await Count("SELECT COUNT(*) AS n FROM invitation_events WHERE invitation_id=@i AND event_type IN ('invitation.opened','registration.started')", ("i", inv1.InvitationId)) == eventsBeforeLegacy,
+                "Alte Linkform /invite/<token> (Token im Pfad) wird nicht mehr verarbeitet: keine Weiterleitung zu Entra, kein Cookie, kein Ereignis [" + (int)legacy.StatusCode + " " + Loc(legacy) + " cookie=" + legacy.Headers.Contains("Set-Cookie") + "]");
+            check((await http.PostAsync("/invite/start", new StringContent("{\"token\":\"x\"}", Encoding.UTF8, "application/json"))).Headers.Location?.OriginalString.StartsWith("/login?error=") == true,
+                "Einladung: POST ohne Formularfeld wird abgewiesen");
             var usersBeforeInv = await Count("SELECT COUNT(*) AS n FROM users");
             var reg = await InviteCallback(inv1.Token, "inv-sub-1", c => { c["email"] = "neu@example.org"; });
             var regSession = Cookies(reg);
             var meReg = new HttpRequestMessage(HttpMethod.Get, "/api/me"); meReg.Headers.Add("Cookie", regSession);
             using var meRegJson = JsonDocument.Parse(await (await http.SendAsync(meReg)).Content.ReadAsStringAsync());
             var newUid = meRegJson.RootElement.GetProperty("id").GetString()!;
-            check(reg.StatusCode == HttpStatusCode.SeeOther && Loc(reg) == "/" && regSession.Contains("lc.auth=") && meRegJson.RootElement.GetProperty("email").GetString() == "neu@example.org",
+            check(reg.StatusCode == HttpStatusCode.SeeOther && Loc(reg) == "/start" && regSession.Contains("lc.auth=") && meRegJson.RootElement.GetProperty("email").GetString() == "neu@example.org",
                 "Einladung: gültige Einladung + bestätigte E-Mail → Benutzer angelegt und angemeldet");
             check(await Count("SELECT COUNT(*) AS n FROM users") == usersBeforeInv + 1
                   && await Count("SELECT COUNT(*) AS n FROM user_identities WHERE user_id=@u AND kind='external' AND provider=@p", ("u", newUid), ("p", ext.Issuer)) == 1
@@ -436,7 +458,7 @@ public static class OidcFlowTests
             check(Failed(await InviteCallback(invMail.Token, "inv-sub-2", c => { c["email"] = "richtig@example.org"; c["tid"] = "99999999-9999-9999-9999-999999999999"; }), "nicht möglich") && await InvStatus(invMail.InvitationId) == "pending",
                 "Einladung: falscher Tenant → abgewiesen, Einladung bleibt gültig");
             var okAfter = await InviteCallback(invMail.Token, "inv-sub-2", c => { c["email"] = "richtig@example.org"; });
-            check(Loc(okAfter) == "/" && Cookies(okAfter).Contains("lc.auth=") && await InvStatus(invMail.InvitationId) == "accepted", "Einladung: nach Fehlversuchen löst die richtige Anmeldung die Einladung ein");
+            check(Loc(okAfter) == "/start" && Cookies(okAfter).Contains("lc.auth=") && await InvStatus(invMail.InvitationId) == "accepted", "Einladung: nach Fehlversuchen löst die richtige Anmeldung die Einladung ein");
 
             var invAgain = await invites.CreateAsync(invAdmin, "zweite@example.org", "B2B_LEARNER");
             check(Inv(await InviteCallback(invAgain.Token, "inv-sub-1", c => { c["email"] = "zweite@example.org"; })) && await InvStatus(invAgain.InvitationId) == "pending",
@@ -456,6 +478,33 @@ public static class OidcFlowTests
             check(Failed(await ExtCallback(wrongKind.Cookie, wrongKind.State, ext.NewCode(ExtGrant("inv-sub-1", wrongKind))), "nicht vollständig"),
                 "Externe Anmeldung: eine Identität des External-Issuers mit falscher Art wird abgewiesen");
             await appDb.ExecuteAsync("UPDATE user_identities SET kind='external' WHERE provider=@p AND subject='inv-sub-1'", new (string, object?)[] { ("p", ext.Issuer) });
+
+            // Mail-Zertifikat: nur für Administratoren über die Browser-Anmeldung
+            var certDlAnon = await http.GetAsync("/api/admin/mail/certificate.cer");
+            var certDlReq = new HttpRequestMessage(HttpMethod.Get, "/api/admin/mail/certificate.cer"); certDlReq.Headers.Add("Cookie", session);
+            check(certDlAnon.StatusCode == HttpStatusCode.Unauthorized && (await http.SendAsync(certDlReq)).StatusCode == HttpStatusCode.Forbidden, "Mail-Zertifikat: Download ohne Anmeldung 401, als normaler Benutzer 403");
+            // Externe Lernprofile: kein MCP-Zugang über die API (403 statt Fehler), weder Token noch Verknüpfung
+            var mcpReq = new HttpRequestMessage(HttpMethod.Post, "/api/mcp/links") { Content = new StringContent("{\"name\":\"x\",\"days\":30}", Encoding.UTF8, "application/json") };
+            mcpReq.Headers.Add("Cookie", regSession);
+            var mcpRes = await http.SendAsync(mcpReq);
+            check(mcpRes.StatusCode == HttpStatusCode.Forbidden && await Count("SELECT COUNT(*) AS n FROM mcp_links WHERE user_id=@u", ("u", newUid)) == 0, "Externes Lernprofil: POST /api/mcp/links → 403, kein MCP-Zugang entsteht");
+            // 5c. OTP-Extension: eigene Endpunkt-Authentifizierung (Bearer der Extension), nie das Benutzer-Cookie
+            async Task<HttpResponseMessage> OtpPost(string? bearer, string body, string? cookie = null)
+            {
+                var m = new HttpRequestMessage(HttpMethod.Post, "/extensions/otp-send") { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+                if (bearer is not null) m.Headers.TryAddWithoutValidation("Authorization", bearer);
+                if (cookie is not null) m.Headers.Add("Cookie", cookie);
+                return await http.SendAsync(m);
+            }
+            const string otpBody = "{\"type\":\"microsoft.graph.authenticationEvent.emailOtpSend\",\"data\":{\"otpContext\":{\"identifier\":\"neu@example.org\",\"oneTimeCode\":\"48151623\"}}}";
+            codes.Add("48151623");
+            var otpNo = await OtpPost(null, otpBody);
+            var otpNoBody = await otpNo.Content.ReadAsStringAsync();
+            check(otpNo.StatusCode == HttpStatusCode.Unauthorized && otpNoBody.Length == 0 && !otpNo.Headers.Contains("Set-Cookie"), "OTP-Endpunkt: ohne Authentifizierung → 401 ohne Inhalt [" + (int)otpNo.StatusCode + " body=" + otpNoBody + " loc=" + otpNo.Headers.Location + "]");
+            check((await OtpPost(null, otpBody, session)).StatusCode == HttpStatusCode.Unauthorized, "OTP-Endpunkt: eine Benutzersitzung (Cookie) ersetzt die Endpunkt-Authentifizierung nicht");
+            check((await OtpPost("Bearer abc.def.ghi", otpBody)).StatusCode == HttpStatusCode.Unauthorized, "OTP-Endpunkt: ungültiges Bearer-Token → 401");
+            check((await OtpPost("Bearer abc.def.ghi", new string(' ', 20000))).StatusCode is HttpStatusCode.RequestEntityTooLarge or HttpStatusCode.Unauthorized, "OTP-Endpunkt: übergroße Anfrage wird begrenzt");
+            check((await http.GetAsync("/extensions/otp-send")).StatusCode is HttpStatusCode.MethodNotAllowed or HttpStatusCode.NotFound, "OTP-Endpunkt: nur POST (GET liefert keine Funktion)");
 
             // 6. Protokollierung
             string logText; lock (log) logText = log.ToString();

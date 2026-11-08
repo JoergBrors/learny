@@ -1,6 +1,21 @@
-@* Lernkarte mit 3D-Flip, Fortschrittsbalken, Aktionen und Tastatur-Navigation *@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@* Lernkarte mit 3D-Flip, Fortschrittsbalken, Aktionen und Bedienung per Berührung (Wischen/Tippen), Maus und Tastatur. Die Gesten (wwwroot/cards.js) rufen dieselben Aktionen
+   wie die sichtbaren Schaltflächen auf — es gibt keine zweite Navigationslogik. Vertikales Scrollen bleibt nativ. *@
 
-<div class="flashcard-wrap">
+<div class="flashcard-wrap" data-immersive="@(_immersive ? "true" : "false")" data-controls="@(_controls ? "true" : "false")">
+    @* Vollbildmodus (Mobil): blendet Navigation, Kopfzeile und Steuerung aus; die Steuerung lässt sich jederzeit einblenden. Wischen, Tippen und Tasten funktionieren weiter. *@
+    <div class="immersive-fab">
+        @if (_immersive)
+        {
+            <button type="button" class="btn btn-ghost btn-sm" aria-pressed="@(_controls ? "true" : "false")" @onclick="() => _controls = !_controls">@(_controls ? "Steuerung ausblenden" : "Steuerung einblenden")</button>
+            <button type="button" class="btn btn-primary btn-sm" @onclick="() => SetImmersiveAsync(false)">Vollbild beenden</button>
+        }
+        else
+        {
+            <button type="button" class="btn btn-ghost btn-sm immersive-start" @onclick="() => SetImmersiveAsync(true)" aria-label="Vollbild: Steuerelemente ausblenden">⛶ Vollbild</button>
+        }
+    </div>
     @* Fortschritt *@
     <div class="progress-head" role="progressbar" aria-valuenow="@ProgressValue" aria-valuemin="1" aria-valuemax="@ProgressTotal"
          aria-label="@($"{ProgressLabel} {ProgressValue} von {ProgressTotal}")">
@@ -16,11 +31,10 @@
     </div>
 
     @* Karte *@
-    <div class="flip-scene" tabindex="0" role="button" aria-pressed="@_flipped"
-         aria-label="@(_flipped ? $"Rückseite: {Card.Term}" : $"Vorderseite: {Card.Term}. Klicken zum Umdrehen")"
-         @onclick="HandleClick" @onkeydown="HandleKey"
-         @onpointerdown="HandlePointerDown" @onpointermove="HandlePointerMove" @onpointerup="HandlePointerUp"
-         @onpointercancel="HandlePointerCancel">
+    <div class="flip-scene" @ref="_scene" tabindex="0" role="button" aria-pressed="@(_flipped ? "true" : "false")"
+         data-can-prev="@(Index > 0 ? "true" : "false")" data-can-next="@(Index < Total - 1 ? "true" : "false")"
+         aria-label="@(_flipped ? $"Rückseite: {Card.Term}" : $"Vorderseite: {Card.Term}. Antippen oder Leertaste zum Umdrehen")"
+         @onkeydown="HandleKey">
         <div class="flip-inner @(_flipped ? "flipped" : "")">
             <div class="flip-face flip-front" aria-hidden="@_flipped">
                 <div>
@@ -43,7 +57,7 @@
                         </div>
                     }
                 </div>
-                <p class="flip-hint">Klicken oder <kbd>Space</kbd> zum Umdrehen</p>
+                <p class="flip-hint"><span class="hint-pointer">Klicken oder <kbd>Space</kbd> zum Umdrehen</span><span class="hint-touch">Tippen zum Umdrehen · nach links/rechts wischen für nächste/vorherige Karte</span></p>
             </div>
             <div class="flip-face flip-back" aria-hidden="@(!_flipped)">
                 <div class="back-head">
@@ -117,8 +131,9 @@
     @* Aktionsleiste *@
     <div class="card-actions">
         <div class="nav-group">
-            <button class="btn btn-ghost" @onclick="OnPrevClick" disabled="@(Index == 0)" aria-label="Vorherige Karte">← Zurück</button>
-            <button class="btn btn-ghost" @onclick="OnNextClick" disabled="@(Index >= Total - 1)" aria-label="Nächste Karte">Weiter →</button>
+            <button class="btn btn-ghost btn-touch" @onclick="OnPrevClick" disabled="@(Index == 0)" aria-label="Vorherige Karte">← Zurück</button>
+            <button class="btn btn-primary btn-touch" @onclick="Flip" aria-pressed="@(_flipped ? "true" : "false")" aria-label="@(_flipped ? "Frage wieder anzeigen" : "Antwort anzeigen")">@(_flipped ? "Frage zeigen" : "Antwort anzeigen")</button>
+            <button class="btn btn-ghost btn-touch" @onclick="OnNextClick" disabled="@(Index >= Total - 1)" aria-label="Nächste Karte">Weiter →</button>
         </div>
         <div class="action-group">
             <button class="btn btn-ghost btn-sm" @onclick="() => OnPageQuizCard.InvokeAsync(Card.Id)" aria-label="Quiz zu dieser Seite starten">📝 Quiz für diese Seite</button>
@@ -180,10 +195,19 @@
     private bool _flipped;
     private bool _chatOpen;
     private string _lastCardId = "";
-    private double _pointerStartX;
-    private double _pointerStartY;
-    private bool _pointerMoved;
-    private const double PointerMoveThreshold = 12;
+    private ElementReference _scene;
+    private DotNetObjectReference<FlashCardView>? _self;
+    private bool _immersive, _controls;
+
+    private async Task SetImmersiveAsync(bool on)
+    {
+        _immersive = on; _controls = false;
+        try { await JS.InvokeVoidAsync("lcCards.immersive", on, _self); } catch (Exception) { /* ohne JavaScript bleibt die normale Ansicht */ }
+    }
+
+    /// <summary>Vom Browser beendetes Vollbild (Escape, Systemgeste): Zustand angleichen.</summary>
+    [JSInvokable]
+    public Task OnImmersiveExited() => InvokeAsync(() => { _immersive = false; _controls = false; StateHasChanged(); });
     private int ProgressValue => ProgressValueOverride ?? (Index + 1);
     private int ProgressTotal => ProgressTotalOverride ?? Total;
 
@@ -198,34 +222,33 @@
 
     private void Flip() => _flipped = !_flipped;
 
-    private void HandleClick()
-    {
-        if (_pointerMoved) return;
-        Flip();
-    }
-
     private async Task OnNextClick() => await OnNext.InvokeAsync();
     private async Task OnPrevClick() => await OnPrev.InvokeAsync();
 
-    private void HandlePointerDown(PointerEventArgs e)
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        _pointerStartX = e.ClientX;
-        _pointerStartY = e.ClientY;
-        _pointerMoved = false;
+        if (!firstRender) return;
+        try { _self = DotNetObjectReference.Create(this); await JS.InvokeVoidAsync("lcCards.attach", _scene, _self); }
+        catch (Exception) { /* ohne JavaScript bleiben Schaltflächen und Tastatur (auf der Karte) nutzbar */ }
     }
 
-    private void HandlePointerMove(PointerEventArgs e)
+    /// <summary>Wisch- oder Pfeiltastenaktion aus cards.js: dieselben Aktionen wie die Schaltflächen „Zurück“/„Weiter“ (mit Grenzen).</summary>
+    [JSInvokable]
+    public async Task OnSwipe(string direction)
     {
-        if (_pointerMoved) return;
-        var dx = Math.Abs(e.ClientX - _pointerStartX);
-        var dy = Math.Abs(e.ClientY - _pointerStartY);
-        if (dx > PointerMoveThreshold || dy > PointerMoveThreshold)
-            _pointerMoved = true;
+        if (direction == "next" && Index < Total - 1) await OnNext.InvokeAsync();
+        else if (direction == "prev" && Index > 0) await OnPrev.InvokeAsync();
     }
 
-    private void HandlePointerUp(PointerEventArgs e) => HandlePointerMove(e);
+    /// <summary>Einfaches Tippen/Klicken auf die Kartenfläche (nicht auf Links, Schaltflächen oder Eingaben): Karte umdrehen.</summary>
+    [JSInvokable]
+    public Task OnTap() => InvokeAsync(() => { Flip(); StateHasChanged(); });
 
-    private void HandlePointerCancel() => _pointerMoved = true;
+    public async ValueTask DisposeAsync()
+    {
+        try { await JS.InvokeVoidAsync("lcCards.immersive", false, null); await JS.InvokeVoidAsync("lcCards.detach", _scene); } catch (Exception) { /* Verbindung bereits beendet */ }
+        _self?.Dispose();
+    }
 
     private static string FormatTargetTime(int seconds)
     {
@@ -238,8 +261,6 @@
         switch (e.Key)
         {
             case " ": case "Enter": Flip(); break;
-            case "ArrowRight": await OnNext.InvokeAsync(); break;
-            case "ArrowLeft": await OnPrev.InvokeAsync(); break;
             case "g": case "G": await OnMarkKnown.InvokeAsync(Card.Id); break;
             case "r": case "R": await OnMarkReview.InvokeAsync(Card.Id); break;
         }

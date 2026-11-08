@@ -1,0 +1,10 @@
+@* Stern zum Merken eines Eintrags. Klick löst nur das Umschalten aus (kein Öffnen der Kachel/Zeile). *@
+<button type="button" class="fav-btn @(Active ? "is-fav" : "")" aria-pressed="@(Active ? "true" : "false")"
+        title="@(Active ? "Aus Favoriten entfernen" : "Zu Favoriten hinzufügen")" aria-label="@(Active ? $"{Label} aus Favoriten entfernen" : $"{Label} zu Favoriten hinzufügen")"
+        @onclick="OnToggle" @onclick:stopPropagation="true" @onclick:preventDefault="true">@(Active ? "★" : "☆")</button>
+
+@code {
+    [Parameter] public bool Active { get; set; }
+    [Parameter] public string Label { get; set; } = "Eintrag";
+    [Parameter] public EventCallback OnToggle { get; set; }
+}

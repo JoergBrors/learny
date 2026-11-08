@@ -40,6 +40,9 @@ public class AppConfig
     public ExternalIdSettings ExternalId { get; set; } = new();
     /// <summary>Einladungspflichtige Registrierung (ADR 0049): HMAC-Schlüssel der Einladungslinks, Basisadresse, Gültigkeit.</summary>
     public InviteSettings Invitations { get; set; } = new();
+    /// <summary>Mailversand über Exchange Online (ADR 0044) und OTP-Extension (ADR 0045); Standard: aus.</summary>
+    public ExchangeMailSettings Mail { get; set; } = new();
+    public OtpExtensionSettings OtpExtension { get; set; } = new();
 
     // OpenAI
     public string OpenAiApiKey { get; set; } = "";
@@ -195,6 +198,8 @@ public class AppConfig
         // ── Entra External ID als zweiter Identitätsanbieter (ADR 0048): Standard aus; wenn aktiv, vollständig und strikt getrennt vom Workforce-Zugang ──
         cfg.ExternalId = ExternalIdSettings.Load(k => E(k), cfg.OidcIssuer, cfg.OidcClientId, isDevelopment);
         cfg.Invitations = InviteSettings.Resolve(k => E(k), cfg.ExternalId.Enabled, isDevelopment, Path.GetFullPath("data"), cfg.Blockchain.PublicBaseUrl);   // Pflicht, solange External ID aktiv ist
+        cfg.Mail = ExchangeMailSettings.Load(k => E(k), cfg.ExternalId.TenantId, isDevelopment, Path.GetFullPath("data"));
+        cfg.OtpExtension = OtpExtensionSettings.Load(k => E(k), cfg.ExternalId, cfg.Mail, isDevelopment);
         if (cfg.McpPublicUrls.Count == 0 && cfg.AuthMode == "dev")
             cfg.McpPublicUrls = new() { "http://127.0.0.1:8787", "http://localhost:8787" };
 

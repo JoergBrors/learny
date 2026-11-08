@@ -8,6 +8,7 @@
 @inject ModuleVersionService ModuleVersions
 @inject NavigationManager Nav
 @inject AuthenticationStateProvider AuthState
+@inject FavoritesService Favs
 
 <PageTitle>Module — LearnCards</PageTitle>
 
@@ -19,11 +20,14 @@
         </div>
         <div class="page-head-actions">
             <a class="btn btn-ghost" href="/help">❓ Hilfe & Templates</a>
+            @if (!_restricted)
+            {
             <label class="btn btn-primary file-btn">
                 📥 JSON importieren
                 <InputFile OnChange="HandleImport" accept=".json" disabled="@_importing" title="Karten-JSON (Kartenliste) oder vollständiges Modul-JSON (learny-module)" />
             </label>
             <button class="btn btn-ghost" @onclick="() => _showCreate = !_showCreate">＋ Neues Modul</button>
+            }
         </div>
     </div>
 
@@ -166,14 +170,78 @@
     }
     else
     {
+        var shown = Shown();
+        var groups = ListGrouping.By(shown, GroupKey());
+        <ListToolbar Placeholder="Module suchen" @bind-Query="_q" @bind-Sort="_sort" SortOptions="SortOpts" @bind-Group="_group" GroupOptions="GroupOpts" @bind-FavoritesOnly="_favOnly" FavoriteCount="@Current.Count(m => _favs.Contains(m.Id))"
+                     @bind-View="_view" StorageKey="view.modules" Total="@Current.Count" Shown="@shown.Count">
+            <Filters>
+                <select class="input compact" @bind="_flt" aria-label="Filter">
+                    <option value="">Alle Stände</option>
+                    <option value="passed">Bestanden</option>
+                    <option value="open">Noch nicht bestanden</option>
+                    @if (_tab == "private") { <option value="unused">Ohne Thema</option> }
+                </select>
+            </Filters>
+        </ListToolbar>
+        @if (shown.Count == 0)
+        {
+            <div class="empty-state"><p class="empty-title">Keine Treffer.</p><p class="muted">Suche oder Filter anpassen@(_favOnly ? " bzw. „Favoriten“ ausschalten" : "").</p></div>
+        }
+        else if (_view == "list")
+        {
+            <div class="card table-wrap list-view">
+                <table class="table">
+                    <caption class="sr-only">Module</caption>
+                    <thead><tr><th class="sr-only">Favorit</th><th>Modul</th><th>Bereich</th><th>Karten</th><th>Stand</th><th><span class="sr-only">Aktionen</span></th></tr></thead>
+                    <tbody>
+                        @foreach (var g in groups)
+                        {
+                        @if (g.Title.Length > 0) { <tr class="group-row"><th colspan="6" scope="colgroup">@g.Title (@g.Items.Count)</th></tr> }
+                        @foreach (var mod in g.Items)
+                        {
+                            <tr class="clickable" tabindex="0" @onclick="() => Open(mod.Id)" @onkeydown='e => { if (e.Key == "Enter") Open(mod.Id); }'>
+                                <td><FavoriteButton Active="_favs.Contains(mod.Id)" Label="@mod.Name" OnToggle="() => ToggleFav(mod.Id)" /></td>
+                                <td><div class="name-cell"><span class="icon" aria-hidden="true">@mod.Icon</span><div><strong>@mod.Name</strong>@if (!string.IsNullOrEmpty(mod.Description)) { <small>@mod.Description</small> }</div></div></td>
+                                <td><span class="badge @(_tab == "private" ? "badge-private" : "badge-" + mod.Context)">@(_tab == "private" ? "Eigenes" : mod.Context == "shared" ? "Freigegeben" : "Global")</span>@if (_tab == "shared") { <small class="muted">von @mod.OwnerName</small> }</td>
+                                <td>@mod.ActiveCount aktiv@(mod.CardCount - mod.ActiveCount > 0 ? $" · {mod.CardCount - mod.ActiveCount} archiviert" : "")</td>
+                                <td>
+                                    @if (_certs.TryGetValue(mod.Id, out var cert)) { <span class="badge badge-pass">✔ Note @cert.Grade</span> }
+                                    @if (_tab == "private" && _latestVersions.TryGetValue(mod.Id, out var lv)) { <span class="pill">V@(lv)</span> } else if (_tab == "private") { <span class="pill">Entwurf</span> } else if (_tab == "global") { <span class="pill">V@(mod.GlobalVersion)</span> }
+                                </td>
+                                <td class="actions">
+                                    @if (_tab == "global") { <button class="btn btn-ghost btn-sm" @onclick:stopPropagation="true" @onclick="() => CloneAsync(mod)" disabled="@_cloning" title="Erzeugt eine eigene private Kopie">⧉ Klonen</button> }
+                                    @if (_tab != "shared") { <a class="btn btn-ghost btn-sm" href="/api/modules/@mod.Id/export" download="@(FileName(mod.Name)).json" @onclick:stopPropagation="true" aria-label="@($"{mod.Name} als JSON exportieren")">⬇ JSON</a> }
+                                    @if (_tab == "shared")
+                                    {
+                                        @if (_pendingDeleteModuleId == mod.Id)
+                                        {
+                                            <button class="btn btn-danger btn-sm" @onclick:stopPropagation="true" @onclick="() => ConfirmDeleteModule(mod.Id)">Löschen</button>
+                                            <button class="btn btn-ghost btn-sm" @onclick:stopPropagation="true" @onclick="CancelDeleteModule">Abbrechen</button>
+                                        }
+                                        else { <button class="icon-btn" title="Modul löschen" aria-label="@($"{mod.Name} löschen")" @onclick:stopPropagation="true" @onclick="() => AskDeleteModule(mod.Id)">🗑</button> }
+                                    }
+                                </td>
+                            </tr>
+                        }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+        else
+        {
+        @foreach (var g in groups)
+        {
+        @if (g.Title.Length > 0) { <h3 class="group-head">@g.Title <span class="count">(@g.Items.Count)</span></h3> }
         <div class="module-grid">
-            @foreach (var mod in Current)
+            @foreach (var mod in g.Items)
             {
                 <article class="module-card" tabindex="0" role="link"
                          aria-label="@($"Modul {mod.Name}: {mod.ActiveCount} aktive Karten")"
                          @onclick="() => Open(mod.Id)"
                          @onkeydown='e => { if (e.Key == "Enter") Open(mod.Id); }'>
                     <div class="module-stripe" style="background:@mod.Color" aria-hidden="true"></div>
+                    <FavoriteButton Active="_favs.Contains(mod.Id)" Label="@mod.Name" OnToggle="() => ToggleFav(mod.Id)" />
                     <div class="module-body">
                         <div class="module-actions">
                             @if (_tab != "private")
@@ -250,6 +318,8 @@
                 </article>
             }
         </div>
+        }
+        }
     }
 </div>
 
@@ -259,6 +329,51 @@
     private List<ModuleInfo> _shared = new();
     private List<ModuleInfo> _global = new();
     private string _tab = "private";
+    private string _q = "", _sort = "fav", _view = "tiles", _flt = "";
+    /// <summary>Direktlink auf eine Ansicht: <c>?view=list</c> bzw. <c>?view=tiles</c> (überschreibt die gemerkte Ansicht beim Start).</summary>
+    [SupplyParameterFromQuery(Name = "view")] public string? ViewQuery { get; set; }
+    /// <summary>Suchbegriff aus dem Suchfeld im Kopfbereich (<c>/?q=</c>): filtert die Module, die der Benutzer sehen darf.</summary>
+    [SupplyParameterFromQuery(Name = "q")] public string? SearchQuery { get; set; }
+    private bool _favOnly;
+    private HashSet<string> _favs = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly (string Value, string Label)[] SortOpts = { ("fav", "Favoriten zuerst"), ("name", "Name A–Z"), ("name_desc", "Name Z–A"), ("cards", "Meiste Karten"), ("updated", "Zuletzt geändert"), ("created", "Zuletzt angelegt") };
+    private static readonly (string Value, string Label)[] GroupOpts = { ("", "keine"), ("status", "Stand (bestanden/offen)"), ("topic", "Thema"), ("pub", "Veröffentlichung"), ("date", "Änderungsmonat") };
+    private string _group = "";
+
+    private Func<ModuleInfo, (int Order, string Title)>? GroupKey() => _group switch
+    {
+        "status" => m => _certs.ContainsKey(m.Id) ? (0, "Bestanden") : (1, "Noch nicht bestanden"),
+        "topic" => m => _usage.TryGetValue(m.Id, out var u) && u.Count > 0 ? (0, u[0].TopicName) : (1, "Ohne Thema"),
+        "pub" => m => _tab == "global" ? (0, "Global veröffentlicht") : _tab == "shared" ? (0, "Freigegeben") : _latestVersions.ContainsKey(m.Id) ? (0, "Als Modulversion veröffentlicht") : (1, "Entwurf (nicht veröffentlicht)"),
+        "date" => m => ListGrouping.Month(m.UpdatedAt),
+        _ => null,
+    };
+
+    private List<ModuleInfo> Shown()
+    {
+        var q = _q.Trim();
+        IEnumerable<ModuleInfo> r = Current.Where(m =>
+            (q.Length == 0 || m.Name.Contains(q, StringComparison.CurrentCultureIgnoreCase) || (m.Description ?? "").Contains(q, StringComparison.CurrentCultureIgnoreCase))
+            && (!_favOnly || _favs.Contains(m.Id))
+            && (_flt switch { "passed" => _certs.ContainsKey(m.Id), "open" => !_certs.ContainsKey(m.Id), "unused" => !_usage.TryGetValue(m.Id, out var u) || u.Count == 0, _ => true }));
+        var cmp = StringComparer.CurrentCultureIgnoreCase;
+        r = _sort switch
+        {
+            "name" => r.OrderBy(m => m.Name, cmp),
+            "name_desc" => r.OrderByDescending(m => m.Name, cmp),
+            "cards" => r.OrderByDescending(m => m.ActiveCount).ThenBy(m => m.Name, cmp),
+            "updated" => r.OrderByDescending(m => m.UpdatedAt).ThenBy(m => m.Name, cmp),
+            "created" => r.OrderByDescending(m => m.CreatedAt).ThenBy(m => m.Name, cmp),
+            _ => r.OrderByDescending(m => _favs.Contains(m.Id)).ThenBy(m => m.Name, cmp),
+        };
+        return r.ToList();
+    }
+
+    private async Task ToggleFav(string id)
+    {
+        try { if (await Favs.ToggleAsync(_userId, "module", id)) _favs.Add(id); else _favs.Remove(id); }
+        catch (Exception e) when (e is InvalidOperationException or ArgumentException) { _message = e.Message; _messageOk = false; }
+    }
     private List<ModuleInfo> Current => _tab switch { "shared" => _shared, "global" => _global, _ => _modules };
     private bool _loading = true;
     private bool _importing;
@@ -289,13 +404,18 @@
 
     protected override async Task OnInitializedAsync()
     {
+        if (ViewQuery is "tiles" or "list") _view = ViewQuery;
+        if (!string.IsNullOrWhiteSpace(SearchQuery)) _q = SearchQuery.Trim()[..Math.Min(SearchQuery.Trim().Length, 100)];
         var auth = await AuthState.GetAuthenticationStateAsync();
         _userName = auth.User.Identity?.Name ?? "";
         _userId = auth.User.GetUserId() ?? throw new UnauthorizedAccessException();
+        _restricted = await Repo.IsRestrictedLearnerAsync(_userId);   // externe Lernprofile: keine Anlage, kein Import
+        _favs = await Favs.ListAsync(_userId, "module");
         await ReloadAsync();
     }
 
     private string _userId = "";
+    private bool _restricted;
     private Dictionary<string, Certificate> _certs = new(StringComparer.OrdinalIgnoreCase);
 
     private async Task ReloadAsync()

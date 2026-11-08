@@ -15,7 +15,7 @@ public static class InvitationUnitTests
     private const string WfIssuer = "https://wf.example/v2.0", ExtIssuer = "https://ext.example/v2.0";
 
     /// <summary>Datenbank-Hülle: kann in der nächsten atomaren Gruppe eine fehlerhafte Anweisung einschieben oder nach dem Commit einen Verbindungsabbruch melden.</summary>
-    private sealed class FaultBatchDb : IDatabase
+    internal sealed class FaultBatchDb : IDatabase
     {
         private readonly IDatabase _inner;
         public int? FailAt; public bool ThrowAfterCommit;
@@ -39,7 +39,7 @@ public static class InvitationUnitTests
         }
     }
 
-    private sealed class Env
+    internal sealed class Env
     {
         public SqliteDatabase Raw = null!; public FaultBatchDb Db = null!; public AppConfig Cfg = null!; public UserService Users = null!; public CardRepository Repo = null!;
         public TopicService Topics = null!; public InvitationService Invites = null!; public LearnerAdminService Learners = null!; public InviteEvents Events = null!;
@@ -119,7 +119,7 @@ public static class InvitationUnitTests
         public async Task<long> CountAsync(string sql, params (string, object?)[] a) => long.Parse((await Raw.QueryAsync(sql, a))[0]["n"]!);
     }
 
-    private static VerifiedExternalIdentity Id(string email, string? sub = null, bool verified = true, string issuer = ExtIssuer) => new(issuer, sub ?? Guid.NewGuid().ToString(), email, verified);
+    internal static VerifiedExternalIdentity Id(string email, string? sub = null, bool verified = true, string issuer = ExtIssuer) => new(issuer, sub ?? Guid.NewGuid().ToString(), email, verified);
 
     public static async Task RunAsync(Action<bool, string> check, string tmp)
     {
@@ -252,7 +252,7 @@ public static class InvitationUnitTests
         check(await Throws<AccountExistsException>(() => e.Invites.CreateAsync(e.Admin, "Bekannt@Example.org", "B2C_LEARNER")), "Einladung: für eine Adresse mit vorhandenem Konto wird keine Einladung erstellt (Groß-/Kleinschreibung egal)");
 
         var inv = await e.Invites.CreateAsync(e.Admin, "Neu@Example.org", "B2C_LEARNER", new[] { global }, null, new InvitationMeta("Neue Lernende"));
-        check(inv.Link == "https://learny.test/invite/" + inv.Token && inv.Token.Length == 43, "Einladung: Link /invite/<token>, 256-Bit-Token");
+        check(inv.Link == "https://learny.test/invite#" + inv.Token && inv.Token.Length == 43, "Einladung: Link /invite#<token> (Fragment), 256-Bit-Token");
         var stored = await e.Raw.QueryAsync("SELECT token_hash FROM invitations WHERE invitation_id=@i", new (string, object?)[] { ("i", inv.InvitationId) });
         var dump = string.Join("|", (await e.Raw.QueryAsync("SELECT * FROM invitation_events")).SelectMany(r => r.Values)) + string.Join("|", (await e.Raw.QueryAsync("SELECT * FROM audit_log")).SelectMany(r => r.Values))
                    + string.Join("|", (await e.Raw.QueryAsync("SELECT * FROM invitations")).SelectMany(r => r.Values)) + string.Join("|", (await e.Raw.QueryAsync("SELECT * FROM invitation_meta")).SelectMany(r => r.Values));

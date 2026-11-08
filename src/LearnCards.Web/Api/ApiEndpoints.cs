@@ -28,7 +28,11 @@ public static partial class ApiEndpoints
     {
         var cfg = app.Services.GetRequiredService<AppConfig>();
 
-        app.MapGet("/health", () => Results.Json(new { status = "ok", version = "2.0.0", engine = ".NET 10" }))
+        app.MapGet("/health", (HttpContext http) =>
+            {
+                http.Response.Headers.CacheControl = "no-store";   // Erreichbarkeitsprüfung der Verbindungsanzeige: nie zwischenspeichern
+                return Results.Json(new { status = "ok", version = "2.0.0", engine = ".NET 10" });
+            })
             .AllowAnonymous();
 
         var api = app.MapGroup("/api");
@@ -243,6 +247,10 @@ public static partial class ApiEndpoints
             {
                 var content = await images.GetContentAsync(meta, http.RequestAborted);
                 return Results.Bytes(content.Data, meta.MimeType);
+            }
+            catch (OperationCanceledException) when (http.RequestAborted.IsCancellationRequested)
+            {
+                return Results.StatusCode(499);   // Client hat die Seite verlassen (Navigation): kein Fehler, nur Abbruch
             }
             catch (ImageStorageException e)
             {
@@ -539,6 +547,13 @@ public static partial class ApiEndpoints
                 ? Results.Json(new { detail = "MCP-Zugänge können nur über die Browser-Anmeldung verwaltet werden." }, statusCode: 403)
                 : await next(ctx));
 
+        // Externe Lernprofile dürfen keine MCP-Zugänge anlegen (Widerrufen/Ansehen bleibt möglich)
+        g.AddEndpointFilter(async (ctx, next) =>
+            !HttpMethods.IsGet(ctx.HttpContext.Request.Method) && !HttpMethods.IsDelete(ctx.HttpContext.Request.Method)
+            && !await ctx.HttpContext.RequestServices.GetRequiredService<McpLinkService>().IsAllowedAsync(Uid(ctx.HttpContext))
+                ? Results.Json(new { detail = LearnerRestriction.Message }, statusCode: 403)
+                : await next(ctx));
+
         g.MapGet("/", async (HttpContext http, McpLinkService links) =>
             Results.Ok((await links.ListAsync(Uid(http))).Select(LinkDto)));
 
@@ -566,6 +581,7 @@ public static partial class ApiEndpoints
                 return Results.Ok(new { redirect_url = url });
             }
             catch (ArgumentException e) { return Results.Json(new { detail = e.Message }, statusCode: 400); }
+            catch (UnauthorizedAccessException e) { return Results.Json(new { detail = e.Message }, statusCode: 403); }
         });
     }
 

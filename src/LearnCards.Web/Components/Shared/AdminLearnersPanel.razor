@@ -1,0 +1,295 @@
+@inject LearnerAdminService Learners
+@inject UserService Users
+@inject TopicService Topics
+@inject SharingService Sharing
+@inject InviteEvents Events
+
+@* Benutzer (ADR 0049): Workforce-Benutzer und externe Lernende in einer Liste. Zugang (Art, Profil) und Rollen sind getrennte Angaben: Profile sind keine Rollen.
+   Keine Geschäftslogik hier — Rolle gegen die Datenbank und Zuweisbarkeit prüfen die Dienste. *@
+
+@if (_denied)
+{
+    <div class="alert alert-error" role="status">@_message</div>
+    return;
+}
+
+<section class="admin-section" aria-labelledby="users-title">
+    <div class="section-head">
+        <div>
+            <h2 id="users-title">Benutzer</h2>
+            <p class="muted">Workforce-Benutzer behalten ihr bisheriges Zugriffsmodell. Externe Lernende (B2B/B2C) sehen nur ausdrücklich zugewiesene Inhalte, haben keine Rollen und können nichts anlegen, teilen oder per MCP nutzen.</p>
+        </div>
+        <div class="stat-row" role="group" aria-label="Übersicht">
+            <div class="stat"><b>@UserList.Count(u => !_external.ContainsKey(u.Id))</b><span>Workforce</span></div>
+            <div class="stat"><b>@UserList.Count(u => _external.ContainsKey(u.Id))</b><span>Extern</span></div>
+            <div class="stat"><b>@UserList.Count(u => !u.IsActive)</b><span>gesperrt</span></div>
+        </div>
+    </div>
+
+    @if (_message is not null)
+    {
+        <div class="alert @(_error ? "alert-error" : "alert-ok")" role="status">@_message</div>
+    }
+
+    <div class="toolbar">
+        <input class="input" type="search" placeholder="Name oder E-Mail suchen" @bind="_query" @bind:event="oninput" aria-label="Benutzer suchen" />
+        <select class="input compact" @bind="_kind" aria-label="Zugang filtern">
+            <option value="">Alle Zugänge</option>
+            <option value="workforce">Workforce</option>
+            <option value="external">Extern (B2B/B2C)</option>
+        </select>
+        <select class="input compact" @bind="_state" aria-label="Status filtern">
+            <option value="">Jeder Status</option>
+            <option value="active">aktiv</option>
+            <option value="disabled">gesperrt</option>
+        </select>
+    </div>
+
+    <div class="card table-wrap">
+        <table class="table table-users">
+            <caption class="sr-only">Benutzer</caption>
+            <thead><tr><th>Benutzer</th><th>Zugang</th><th>Rollen</th><th>Status</th><th><span class="sr-only">Aktionen</span></th></tr></thead>
+            <tbody>
+                @foreach (var u in Filtered())
+                {
+                    var open = _selected?.UserId == u.Id;
+                    <tr class="@(open ? "row-open" : "")">
+                        <td><div class="user-cell"><strong>@u.DisplayName</strong><small>@u.Email</small></div></td>
+                        <td>
+                            @if (_external.TryGetValue(u.Id, out var profile))
+                            {
+                                <span class="badge badge-external">Extern</span><span class="badge badge-profile">@ProfileLabel(profile)</span>
+                            }
+                            else
+                            {
+                                <span class="badge badge-workforce">Workforce</span><span class="badge badge-muted">Bestandsprofil</span>
+                            }
+                        </td>
+                        <td>
+                            @foreach (var r in u.Roles) { <span class="badge badge-@r">@RoleLabel(r)</span> }
+                        </td>
+                        <td><span class="badge @(u.IsActive ? "badge-ok" : "badge-danger")">@(u.IsActive ? "aktiv" : "gesperrt")</span></td>
+                        <td class="actions"><button class="btn btn-ghost btn-sm" aria-expanded="@(open ? "true" : "false")" @onclick="() => OpenAsync(u.Id)">Verwalten</button></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        @if (!Filtered().Any()) { <div class="empty-state">Keine Benutzer gefunden.</div> }
+    </div>
+    @if (_selected is { } s && UserList.FirstOrDefault(x => x.Id == s.UserId) is { } user)
+    {
+        <DetailDrawer Title="@($"{s.DisplayName} · {s.Email}")" OnClose="CloseDetail">
+            <div class="detail-grid">
+                <div class="subpanel">
+                    <h3>Zugang und Rollen</h3>
+                    @if (s.Profile is null)
+                    {
+                        <p class="muted">Bestandsprofil: der bisherige Zugriff bleibt unverändert. Eine Modulzuweisung ist hier nur eine Markierung.</p>
+                        <div class="role-toggles" role="group" aria-label="Rollen">
+                            @foreach (var role in new[] { Roles.Admin, Roles.Auditor, Roles.TopicAdmin })
+                            {
+                                var r = role;
+                                <button class="chip @(user.Roles.Contains(r) ? "chip-active" : "")" aria-pressed="@(user.Roles.Contains(r) ? "true" : "false")" disabled="@_busy" @onclick="() => ToggleRoleAsync(user, r)">@RoleLabel(r)</button>
+                            }
+                        </div>
+                        <p class="muted">Rollen aus Entra-App-Rollen (z. B. <code>Admin.All</code>) werden bei der nächsten Anmeldung wieder gesetzt.</p>
+                    }
+                    else
+                    {
+                        <p class="muted"><span class="badge badge-profile">@ProfileLabel(s.Profile)</span> Externes Profil: keine Rollen, nur zugewiesene Module und Themen; keine Anlage, Freigabe oder MCP-Nutzung. Das Profil wird nicht geändert; Entzug wirkt sofort.</p>
+                    }
+                    <div class="actions">
+                        <button class="btn btn-ghost btn-sm" @onclick="() => ToggleStatusAsync(s)" disabled="@_busy">@(s.Status == "active" ? "Benutzer sperren" : "Benutzer entsperren")</button>
+                    </div>
+                </div>
+
+                <div class="subpanel">
+                    <h3>Module</h3>
+                    @if (s.ModuleGrants.Count == 0) { <p class="muted">Keine Modulzuweisungen.</p> }
+                    else
+                    {
+                        <table class="table">
+                            <thead><tr><th>Modul</th><th>Seit</th><th></th></tr></thead>
+                            <tbody>
+                                @foreach (var g in s.ModuleGrants)
+                                {
+                                    <tr>
+                                        <td>@g.ModuleName</td>
+                                        <td>@g.GrantedAt.ToLocalTime().ToString("dd.MM.yyyy")</td>
+                                        <td class="actions">@if (g.Active) { <button class="btn btn-ghost btn-sm" @onclick="() => RevokeModuleAsync(s, g.ModuleId)" disabled="@_busy">Entziehen</button> } else { <span class="badge badge-muted">entzogen</span> }</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                    <div class="form-row">
+                        <select class="input" @bind="_moduleId" aria-label="Globales Modul wählen">
+                            <option value="">Globales Modul wählen …</option>
+                            @foreach (var m in _modules) { <option value="@m.Id">@m.Name</option> }
+                        </select>
+                        <button class="btn btn-primary btn-sm" @onclick="() => AssignModuleAsync(s)" disabled="@(string.IsNullOrEmpty(_moduleId) || _busy)">Zuweisen</button>
+                    </div>
+                </div>
+
+                <div class="subpanel">
+                    <h3>Themen und Pflichtschulungen</h3>
+                    @if (s.TopicAssignments.Count == 0) { <p class="muted">Keine Themenzuweisungen.</p> }
+                    else
+                    {
+                        <table class="table">
+                            <thead><tr><th>Thema</th><th>Art</th><th>Fällig</th><th></th></tr></thead>
+                            <tbody>
+                                @foreach (var a in s.TopicAssignments)
+                                {
+                                    <tr>
+                                        <td>@a.TopicName <small class="muted">v@(a.TopicVersion)</small></td>
+                                        <td><span class="badge @(a.Mandatory ? "badge-danger" : "badge-muted")">@(a.Mandatory ? "Pflicht" : "freiwillig")</span></td>
+                                        <td>@(a.DueAt?.ToLocalTime().ToString("dd.MM.yyyy"))</td>
+                                        <td class="actions">@if (a.Status == "active") { <button class="btn btn-ghost btn-sm" @onclick="() => RevokeTopicAsync(s, a.AssignmentId)" disabled="@_busy">Entziehen</button> } else { <span class="badge badge-muted">entzogen</span> }</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                    <div class="form-row">
+                        <select class="input" @bind="_topicId" @bind:after="OnTopicChanged" aria-label="Thema wählen">
+                            <option value="">Thema wählen …</option>
+                            @foreach (var t in _topics) { <option value="@t.TopicId">@t.Name</option> }
+                        </select>
+                        <select class="input compact" @bind="_version" aria-label="Themenversion" disabled="@(_versions.Count == 0)">
+                            @foreach (var v in _versions) { <option value="@v.Version">v@(v.Version)@(v.GlobalStatus == "active" ? " · global" : "")</option> }
+                        </select>
+                    </div>
+                    <div class="form-row">
+                        <input class="input compact" type="date" @bind="_due" aria-label="Fälligkeitsdatum (optional)" title="Fälligkeitsdatum (optional)" />
+                        <label class="chip-check"><input type="checkbox" @bind="_mandatory" /> verpflichtend</label>
+                        <button class="btn btn-primary btn-sm" @onclick="() => AssignTopicAsync(s)" disabled="@(string.IsNullOrEmpty(_topicId) || _busy)">@(_mandatory ? "Pflicht zuweisen" : "Zuweisen")</button>
+                    </div>
+                </div>
+
+                <div class="subpanel">
+                    <h3>Verlauf</h3>
+                    @if (_events.Count == 0) { <p class="muted">Keine Ereignisse.</p> }
+                    else
+                    {
+                        <table class="table">
+                            <tbody>
+                                @foreach (var e in _events.Take(8))
+                                {
+                                    <tr><td>@e.At.ToLocalTime().ToString("dd.MM. HH:mm")</td><td>@AdminEventLabels.Label(e.Type)</td></tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            </div>
+        </DetailDrawer>
+    }
+    @if (Filter().Count() > 100) { <p class="muted">Es werden höchstens 100 Treffer gezeigt — bitte die Suche eingrenzen.</p> }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public string ActorId { get; set; } = "";
+    [Parameter, EditorRequired] public IReadOnlyList<AppUser> UserList { get; set; } = Array.Empty<AppUser>();
+    /// <summary>Wird nach einer Änderung aufgerufen (z. B. um die Benutzerliste der Seite zu laden).</summary>
+    [Parameter] public EventCallback Changed { get; set; }
+    /// <summary>Benutzer, dessen Verwaltung beim Start geöffnet ist (z. B. für Tests/Direktlinks).</summary>
+    [Parameter] public string? InitiallyOpenUserId { get; set; }
+
+    private string _query = "", _kind = "", _state = "";
+    private Dictionary<string, string?> _external = new();   // userId → Profil
+    private LearnerOverviewInfo? _selected;
+    private List<ModuleInfo> _modules = new();
+    private List<AssignableTopic> _topics = new();
+    private List<AssignableVersion> _versions = new();
+    private List<InvitationEventRow> _events = new();
+    private string _moduleId = "", _topicId = "";
+    private int _version;
+    private DateTime? _due;
+    private bool _mandatory, _busy, _error, _denied;
+    private string? _message;
+
+    private IEnumerable<AppUser> Filtered() => Filter().Take(100);
+
+    private IEnumerable<AppUser> Filter()
+    {
+        var q = _query.Trim();
+        return UserList.Where(u => (q.Length == 0 || u.DisplayName.Contains(q, StringComparison.OrdinalIgnoreCase) || u.Email.Contains(q, StringComparison.OrdinalIgnoreCase))
+            && (_kind == "" || (_kind == "external") == _external.ContainsKey(u.Id))
+            && (_state == "" || (_state == "active") == u.IsActive));
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _external = (await Learners.ListExternalLearnersAsync(ActorId, 2000)).ToDictionary(r => r.UserId, r => r.Profile);
+            _modules = (await Sharing.ListGlobalModulesForReviewAsync(ActorId)).Where(m => m.GlobalStatus == "active").OrderBy(m => m.Name).ToList();
+            _topics = await Topics.ListAssignableTopicsAsync(ActorId);
+        }
+        catch (UnauthorizedAccessException ex) { _denied = true; Fail(ex.Message); return; }
+        if (InitiallyOpenUserId is { } open) await OpenAsync(open);
+    }
+
+    private static string ProfileLabel(string? p) => p switch { "B2B_LEARNER" => "B2B", "B2C_LEARNER" => "B2C", _ => p ?? "" };
+    private static string RoleLabel(string r) => r switch { "admin" => "Admin", "auditor" => "Auditor", "themen_admin" => "Themen-Admin", "user" => "Benutzer", _ => r };
+
+    private void CloseDetail() => _selected = null;
+
+    private async Task OpenAsync(string userId)
+    {
+        if (_selected?.UserId == userId) { _selected = null; return; }
+        _moduleId = ""; _topicId = ""; _versions = new(); _mandatory = false; _due = null; _message = null;
+        await LoadAsync(userId);
+    }
+
+    private async Task LoadAsync(string userId)
+    {
+        try
+        {
+            _selected = await Learners.GetOverviewAsync(ActorId, userId);
+            _events = _selected is null ? new() : await Events.ListAsync(null, userId, 50);
+        }
+        catch (UnauthorizedAccessException ex) { Fail(ex.Message); }
+    }
+
+    private void OnTopicChanged()
+    {
+        _versions = _topics.FirstOrDefault(t => t.TopicId == _topicId)?.Versions ?? new();
+        _version = _versions.FirstOrDefault()?.Version ?? 0;
+    }
+
+    private async Task RunAsync(string userId, Func<Task<string>> action)
+    {
+        _busy = true; _message = null;
+        try { Ok(await action()); await LoadAsync(userId); await Changed.InvokeAsync(); }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException or UnauthorizedAccessException) { Fail(ex.Message); }
+        finally { _busy = false; }
+    }
+
+    private Task ToggleRoleAsync(AppUser u, string role) => RunAsync(u.Id, async () =>
+    {
+        var roles = u.Roles.ToHashSet();
+        var had = roles.Remove(role); if (!had) roles.Add(role);
+        await Users.SetRolesAsync(ActorId, u.Id, roles);
+        return had ? "Rolle entzogen." : "Rolle vergeben.";
+    });
+    private Task AssignModuleAsync(LearnerOverviewInfo s) => RunAsync(s.UserId, async () => { await Learners.AssignModuleAsync(ActorId, s.UserId, _moduleId); _moduleId = ""; return "Modul zugewiesen."; });
+    private Task RevokeModuleAsync(LearnerOverviewInfo s, string moduleId) => RunAsync(s.UserId, async () => await Learners.RevokeModuleAsync(ActorId, s.UserId, moduleId) ? "Modulzuweisung entzogen." : "Nichts zu entziehen.");
+    private Task RevokeTopicAsync(LearnerOverviewInfo s, string assignmentId) => RunAsync(s.UserId, async () => await Learners.RevokeTopicAssignmentAsync(ActorId, assignmentId) ? "Themenzuweisung entzogen." : "Nichts zu entziehen.");
+    private Task ToggleStatusAsync(LearnerOverviewInfo s) => RunAsync(s.UserId, async () =>
+    {
+        var activate = s.Status != "active";
+        await Users.SetStatusAsync(ActorId, s.UserId, activate);
+        return activate ? "Benutzer entsperrt." : "Benutzer gesperrt; bestehende Sitzungen enden spätestens bei der nächsten Prüfung.";
+    });
+    private Task AssignTopicAsync(LearnerOverviewInfo s) => RunAsync(s.UserId, async () =>
+    {
+        await Learners.AssignTopicAsync(ActorId, s.UserId, _topicId, _version > 0 ? _version : null, _mandatory, _due?.ToUniversalTime());
+        _topicId = ""; _versions = new(); _mandatory = false; _due = null;
+        return "Thema zugewiesen.";
+    });
+
+    private void Ok(string m) { _message = "✅ " + m; _error = false; }
+    private void Fail(string m) { _message = "❌ " + m; _error = true; }
+}

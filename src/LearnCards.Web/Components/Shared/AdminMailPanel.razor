@@ -1,0 +1,138 @@
+@using LearnCards.Web.Services.Mail
+@inject MailCertificateService Certs
+@inject AppConfig Config
+@inject MailRecipientsService Recipients
+
+@* Mailversand (ADR 0044/0050): Zustand der Konfiguration, erlaubte Empfänger (dauerhaft in der Plattform) und das auf der Plattform erzeugte Client-Zertifikat.
+   Der private Schlüssel entsteht hier, verlässt die Plattform nie und liegt verschlüsselt im Schlüsselverzeichnis; heruntergeladen wird nur das öffentliche Zertifikat. *@
+
+@if (_denied)
+{
+    <div class="alert alert-error" role="status">@_message</div>
+}
+else
+{
+    <section class="admin-section" aria-labelledby="mail-title">
+        <div class="section-head">
+            <div>
+                <h2 id="mail-title">Mailversand</h2>
+                <p class="muted">Einladungen und Anmeldecodes gehen über das Postfach @(Config.Mail.Sender.Length > 0 ? Config.Mail.Sender : "—"). Der Versand ist @(Config.Mail.Enabled ? "aktiviert" : "ausgeschaltet") (<code>MAIL_ENABLED</code>).</p>
+            </div>
+            <span class="badge @(Config.Mail.Enabled ? "badge-ok" : "badge-muted")">@(Config.Mail.Enabled ? "aktiv" : "aus")</span>
+        </div>
+
+        @if (_message is not null)
+        {
+            <div class="alert @(_error ? "alert-error" : "alert-ok")" role="status">@_message</div>
+        }
+
+        <div class="detail-grid">
+            <div class="subpanel">
+                <h3>Konfiguration</h3>
+                <dl class="kv">
+                    <dt>Absenderpostfach</dt><dd>@(Config.Mail.Sender.Length > 0 ? Config.Mail.Sender : "—")</dd>
+                    <dt>Tenant der Mail-App</dt><dd><code>@(Config.Mail.TenantId.Length > 0 ? Config.Mail.TenantId : "—")</code></dd>
+                    <dt>Anwendungs-ID</dt><dd><code>@(Config.Mail.ClientId.Length > 0 ? Config.Mail.ClientId : "—")</code></dd>
+                    <dt>Zertifikatsquelle</dt><dd>@(Config.Mail.UsesPlatformCertificate ? "Plattform (hier erzeugt)" : Config.Mail.CertificatePath.Length > 0 ? "Datei (MAIL_CLIENT_CERT_PATH)" : "Secret (nur Development)")</dd>
+                </dl>
+                @if (!Config.Mail.Enabled)
+                {
+                    <p class="muted">Zum Einschalten <code>MAIL_ENABLED=1</code>, <code>MAIL_TENANT_ID</code>, <code>MAIL_CLIENT_ID</code>, <code>MAIL_SENDER</code> setzen und die Anwendung neu starten.</p>
+                }
+            </div>
+
+            <div class="subpanel">
+                <h3>Erlaubte Empfänger</h3>
+                <p class="muted">Adressen, <code>@@domain</code> oder <code>*</code> (jede Adresse), getrennt durch Komma. Leer = niemand. Gilt für Einladungs- und Schulungsmails, nicht für Anmeldecodes. Der Wert wird dauerhaft gespeichert, wirkt sofort und überschreibt <code>MAIL_ALLOWED_RECIPIENTS</code>.</p>
+                <div class="form-row">
+                    <input class="input" @bind="_recipientsInput" placeholder="z. B. @@brors.net oder *" aria-label="Erlaubte Empfänger" />
+                    <button class="btn btn-primary btn-sm" @onclick="SaveRecipientsAsync" disabled="@_busy">Speichern</button>
+                    @if (_recipients?.Source == "datenbank") { <button class="btn btn-ghost btn-sm" @onclick="ResetRecipientsAsync" disabled="@_busy">Zurücksetzen</button> }
+                </div>
+                <p class="muted">
+                    Wirksam: <strong>@(_recipients is null || _recipients.Recipients.Count == 0 ? "niemand" : _recipients.Recipients.Contains("*") ? "jede Adresse" : string.Join(", ", _recipients.Recipients))</strong>
+                    — Quelle: @(_recipients?.Source == "datenbank" ? "in der Plattform gespeichert" : "Konfiguration MAIL_ALLOWED_RECIPIENTS")@(_recipients?.UpdatedAt is { } u ? ", geändert " + u.ToLocalTime().ToString("dd.MM.yyyy HH:mm") : "").
+                </p>
+                @if (_recipients?.Recipients.Contains("*") == true)
+                {
+                    <div class="alert alert-error" role="status">Jede Adresse ist erlaubt: Einladungen können an beliebige Empfänger versendet werden. Die gültige Einladung bleibt die Zugriffsprüfung.</div>
+                }
+            </div>
+
+            @if (Config.Mail.UsesPlatformCertificate)
+            {
+                <div class="subpanel">
+                    <h3>Client-Zertifikat der Mail-App</h3>
+                    @if (_info is null)
+                    {
+                        <p class="muted">Es gibt noch kein Zertifikat. „Zertifikat erzeugen“ legt auf dieser Plattform einen privaten Schlüssel an (verschlüsselt, nie herunterladbar) und ein selbstsigniertes Zertifikat (RSA 3072, 24 Monate).</p>
+                    }
+                    else if (!_info.Usable)
+                    {
+                        <div class="alert alert-error" role="status">Das gespeicherte Zertifikat ist nicht lesbar (anderer <code>INVITE_TOKEN_KEY</code> oder beschädigt). Es wird nie still ersetzt: bitte ausdrücklich neu erzeugen und die neue .cer in Entra hinterlegen.</div>
+                    }
+                    else
+                    {
+                        <dl class="kv">
+                            <dt>Fingerabdruck</dt><dd><code>@_info.Thumbprint</code></dd>
+                            <dt>Betreff</dt><dd>@_info.Subject</dd>
+                            <dt>Gültig</dt><dd>@_info.NotBefore.ToLocalTime().ToString("dd.MM.yyyy") – @_info.NotAfter.ToLocalTime().ToString("dd.MM.yyyy") (noch @Math.Max(0, (int)(_info.NotAfter - DateTime.UtcNow).TotalDays) Tage)</dd>
+                        </dl>
+                        <p><a class="btn btn-ghost btn-sm" href="/api/admin/mail/certificate.cer" download="learny-mail-client.cer">Öffentliches Zertifikat herunterladen (.cer)</a></p>
+                        <label class="pick"><input type="checkbox" @bind="_confirmReplace" /> Vorhandenes Zertifikat ersetzen (der bisherige private Schlüssel geht verloren; der Versand ruht, bis die neue .cer in Entra hinterlegt ist)</label>
+                    }
+                    <div class="actions"><button class="btn btn-primary btn-sm" @onclick="GenerateAsync" disabled="@(_busy || (_info is not null && !_confirmReplace))">Zertifikat erzeugen</button></div>
+                    <p class="muted">Nächster Schritt in Entra (Tenant <code>@(Config.Mail.TenantId.Length > 0 ? Config.Mail.TenantId : "der Mail-App")</code>): App-Registrierung der Mail-App → Zertifikate &amp; Geheimnisse → <strong>Zertifikat hochladen</strong> → die .cer wählen. Vorhandene Zertifikate bleiben eingetragen (jede Umgebung hat ein eigenes); der Exchange-RBAC-Scope ändert sich nicht. Ausstellung aus der Learny-PKI und Rotation folgen in Phase D.</p>
+                </div>
+            }
+            else
+            {
+                <div class="subpanel"><h3>Client-Zertifikat</h3><p class="muted">Das Zertifikat kommt aus der Konfiguration (<code>MAIL_CLIENT_CERT_PATH</code> bzw. in Development <code>MAIL_CLIENT_SECRET</code>). Für ein auf der Plattform erzeugtes Zertifikat beide Einträge entfernen.</p></div>
+            }
+        </div>
+    </section>
+}
+
+@code {
+    [Parameter, EditorRequired] public string ActorId { get; set; } = "";
+    private MailCertificateInfo? _info;
+    private MailRecipientsInfo? _recipients;
+    private string _recipientsInput = "";
+    private bool _busy, _error, _denied, _confirmReplace;
+    private string? _message;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { _info = await Certs.GetInfoAsync(ActorId); _recipients = await Recipients.GetAsync(ActorId); _recipientsInput = string.Join(", ", _recipients.Recipients); }
+        catch (UnauthorizedAccessException ex) { _denied = true; _error = true; _message = "❌ " + ex.Message; }
+    }
+
+    private async Task SaveRecipientsAsync()
+    {
+        _busy = true; _message = null; _error = false;
+        try { _recipients = await Recipients.SaveAsync(ActorId, _recipientsInput); _recipientsInput = string.Join(", ", _recipients.Recipients); _message = "✅ Empfängerliste gespeichert; sie wirkt sofort."; }
+        catch (Exception ex) when (ex is ArgumentException or UnauthorizedAccessException) { _error = true; _message = "❌ " + ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task ResetRecipientsAsync()
+    {
+        _busy = true; _message = null; _error = false;
+        try { _recipients = await Recipients.ResetAsync(ActorId); _recipientsInput = string.Join(", ", _recipients.Recipients); _message = "✅ Gespeicherter Wert entfernt; es gilt wieder die Konfiguration."; }
+        catch (UnauthorizedAccessException ex) { _error = true; _message = "❌ " + ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task GenerateAsync()
+    {
+        _busy = true; _message = null; _error = false;
+        try
+        {
+            _info = await Certs.GenerateAsync(ActorId, _confirmReplace);
+            _confirmReplace = false;
+            _message = "✅ Zertifikat erzeugt. Jetzt die .cer herunterladen und in Entra bei der Mail-App hochladen.";
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException) { _error = true; _message = "❌ " + ex.Message; }
+        finally { _busy = false; }
+    }
+}

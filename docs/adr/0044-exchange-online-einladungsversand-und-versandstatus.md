@@ -62,3 +62,7 @@ Status unverändert. `ExchangeOnlineMailService` sendet zusätzlich die von Entr
 ## Nachtrag 2026-11-08 (Einladungsmail)
 
 Status unverändert. Die Einladungsmail ist jetzt gebrandetes HTML (`InvitationMailTemplate`: Learny-Kopf, persönliche Begrüßung falls ein Anzeigename vorliegt, Link als Schaltfläche und sichtbar, Gültigkeit, Hinweis auf einmalige Nutzung, Sicherheitshinweis; keine Bilder, kein Tracking). Absender, Betreff, Mail-App, Zertifikat und Postfachscope bleiben unverändert; keine zusätzlichen Rechte. Das Portal löst den Versand nur nach ausdrücklicher Administratorbestätigung aus.
+
+## Nachtrag 2026-11-08 (Phase C)
+
+Der `ExchangeOnlineMailService` ist in Learny übernommen (`Services/Mail`), der Versandzustand mit `ExecuteBatchAsync` neu gefasst: der Anspruch setzt den Zustand **vor** dem Graph-Aufruf auf `unknown`, Ergebnis, Ereignis und Audit werden in einer Transaktion geschrieben, `unknown` wird nur mit zusätzlicher ausdrücklicher Bestätigung wiederholt. Konfiguration nur aus Umgebung (`MAIL_*`); der Zertifikatsgenerator des PoC-Portals entfällt (Zertifikat aus der Learny-PKI und Rotation: Phase D). Einzelheiten: [ADR 0050](0050-administration-einladungsversand-und-otp-in-learny.md).

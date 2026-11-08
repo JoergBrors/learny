@@ -220,6 +220,8 @@ public static class Schema
             CREATE TABLE IF NOT EXISTS user_preferences (
                 user_sub    TEXT PRIMARY KEY,
                 theme       TEXT NOT NULL DEFAULT '',
+                avatar      TEXT NOT NULL DEFAULT '',
+                avatar_hidden INTEGER NOT NULL DEFAULT 0,
                 updated_at  TEXT NOT NULL
             )
             """;
@@ -489,7 +491,7 @@ public static class Schema
             )
             """;
 
-        // Versandstatus getrennt vom Einladungsstatus (ADR 0044): pending | submitted | failed | unknown. Nie ein Token. Der Versand selbst folgt in Phase C.
+        // Versandstatus getrennt vom Einladungsstatus (ADR 0044): pending | submitted | failed | unknown. Nie ein Token. Versandzustand und Anspruch: InvitationDeliveryService (ADR 0050).
         yield return $"""
             CREATE TABLE IF NOT EXISTS invitation_deliveries (
                 invitation_id   {id} PRIMARY KEY REFERENCES invitations(invitation_id) ON DELETE CASCADE,
@@ -543,6 +545,27 @@ public static class Schema
             )
             """;
         yield return "CREATE INDEX IF NOT EXISTS ix_module_grants_publication ON module_grants(publication_id)";
+
+        // Favoriten je Benutzer (Module, Themen, Nachweise): nur Kennungen, keine Inhalte; sichtbar ist ein Favorit nur, wenn der Benutzer den Eintrag ohnehin sehen darf.
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS user_favorites (
+                user_id    {id} NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                kind       TEXT NOT NULL,
+                item_id    {id} NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (user_id, kind, item_id)
+            )
+            """;
+
+        // Von Administratoren in der Plattform gepflegte erlaubte Mailempfänger (ADR 0050). Eine Zeile (id=1) überschreibt MAIL_ALLOWED_RECIPIENTS; keine Zeile = Wert aus der Umgebung. Keine Geheimnisse.
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS mail_settings (
+                id                 INTEGER PRIMARY KEY,
+                allowed_recipients TEXT NOT NULL,
+                updated_at         TEXT NOT NULL,
+                updated_by         {id} NULL
+            )
+            """;
     }
 
     private static IEnumerable<string> TopicStatements(string id, string real)

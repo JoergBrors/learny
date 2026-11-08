@@ -44,6 +44,9 @@ public static class AchievementTests
 
         // Nachweisübersicht
         var page = await (await lea.GetAsync("/achievements")).Content.ReadAsStringAsync();
+        // Die Details (CLR, Badges, Kompetenzen, LinkedIn) öffnen als Overlay; Direktlink ?open=<ID> rendert sie
+        page += await (await lea.GetAsync("/achievements?open=" + topicCertId)).Content.ReadAsStringAsync();
+        page += await (await lea.GetAsync("/achievements?open=" + moduleCertId)).Content.ReadAsStringAsync();
         check(page.Contains("Meine Abschlüsse und Nachweise") && page.Contains("TC Thema") && page.Contains("Themenabschluss") && page.Contains("Master-Badge") && page.Contains($"/api/certificates/{topicCertId}/certificate.pdf") && page.Contains($"/api/certificates/{topicCertId}/clr")
               && page.Contains($"/api/certificates/{moduleCertId}/certificate.pdf") && page.Contains("Auf LinkedIn hinzufügen") && page.Contains("Zertifikat prüfen") && page.Contains("Learny Verified") && page.Contains("Grundlagen anwenden"),
             "L2 „Meine Abschlüsse und Nachweise“ zeigt Modul- und Themenabschlüsse mit Versionen, Nummern, Kompetenzen und den Aktionen PDF, CLR, Open Badge, Prüfen und LinkedIn");
