@@ -157,4 +157,5 @@
 }
 
 .components-reconnect-status { margin: .6rem 0 0; font-size: .85rem; color: var(--ink-soft, #5b6470); min-height: 1.2em; }
-#components-reload-button { margin-top: .6rem; }
+.components-reconnect-title { font-weight: 600; }
+#components-reconnect-modal button[hidden] { display: none; }

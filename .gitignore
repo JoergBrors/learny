@@ -35,3 +35,5 @@ tests/TESTFILES/*
 
 # Mail-Zertifikat (privater Schlüssel, verschlüsselt) — nie committen
 src/LearnCards.Web/Data/mail/
+src/LearnCards.Web/Data/keys/
+tests/LearnCards.IntegrationTests/.tmpbin/

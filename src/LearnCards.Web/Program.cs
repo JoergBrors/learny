@@ -155,7 +155,12 @@ builder.Services.ConfigureHttpJsonOptions(o =>
 });
 
 builder.Services.AddRazorComponents()
-    .AddInteractiveServerComponents();
+    .AddInteractiveServerComponents(o =>
+    {
+        // Mobile PWAs liegen oft viele Minuten im Hintergrund: getrennte Sitzungen bleiben länger wiederaufnehmbar (Standard 3 min). Danach lädt die
+        // Verbindungsanzeige kontrolliert neu (docs/architecture.md, „Wiederverbindung und PWA“). Lernfortschritt und Quizsitzungen liegen in der Datenbank.
+        o.DisconnectedCircuitRetentionPeriod = TimeSpan.FromMinutes(10);
+    });
 
 var app = builder.Build();
 
