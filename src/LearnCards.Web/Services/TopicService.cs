@@ -110,9 +110,11 @@ public partial class TopicService
         return (await GetTopicRawAsync(id))!;
     }
 
-    public async Task<TopicInfo> UpdateAsync(string ownerId, string topicId, string name, string? description)
+    public async Task<TopicInfo> UpdateAsync(string ownerId, string topicId, string name, string? description, int? expectedRevision = null)
     {
-        var topic = await RequireOwnTopicAsync(ownerId, topicId);
+        var topic = await RequireEditableTopicAsync(ownerId, topicId);
+        var actor = ownerId; ownerId = topic.OwnerUserId;   // Co-Autor (ADR 0052): Daten gehören dem Themeneigentümer, protokolliert wird der Handelnde
+        CheckDraftRevision(topic, expectedRevision);
         name = CleanName(name);
         description = CleanDescription(description);
         if (!string.Equals(name, topic.Name, StringComparison.Ordinal)
@@ -120,7 +122,7 @@ public partial class TopicService
             throw new ArgumentException("Es existiert bereits ein Thema mit diesem Namen.");
         await _db.ExecuteAsync("UPDATE topics SET name = @n, description = @d, draft_revision = draft_revision + 1, updated_at = @now WHERE id = @id",
             new (string, object?)[] { ("n", name), ("d", description), ("now", DateTime.UtcNow), ("id", topic.Id) });
-        await _users.WriteAuditAsync(ownerId, "topic.update", topic.Id, name);
+        await _users.WriteAuditAsync(actor, "topic.update", topic.Id, name);
         return (await GetTopicRawAsync(topic.Id))!;
     }
 
@@ -213,14 +215,15 @@ public partial class TopicService
     /// </summary>
     public async Task<int> AdoptModuleVersionAsync(string ownerId, string topicId, string moduleId, int? version = null)
     {
-        var topic = await RequireOwnTopicAsync(ownerId, topicId);
+        var topic = await RequireEditableTopicAsync(ownerId, topicId);
+        var actor = ownerId; ownerId = topic.OwnerUserId;   // Co-Autor (ADR 0052): Daten gehören dem Themeneigentümer, protokolliert wird der Handelnde
         var row = (await ListDraftModuleRowsAsync(topic.Id)).FirstOrDefault(r => string.Equals(r.ModuleId, moduleId, StringComparison.OrdinalIgnoreCase)) ?? throw new KeyNotFoundException("Das Modul ist dem Thema nicht zugeordnet.");
         if (await CanUseModuleInTopicAsync(ownerId, row.ModuleId) is { } error) throw new ArgumentException(error);
         var chosen = await PinModuleAsync(ownerId, topic.Id, row.ModuleId, version);
         if (chosen != row.Version)
         {
             await TouchDraftAsync(topic.Id);
-            await _users.WriteAuditAsync(ownerId, "topic.module.adopt", topic.Id, $"module={row.ModuleId} version={chosen}");
+            await _users.WriteAuditAsync(actor, "topic.module.adopt", topic.Id, $"module={row.ModuleId} version={chosen}");
         }
         return chosen;
     }
@@ -258,9 +261,11 @@ public partial class TopicService
         await _users.WriteAuditAsync(ownerId, "topic.module.add", topic.Id, $"module={moduleId}");
     }
 
-    public async Task<bool> RemoveModuleAsync(string ownerId, string topicId, string moduleId)
+    public async Task<bool> RemoveModuleAsync(string ownerId, string topicId, string moduleId, int? expectedRevision = null)
     {
-        var topic = await RequireOwnTopicAsync(ownerId, topicId);
+        var topic = await RequireEditableTopicAsync(ownerId, topicId);
+        var actor = ownerId; ownerId = topic.OwnerUserId;   // Co-Autor (ADR 0052): Daten gehören dem Themeneigentümer, protokolliert wird der Handelnde
+        CheckDraftRevision(topic, expectedRevision);
         if (!UserService.IsGuid(moduleId)) return false;
         var n = await _db.ExecuteAsync("DELETE FROM topic_modules WHERE topic_id = @t AND module_id = @m", new (string, object?)[] { ("t", topic.Id), ("m", moduleId) });
         if (n == 0) return false;
@@ -271,14 +276,16 @@ public partial class TopicService
         var cfg = await LoadExamConfigAsync(topic.Id);
         if (cfg.ModuleExams.Remove(moduleId) | cfg.FinalExam.ManualCounts.Remove(moduleId)) await SaveExamConfigRawAsync(topic.Id, cfg);
         await TouchDraftAsync(topic.Id);
-        await _users.WriteAuditAsync(ownerId, "topic.module.remove", topic.Id, $"module={moduleId}");
+        await _users.WriteAuditAsync(actor, "topic.module.remove", topic.Id, $"module={moduleId}");
         return true;
     }
 
     /// <summary>Setzt die Reihenfolge. Die Liste muss genau die Module des Themas enthalten (keine fremden IDs, keine Duplikate).</summary>
-    public async Task ReorderModulesAsync(string ownerId, string topicId, IReadOnlyList<string> orderedModuleIds)
+    public async Task ReorderModulesAsync(string ownerId, string topicId, IReadOnlyList<string> orderedModuleIds, int? expectedRevision = null)
     {
-        var topic = await RequireOwnTopicAsync(ownerId, topicId);
+        var topic = await RequireEditableTopicAsync(ownerId, topicId);
+        var actor = ownerId; ownerId = topic.OwnerUserId;   // Co-Autor (ADR 0052): Daten gehören dem Themeneigentümer, protokolliert wird der Handelnde
+        CheckDraftRevision(topic, expectedRevision);
         var current = (await ListDraftModuleRowsAsync(topic.Id)).Select(r => r.ModuleId).ToList();
         var requested = orderedModuleIds.Select(i => (i ?? "").Trim()).ToList();
         if (requested.Count != current.Count || requested.Distinct(StringComparer.OrdinalIgnoreCase).Count() != requested.Count
@@ -290,7 +297,7 @@ public partial class TopicService
             await _db.ExecuteAsync("UPDATE topic_modules SET sort_order = @s WHERE topic_id = @t AND module_id = @m", new (string, object?)[] { ("s", i), ("t", topic.Id), ("m", id) });
         }
         await TouchDraftAsync(topic.Id);
-        await _users.WriteAuditAsync(ownerId, "topic.module.reorder", topic.Id, string.Join(",", requested));
+        await _users.WriteAuditAsync(actor, "topic.module.reorder", topic.Id, string.Join(",", requested));
     }
 
     /// <summary>Eigene private Module, die dem Thema noch nicht zugeordnet sind (Suche nach Name; für die Auswahl im Editor).</summary>
@@ -331,15 +338,18 @@ public partial class TopicService
     /// <summary>Prüfungskonfiguration des Entwurfs für den Eigentümer; für jedes Modul des Themas ist ein Eintrag vorhanden (Standard: Prüfung inaktiv).</summary>
     public async Task<TopicExamConfig> GetExamConfigAsync(string ownerId, string topicId)
     {
-        var topic = await RequireOwnTopicAsync(ownerId, topicId, allowArchived: true);
+        var topic = await RequireEditableTopicAsync(ownerId, topicId, allowArchived: true);
+        var actor = ownerId; ownerId = topic.OwnerUserId;   // Co-Autor (ADR 0052): Daten gehören dem Themeneigentümer, protokolliert wird der Handelnde
         var cfg = await LoadExamConfigAsync(topic.Id);
         foreach (var m in await ListDraftModuleRowsAsync(topic.Id)) if (!cfg.ModuleExams.ContainsKey(m.ModuleId)) cfg.ModuleExams[m.ModuleId] = new TopicModuleExamConfig();
         return cfg;
     }
 
-    public async Task<TopicExamConfig> SaveExamConfigAsync(string ownerId, string topicId, TopicExamConfig cfg)
+    public async Task<TopicExamConfig> SaveExamConfigAsync(string ownerId, string topicId, TopicExamConfig cfg, int? expectedRevision = null)
     {
-        var topic = await RequireOwnTopicAsync(ownerId, topicId);
+        var topic = await RequireEditableTopicAsync(ownerId, topicId);
+        var actor = ownerId; ownerId = topic.OwnerUserId;   // Co-Autor (ADR 0052): Daten gehören dem Themeneigentümer, protokolliert wird der Handelnde
+        CheckDraftRevision(topic, expectedRevision);
         var moduleIds = (await ListDraftModuleRowsAsync(topic.Id)).Select(r => r.ModuleId).ToList();
         var normalized = new TopicExamConfig { FinalExam = cfg.FinalExam ?? new TopicFinalExamConfig() };
         foreach (var (key, value) in cfg.ModuleExams ?? new())
@@ -356,7 +366,7 @@ public partial class TopicService
         if (errors.Count > 0) throw new ArgumentException(string.Join(" ", errors));
         await SaveExamConfigRawAsync(topic.Id, normalized);
         await TouchDraftAsync(topic.Id);
-        await _users.WriteAuditAsync(ownerId, "topic.exam.config", topic.Id, "");
+        await _users.WriteAuditAsync(actor, "topic.exam.config", topic.Id, "");
         return await GetExamConfigAsync(ownerId, topicId);
     }
 
@@ -410,24 +420,27 @@ public partial class TopicService
 
     public async Task<List<TopicQuestion>> ListQuestionsAsync(string ownerId, string topicId)
     {
-        var topic = await RequireOwnTopicAsync(ownerId, topicId, allowArchived: true);
+        var topic = await RequireEditableTopicAsync(ownerId, topicId, allowArchived: true);
+        var actor = ownerId; ownerId = topic.OwnerUserId;   // Co-Autor (ADR 0052): Daten gehören dem Themeneigentümer, protokolliert wird der Handelnde
         return await ListQuestionsRawAsync(topic.Id, activeOnly: false);
     }
 
     public async Task<TopicQuestion> CreateQuestionAsync(string ownerId, string topicId, QuizQuestionInput input)
     {
-        var topic = await RequireOwnTopicAsync(ownerId, topicId);
+        var topic = await RequireEditableTopicAsync(ownerId, topicId);
+        var actor = ownerId; ownerId = topic.OwnerUserId;   // Co-Autor (ADR 0052): Daten gehören dem Themeneigentümer, protokolliert wird der Handelnde
         if ((await _db.QueryAsync("SELECT COUNT(*) AS n FROM topic_questions WHERE topic_id = @t", new[] { ("t", (object?)topic.Id) })).Select(r => DbValue.ToInt(r["n"])).FirstOrDefault() >= 500)
             throw new ArgumentException("Ein Thema kann höchstens 500 eigene Fragen enthalten.");
         var q = await CreateQuestionRawAsync(topic.Id, input, active: true);
         await TouchDraftAsync(topic.Id);
-        await _users.WriteAuditAsync(ownerId, "topic.question.create", topic.Id, q.Id);
+        await _users.WriteAuditAsync(actor, "topic.question.create", topic.Id, q.Id);
         return q;
     }
 
     public async Task<TopicQuestion> UpdateQuestionAsync(string ownerId, string topicId, string questionId, QuizQuestionInput input, bool? active = null)
     {
-        var topic = await RequireOwnTopicAsync(ownerId, topicId);
+        var topic = await RequireEditableTopicAsync(ownerId, topicId);
+        var actor = ownerId; ownerId = topic.OwnerUserId;   // Co-Autor (ADR 0052): Daten gehören dem Themeneigentümer, protokolliert wird der Handelnde
         var existing = (await ListQuestionsRawAsync(topic.Id, false)).FirstOrDefault(q => string.Equals(q.Id, questionId, StringComparison.OrdinalIgnoreCase))
                        ?? throw new KeyNotFoundException("Frage nicht gefunden.");
         var error = QuizPoolService.Validate(input);
@@ -440,17 +453,18 @@ public partial class TopicService
                 ("a", (active ?? existing.Active) ? 1 : 0), ("n", DateTime.UtcNow), ("id", existing.Id), ("t", topic.Id),
             });
         await TouchDraftAsync(topic.Id);
-        await _users.WriteAuditAsync(ownerId, "topic.question.update", topic.Id, existing.Id);
+        await _users.WriteAuditAsync(actor, "topic.question.update", topic.Id, existing.Id);
         return (await ListQuestionsRawAsync(topic.Id, false)).First(q => q.Id == existing.Id);
     }
 
     /// <summary>Entfernt eine eigene Frage aus dem Entwurf (bereits veröffentlichte Versionen behalten ihre eingefrorene Kopie).</summary>
     public async Task<bool> DeleteQuestionAsync(string ownerId, string topicId, string questionId)
     {
-        var topic = await RequireOwnTopicAsync(ownerId, topicId);
+        var topic = await RequireEditableTopicAsync(ownerId, topicId);
+        var actor = ownerId; ownerId = topic.OwnerUserId;   // Co-Autor (ADR 0052): Daten gehören dem Themeneigentümer, protokolliert wird der Handelnde
         if (!UserService.IsGuid(questionId)) return false;
         var n = await _db.ExecuteAsync("DELETE FROM topic_questions WHERE id = @id AND topic_id = @t", new (string, object?)[] { ("id", questionId), ("t", topic.Id) });
-        if (n > 0) { await TouchDraftAsync(topic.Id); await _users.WriteAuditAsync(ownerId, "topic.question.delete", topic.Id, questionId); }
+        if (n > 0) { await TouchDraftAsync(topic.Id); await _users.WriteAuditAsync(actor, "topic.question.delete", topic.Id, questionId); }
         return n > 0;
     }
 
@@ -509,6 +523,8 @@ public partial class TopicService
     public sealed class TopicOverview
     {
         public List<TopicSummary> Own { get; set; } = new();
+        /// <summary>Themen anderer Eigentümer, an denen der Benutzer als Co-Author mitarbeitet (ADR 0052).</summary>
+        public List<TopicSummary> CoAuthored { get; set; } = new();
         public List<TopicSummary> Shared { get; set; } = new();
         public List<TopicSummary> Assigned { get; set; } = new();
         public List<TopicSummary> Global { get; set; } = new();
@@ -539,6 +555,17 @@ public partial class TopicService
             summary.SharedWithCount = DbValue.ToInt((await _db.QueryAsync("SELECT COUNT(*) AS n FROM topic_shares WHERE topic_id = @t AND revoked_at IS NULL", new[] { ("t", (object?)topic.Id) }))[0]["n"]);
             summary.AssignedCount = DbValue.ToInt((await _db.QueryAsync("SELECT COUNT(*) AS n FROM topic_assignments WHERE topic_id = @t AND status = 'active'", new[] { ("t", (object?)topic.Id) }))[0]["n"]);
             overview.Own.Add(summary);
+        }
+
+        // Gemeinsam bearbeitete Themen (ADR 0052): nur aktive, nicht eingeschränkte Benutzer; die Statistik zählt Moduldaten des Eigentümers im Themenkontext
+        foreach (var r in restricted ? new List<Dictionary<string, string?>>() : await _db.QueryAsync(TopicSelect + " JOIN topic_coauthors c ON c.topic_id = t.id AND c.user_id = @u WHERE t.owner_user_id <> @u" + archivedFilter + " ORDER BY t.name", new[] { ("u", (object?)userId) }))
+        {
+            var topic = MapTopic(r);
+            overview.CoAuthored.Add(new TopicSummary
+            {
+                Topic = topic, Section = TopicSections.CoAuthored, Relation = TopicRelations.CoAuthor, Version = topic.LatestVersion, GlobalStatus = await LatestGlobalStatusAsync(topic.Id),
+                Stats = await DraftStatsAsync(topic.Id, topic.OwnerUserId),
+            });
         }
 
         var assignedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

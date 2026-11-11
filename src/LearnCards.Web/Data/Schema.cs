@@ -839,6 +839,18 @@ public static class Schema
             """;
         yield return "CREATE INDEX IF NOT EXISTS ix_topic_shares_target ON topic_shares(target_user_id, revoked_at)";
 
+        // Co-Autoren (ADR 0052): objektbezogene Bearbeitungsberechtigung je Thema, keine globale Rolle; Entzug löscht nur diese Zeile, nie Lerninhalte
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS topic_coauthors (
+                topic_id   {id} NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+                user_id    {id} NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                granted_by {id} NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (topic_id, user_id)
+            )
+            """;
+        yield return "CREATE INDEX IF NOT EXISTS ix_topic_coauthors_user ON topic_coauthors(user_id)";
+
         yield return $"""
             CREATE TABLE IF NOT EXISTS topic_assignments (
                 id          {id} PRIMARY KEY,

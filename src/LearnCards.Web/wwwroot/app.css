@@ -1205,3 +1205,7 @@ body { background-image: var(--bg-grad); }
 .user-panel svg { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .user-panel a, .user-panel button { justify-content: flex-start; }
 .user-panel[hidden], .nav-secondary-wrap[hidden] { display: none !important; }
+
+/* Co-Author-Modus (ADR 0052): Kennzeichnung und Liste der Zusammenarbeit (Farbvariablen, Dark Mode über die Tokens) */
+.badge-coauthor, .badge-owner { background: color-mix(in srgb, var(--primary) 14%, var(--surface)); color: var(--primary); border: 1px solid color-mix(in srgb, var(--primary) 50%, var(--border)); border-radius: 999px; padding: .15rem .6rem; font-size: .8rem; font-weight: 700; display: inline-block; }
+.coauthor-list li { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; justify-content: space-between; }

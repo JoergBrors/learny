@@ -32,6 +32,8 @@ public static class TopicGlobalStatuses
 public static class TopicSections
 {
     public const string Own = "own";
+    /// <summary>Themen anderer Eigentümer, an denen der Benutzer als Co-Author mitarbeitet (ADR 0052).</summary>
+    public const string CoAuthored = "coauthored";
     public const string Shared = "shared";
     public const string Assigned = "assigned";
     public const string Global = "global";
@@ -287,6 +289,10 @@ public class TopicDetail
     public int Version { get; set; }
     public bool IsDraft => Version == 0;
     public bool IsOwner { get; set; }
+    /// <summary>Der Betrachter ist Co-Author dieses Themas (ADR 0052): darf den Entwurf bearbeiten, aber nicht veröffentlichen, freigeben oder archivieren.</summary>
+    public bool IsCoAuthor { get; set; }
+    /// <summary>Eigentümer oder Co-Author: darf den Entwurf bearbeiten (Entscheidung nur über <c>TopicService.GetTopicRoleAsync</c>).</summary>
+    public bool CanEdit => IsOwner || IsCoAuthor;
     public string Section { get; set; } = TopicSections.Own;
     public List<TopicModuleView> Modules { get; set; } = new();
     public TopicFinalExamConfig FinalExam { get; set; } = new();
@@ -474,6 +480,7 @@ public static class TopicLearnStatuses
 public static class TopicRelations
 {
     public const string Own = "own";
+    public const string CoAuthor = "coauthor";
     public const string Shared = "shared";
     public const string AssignedVoluntary = "assigned_voluntary";
     public const string AssignedMandatory = "assigned_mandatory";
@@ -498,4 +505,34 @@ public class TopicExamAttempt
     public bool? Passed { get; set; }
     public DateTime StartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
+}
+
+/// <summary>Rolle eines Benutzers an einem Thema (ADR 0052). Keine globale Rolle: gilt nur für dieses Thema.</summary>
+public enum TopicRole
+{
+    None = 0,
+    /// <summary>Darf den Entwurf bearbeiten und weitere Co-Autoren verwalten; veröffentlicht, gibt frei, archiviert und dupliziert nicht.</summary>
+    CoAuthor = 1,
+    /// <summary>Genau ein Eigentümer je Thema: volle Kontrolle.</summary>
+    Owner = 2,
+}
+
+public class TopicCoAuthorInfo
+{
+    public string UserId { get; set; } = "";
+    public string DisplayName { get; set; } = "";
+    public string Email { get; set; } = "";
+    public string GrantedByName { get; set; } = "";
+    public DateTime CreatedAt { get; set; }
+}
+
+/// <summary>Zusammenarbeit an einem Thema: Eigentümer, Co-Autoren und die Rolle des Betrachters.</summary>
+public class TopicCollaboration
+{
+    public string TopicId { get; set; } = "";
+    public string OwnerUserId { get; set; } = "";
+    public string OwnerName { get; set; } = "";
+    public string OwnerEmail { get; set; } = "";
+    public TopicRole ViewerRole { get; set; }
+    public List<TopicCoAuthorInfo> CoAuthors { get; set; } = new();
 }

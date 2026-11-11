@@ -17,7 +17,7 @@
         <div class="empty-state">
             <div class="empty-icon" aria-hidden="true">🧭</div>
             <h1>Thema nicht gefunden</h1>
-            <p>Das Thema existiert nicht oder gehört einem anderen Benutzer.</p>
+            <p>Das Thema existiert nicht oder du hast keine Bearbeitungsrechte dafür.</p>
             <a class="btn btn-primary" href="/topics">Zu den Themen</a>
         </div>
     }
@@ -43,6 +43,15 @@
         {
             <div class="alert @(_error ? "alert-error" : "alert-ok")" role="status">@_message</div>
         }
+        @if (_conflict)
+        {
+            <div class="alert alert-error" role="alert">Das Thema wurde inzwischen von jemand anderem geändert. Deine Änderung wurde <strong>nicht</strong> gespeichert.
+                <button class="btn btn-ghost btn-sm" @onclick="ReloadAsync">Aktuellen Stand laden</button></div>
+        }
+        @if (_d.IsCoAuthor)
+        {
+            <div class="alert alert-info" role="status">Du arbeitest als <span class="badge">Co-Author</span> an diesem Thema von @_d.Topic.OwnerName mit. Du kannst den Entwurf bearbeiten; Veröffentlichen, Freigeben und Archivieren bleiben beim Eigentümer.</div>
+        }
         @if (_d.Topic.Status == "archived")
         {
             <div class="alert alert-info" role="status">Dieses Thema ist archiviert und kann nicht bearbeitet werden. <button class="btn btn-ghost btn-sm" @onclick="() => ArchiveAsync(false)">Archivierung aufheben</button></div>
@@ -57,8 +66,11 @@
             <textarea id="tdesc" class="input" rows="3" maxlength="2000" @bind="_description"></textarea>
             <div class="page-head-actions topic-actions">
                 <button class="btn btn-primary" @onclick="SaveGeneralAsync" disabled="@(_d.Topic.Status == "archived")">Speichern</button>
-                <button class="btn btn-ghost" @onclick="DuplicateAsync">Duplizieren</button>
-                @if (_d.Topic.Status != "archived") { <button class="btn btn-ghost" @onclick="() => ArchiveAsync(true)">Archivieren</button> }
+                @if (_d.IsOwner)
+                {
+                    <button class="btn btn-ghost" @onclick="DuplicateAsync">Duplizieren</button>
+                    @if (_d.Topic.Status != "archived") { <button class="btn btn-ghost" @onclick="() => ArchiveAsync(true)">Archivieren</button> }
+                }
             </div>
         </div>
 
@@ -97,6 +109,8 @@
                     </li>
                 }
             </ol>
+            @if (_d.IsOwner)
+            {
             <label class="form-label" for="msearch">Modul hinzufügen (nur eigene, private Module)</label>
             <p class="muted">Globale Module lassen sich zuerst auf der Seite <a href="/">Module</a> mit „In eigene Module klonen“ in eine eigene Kopie überführen.</p>
             <input id="msearch" class="input" placeholder="Modulname suchen…" @bind="_moduleQuery" @bind:event="oninput" @onkeyup="SearchModulesAsync" />
@@ -109,8 +123,11 @@
                     }
                 </ul>
             }
+            }
         </div>
 
+        @if (_d.IsOwner)
+        {
         @* ─── JSON (ADR 0028) ─── *@
         <div class="card panel">
             <h2 class="panel-title">Thema als JSON</h2>
@@ -134,6 +151,8 @@
         </div>
 
         @* ─── Prüfungen ─── *@
+        }
+
         @if (_cfg is not null)
         {
             <div class="card panel">
@@ -236,6 +255,76 @@
             </div>
         }
 
+        @* ─── Zusammenarbeit (ADR 0052) ─── *@
+        @if (_collab is not null)
+        {
+            <div class="card panel" id="zusammenarbeit">
+                <h2 class="panel-title">Zusammenarbeit</h2>
+                <p class="muted">Co-Autoren bearbeiten diesen Themenentwurf gemeinsam mit dir (Module, Lernkarten, Quiz und Prüfungen dieses Themas). Sie veröffentlichen nicht, geben nicht frei und weisen nichts zu; eine Lernfreigabe ist etwas anderes.</p>
+                <ul class="topic-search-results coauthor-list" aria-label="Eigentümer und Co-Autoren">
+                    <li><span><strong>@_collab.OwnerName</strong> <span class="muted">@_collab.OwnerEmail</span></span> <span class="badge badge-owner">Eigentümer</span></li>
+                    @foreach (var c in _collab.CoAuthors)
+                    {
+                        <li>
+                            <span><strong>@c.DisplayName</strong> <span class="muted">@c.Email</span>@(c.UserId == _userId ? " (du)" : "")</span>
+                            <span class="badge">Co-Author</span>
+                            @if (c.UserId == _userId)
+                            {
+                                <button class="btn btn-ghost btn-sm" @onclick="() => _confirmLeave = true" disabled="@_busy">Zusammenarbeit beenden</button>
+                            }
+                            else
+                            {
+                                <button class="btn btn-ghost btn-sm" @onclick="() => _confirmRemove = c" disabled="@_busy" aria-label="@($"{c.DisplayName} als Co-Author entfernen")">Entfernen</button>
+                            }
+                        </li>
+                    }
+                </ul>
+                @if (_collab.CoAuthors.Count == 0) { <p class="muted">Noch keine Co-Autoren.</p> }
+
+                @if (_confirmRemove is not null)
+                {
+                    <div class="alert alert-error" role="alertdialog" aria-label="Co-Author entfernen">
+                        <strong>@_confirmRemove.DisplayName</strong> verliert sofort den Bearbeitungszugriff auf dieses Thema. Inhalte werden nicht gelöscht.
+                        <button class="btn btn-primary btn-sm" @onclick="RemoveCoAuthorAsync" disabled="@_busy">Ja, entfernen</button>
+                        <button class="btn btn-ghost btn-sm" @onclick="() => _confirmRemove = null">Abbrechen</button>
+                    </div>
+                }
+                @if (_confirmLeave)
+                {
+                    <div class="alert alert-error" role="alertdialog" aria-label="Zusammenarbeit beenden">
+                        Du verlierst sofort den Bearbeitungszugriff auf dieses Thema. Deine Änderungen bleiben erhalten.
+                        <button class="btn btn-primary btn-sm" @onclick="LeaveAsync" disabled="@_busy">Ja, beenden</button>
+                        <button class="btn btn-ghost btn-sm" @onclick="() => _confirmLeave = false">Abbrechen</button>
+                    </div>
+                }
+
+                <button class="btn btn-ghost" @onclick="() => { _addOpen = !_addOpen; _candidates = new(); _pendingCoAuthor = null; }" aria-expanded="@(_addOpen ? "true" : "false")">Co-Author hinzufügen</button>
+                @if (_addOpen)
+                {
+                    <input class="input" placeholder="Benutzer suchen (mindestens 3 Zeichen: Name oder E-Mail)" @bind="_coQuery" @bind:event="oninput" @onkeyup="SearchCandidatesAsync" aria-label="Benutzer für die Zusammenarbeit suchen" />
+                    @if (_candidates.Count > 0 && _pendingCoAuthor is null)
+                    {
+                        <ul class="topic-search-results">
+                            @foreach (var u in _candidates)
+                            {
+                                <li><span>@u.DisplayName <span class="muted">@u.Email</span></span><button class="btn btn-ghost btn-sm" @onclick="() => _pendingCoAuthor = u">Auswählen</button></li>
+                            }
+                        </ul>
+                    }
+                    @if (_pendingCoAuthor is not null)
+                    {
+                        <div class="alert alert-info" role="alertdialog" aria-label="Co-Author bestätigen">
+                            <strong>@_pendingCoAuthor.DisplayName</strong> (@_pendingCoAuthor.Email) darf diesen Themenentwurf einschließlich seiner Module, Lernkarten, Quizfragen und Prüfungen bearbeiten und weitere Co-Autoren verwalten.
+                            <button class="btn btn-primary btn-sm" @onclick="AddCoAuthorAsync" disabled="@_busy">Als Co-Author hinzufügen</button>
+                            <button class="btn btn-ghost btn-sm" @onclick="() => _pendingCoAuthor = null">Abbrechen</button>
+                        </div>
+                    }
+                }
+            </div>
+        }
+
+        @if (_d.IsOwner)
+        {
         @* ─── Freigaben ─── *@
         <div class="card panel">
             <h2 class="panel-title">Freigaben (Lernen und Prüfungen, keine Bearbeitung)</h2>
@@ -262,6 +351,8 @@
             <p class="muted">Pflicht- und Lernzuweisungen an Benutzer vergeben ausschließlich Administratoren und Themen-Admins unter <a href="/topic-admin">Themenzuweisungen</a>.</p>
         </div>
 
+        }
+
         @* ─── Versionen ─── *@
         <div class="card panel">
             <h2 class="panel-title">Versionen und Veröffentlichung</h2>
@@ -277,9 +368,13 @@
                 <p class="muted">Der Entwurf entspricht Version @_versions[0].VersionNumber.</p>
             }
             @foreach (var w in _d.Warnings) { <div class="alert alert-error" role="status">⚠️ @w</div> }
+            @if (!_d.IsOwner) { <p class="muted">Die Veröffentlichung einer Version bleibt beim Eigentümer des Themas.</p> }
             <div class="page-head-actions topic-actions">
+              @if (_d.IsOwner)
+              {
                 <button class="btn btn-primary" @onclick="() => PublishAsync(false)" disabled="@(_busy || _d.Topic.Status == "archived")">Neue Version veröffentlichen</button>
                 <button class="btn btn-ghost" @onclick="() => PublishAsync(true)" disabled="@(_busy || _d.Topic.Status == "archived")" title="Veröffentlicht die Version und reicht sie zur globalen Freigabe ein">Veröffentlichen und global einreichen</button>
+              }
             </div>
             @if (_versions.Count > 0)
             {
@@ -297,7 +392,7 @@
                                     <td>@GlobalLabel(v)</td>
                                     <td class="actions">
                                         <a class="btn btn-ghost btn-sm" href="/topics/@Id?version=@v.VersionNumber">Ansehen</a>
-                                        @if (v.GlobalStatus is "none" or "rejected")
+                                        @if (_d.IsOwner && v.GlobalStatus is "none" or "rejected")
                                         {
                                             <button class="btn btn-ghost btn-sm" @onclick="() => SubmitGlobalAsync(v.VersionNumber)">Global einreichen</button>
                                         }
@@ -327,6 +422,12 @@
     private bool _loading = true, _busy, _error;
     private string? _message;
     private string _userId = "";
+    private TopicCollaboration? _collab;
+    private bool _conflict, _addOpen, _confirmLeave;
+    private string _coQuery = "";
+    private List<UserSearchResult> _candidates = new();
+    private UserSearchResult? _pendingCoAuthor;
+    private TopicCoAuthorInfo? _confirmRemove;
 
     protected override async Task OnInitializedAsync()
     {
@@ -340,13 +441,14 @@
         try
         {
             _d = await Topics.GetDetailAsync(_userId, Id);
-            if (!_d.IsOwner) { _d = null; return; }
+            if (!_d.CanEdit) { _d = null; return; }   // Eigentümer oder Co-Author (ADR 0052)
             _name = _d.Topic.Name; _description = _d.Topic.Description;
+            _collab = await Topics.GetCollaborationAsync(_userId, Id);
             _cfg = await Topics.GetExamConfigAsync(_userId, Id);
             _questions = await Topics.ListQuestionsAsync(_userId, Id);
-            _shares = await Topics.ListSharesAsync(_userId, Id);
+            _shares = _d.IsOwner ? await Topics.ListSharesAsync(_userId, Id) : new();
             _versions = await Topics.ListVersionsAsync(_userId, Id);
-            await SearchModulesAsync();
+            if (_d.IsOwner) await SearchModulesAsync();
         }
         catch (KeyNotFoundException) { _d = null; }
         finally { _loading = false; }
@@ -361,8 +463,14 @@
     private async Task RunAsync(Func<Task> action, string ok, bool reload = true)
     {
         _busy = true; _message = null;
+        _conflict = false;
         try { await action(); _message = ok; _error = false; if (reload) await LoadAsync(); }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException or UnauthorizedAccessException) { _message = ex.Message; _error = true; }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException or UnauthorizedAccessException)
+        {
+            _message = ex.Message; _error = true;
+            _conflict = ex is InvalidOperationException && ex.Message.StartsWith("Konflikt", StringComparison.Ordinal);   // Entwurf wurde zwischenzeitlich geändert: nichts überschrieben
+            if (ex is KeyNotFoundException) await LoadAsync();   // z. B. Berechtigung entzogen: Seite zeigt dann „nicht gefunden“
+        }
         _busy = false;
     }
 
@@ -391,7 +499,8 @@
 
     private Task ReplaceWithCloneAsync(string moduleId) => RunAsync(() => Topics.ReplaceWithOwnCloneAsync(_userId, Id, moduleId), "Das globale Modul wurde durch eine eigene Kopie ersetzt.");
 
-    private Task SaveGeneralAsync() => RunAsync(() => Topics.UpdateAsync(_userId, Id, _name, _description), "Gespeichert.");
+    private async Task ReloadAsync() { _conflict = false; _message = null; await LoadAsync(); }
+    private Task SaveGeneralAsync() => RunAsync(() => Topics.UpdateAsync(_userId, Id, _name, _description, _d!.Topic.DraftRevision), "Gespeichert.");
     private Task ArchiveAsync(bool archived) => RunAsync(() => Topics.SetArchivedAsync(_userId, Id, archived), archived ? "Thema archiviert." : "Archivierung aufgehoben.");
     private async Task DuplicateAsync()
     {
@@ -404,17 +513,17 @@
         try { _addable = await Topics.SearchAddableModulesAsync(_userId, Id, _moduleQuery); } catch (Exception ex) when (ex is InvalidOperationException) { _addable = new(); }
     }
     private Task AddModuleAsync(string moduleId) => RunAsync(() => Topics.AddModuleAsync(_userId, Id, moduleId), "Modul hinzugefügt.");
-    private Task RemoveModuleAsync(string moduleId) => RunAsync(async () => { await Topics.RemoveModuleAsync(_userId, Id, moduleId); }, "Modul entfernt.");
+    private Task RemoveModuleAsync(string moduleId) => RunAsync(async () => { await Topics.RemoveModuleAsync(_userId, Id, moduleId, _d!.Topic.DraftRevision); }, "Modul entfernt.");
     private Task MoveAsync(int index, int delta)
     {
         var ids = _d!.Modules.Select(m => m.ModuleId).ToList();
         var target = index + delta;
         if (target < 0 || target >= ids.Count) return Task.CompletedTask;
         (ids[index], ids[target]) = (ids[target], ids[index]);
-        return RunAsync(() => Topics.ReorderModulesAsync(_userId, Id, ids), "Reihenfolge gespeichert.");
+        return RunAsync(() => Topics.ReorderModulesAsync(_userId, Id, ids, _d!.Topic.DraftRevision), "Reihenfolge gespeichert.");
     }
 
-    private Task SaveExamsAsync() => RunAsync(async () => { _cfg = await Topics.SaveExamConfigAsync(_userId, Id, _cfg!); }, "Prüfungskonfiguration gespeichert.");
+    private Task SaveExamsAsync() => RunAsync(async () => { _cfg = await Topics.SaveExamConfigAsync(_userId, Id, _cfg!, _d!.Topic.DraftRevision); }, "Prüfungskonfiguration gespeichert.");
 
     private Task AddQuestionAsync()
     {
@@ -427,6 +536,25 @@
         }, "Frage hinzugefügt.");
     }
     private Task DeleteQuestionAsync(string questionId) => RunAsync(async () => { await Topics.DeleteQuestionAsync(_userId, Id, questionId); }, "Frage entfernt.");
+
+    private async Task SearchCandidatesAsync() => _candidates = _coQuery.Trim().Length >= 3 ? await Topics.SearchCoAuthorCandidatesAsync(_userId, Id, _coQuery) : new();
+    private Task AddCoAuthorAsync()
+    {
+        var u = _pendingCoAuthor; if (u is null) return Task.CompletedTask;
+        return RunAsync(async () => { await Topics.AddCoAuthorAsync(_userId, Id, u.Id); _pendingCoAuthor = null; _addOpen = false; _coQuery = ""; _candidates = new(); }, $"{u.DisplayName} ist jetzt Co-Author.");
+    }
+    private Task RemoveCoAuthorAsync()
+    {
+        var c = _confirmRemove; if (c is null) return Task.CompletedTask;
+        return RunAsync(async () => { await Topics.RemoveCoAuthorAsync(_userId, Id, c.UserId); _confirmRemove = null; }, $"{c.DisplayName} wurde als Co-Author entfernt.");
+    }
+    private async Task LeaveAsync()
+    {
+        _busy = true;
+        try { await Topics.LeaveCoAuthorAsync(_userId, Id); Nav.NavigateTo("/topics"); }
+        catch (Exception ex) when (ex is KeyNotFoundException or InvalidOperationException) { _message = ex.Message; _error = true; _confirmLeave = false; }
+        _busy = false;
+    }
 
     private async Task SearchUsersAsync() => _userResults = _userQuery.Trim().Length >= 3 ? await Topics.SearchUsersAsync(_userId, _userQuery) : new();
     private Task ShareAsync(string userId) => RunAsync(() => Topics.GrantShareAsync(_userId, Id, userId), "Thema freigegeben.");

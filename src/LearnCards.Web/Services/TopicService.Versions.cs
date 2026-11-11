@@ -181,7 +181,8 @@ public partial class TopicService
     /// <summary>Versionshistorie (nur Eigentümer): alle veröffentlichten Versionen, neueste zuerst; fehlgeschlagene Veröffentlichungen werden nicht angezeigt.</summary>
     public async Task<List<TopicVersionInfo>> ListVersionsAsync(string ownerId, string topicId)
     {
-        var topic = await RequireOwnTopicAsync(ownerId, topicId, allowArchived: true);
+        var topic = await RequireEditableTopicAsync(ownerId, topicId, allowArchived: true);
+        var actor = ownerId; ownerId = topic.OwnerUserId;   // Co-Autor (ADR 0052): Daten gehören dem Themeneigentümer, protokolliert wird der Handelnde
         return (await _db.QueryAsync(VersionSelect + " WHERE v.topic_id = @t AND v.status = 'published' ORDER BY v.version_number DESC", new[] { ("t", (object?)topic.Id) })).Select(MapVersion).ToList();
     }
 
@@ -194,25 +195,31 @@ public partial class TopicService
     public async Task<TopicDetail> GetDetailAsync(string userId, string topicId, int? version = null)
     {
         var topic = await GetTopicRawAsync(topicId) ?? throw new KeyNotFoundException("Thema nicht gefunden.");
-        var isOwner = string.Equals(topic.OwnerUserId, userId, StringComparison.OrdinalIgnoreCase);
+        var role = await RoleForAsync(userId, topic);   // ADR 0052: Eigentümer oder Co-Author dieses Themas
+        var isOwner = role == TopicRole.Owner;
+        var isEditor = role != TopicRole.None;
+        var dataOwner = topic.OwnerUserId;   // Moduldaten des Entwurfs gehören dem Eigentümer; Co-Autoren sehen sie nur im Themenkontext
 
-        if (isOwner && version is null)
+        if (isEditor && version is null)
         {
             var detail = new TopicDetail
             {
-                Topic = topic, Version = 0, IsOwner = true, Section = TopicSections.Own, Modules = await DraftModuleViewsAsync(topic.Id, userId),
-                FinalExam = (await LoadExamConfigAsync(topic.Id)).FinalExam, Stats = await DraftStatsAsync(topic.Id, userId), GlobalStatus = await LatestGlobalStatusAsync(topic.Id),
+                Topic = topic, Version = 0, IsOwner = isOwner, IsCoAuthor = role == TopicRole.CoAuthor, Section = isOwner ? TopicSections.Own : TopicSections.CoAuthored,
+                Modules = await DraftModuleViewsAsync(topic.Id, dataOwner),
+                FinalExam = (await LoadExamConfigAsync(topic.Id)).FinalExam, Stats = await DraftStatsAsync(topic.Id, dataOwner), GlobalStatus = await LatestGlobalStatusAsync(topic.Id),
             };
-            await FillDraftChangesAndWarningsAsync(detail, userId);
+            await FillDraftChangesAndWarningsAsync(detail, dataOwner);
             return detail;
         }
 
-        var section = await SectionForAsync(userId, topic);
-        var ver = isOwner
+        var section = isEditor ? (isOwner ? TopicSections.Own : TopicSections.CoAuthored) : await SectionForAsync(userId, topic);
+        var ver = isEditor
             ? (version is int vn && vn > 0 ? await LoadVersionAsync(topic.Id, vn) : await LoadLatestPublishedAsync(topic.Id))
             : await ResolveVersionForLearnerAsync(userId, topic, section, version);
         if (ver is null) throw new KeyNotFoundException("Thema nicht gefunden.");
-        return DetailFromVersion(topic, ver, isOwner, section);
+        var d = DetailFromVersion(topic, ver, isOwner, section);
+        d.IsCoAuthor = role == TopicRole.CoAuthor;
+        return d;
     }
 
     /// <summary>
@@ -223,7 +230,7 @@ public partial class TopicService
     public async Task<TopicDetail> GetViewAsync(string userId, string topicId, int? version = null)
     {
         var topic = await GetTopicRawAsync(topicId) ?? throw new KeyNotFoundException("Thema nicht gefunden.");
-        if (!string.Equals(topic.OwnerUserId, userId, StringComparison.OrdinalIgnoreCase)) return await GetDetailAsync(userId, topicId, version is > 0 ? version : null);
+        if (await RoleForAsync(userId, topic) == TopicRole.None) return await GetDetailAsync(userId, topicId, version is > 0 ? version : null);
 
         var latest = await LoadLatestPublishedAsync(topic.Id);
         if (version is > 0 || (version is null && latest is not null))

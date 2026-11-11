@@ -3,6 +3,7 @@ using LearnCards.Web.Domain;
 using LearnCards.Web.Infrastructure;
 using LearnCards.Web.Services;
 using LearnCards.Web.Services.Mail;
+using LearnCards.Web.Services.ImageStorage;
 
 /// <summary>
 /// Vorbereitete PostgreSQL-Prüfung für ADR 0004/0049: Schema-Idempotenz, <c>ExecuteBatchAsync</c> (Commit, Rollback, erwartete Zeilenzahl), <c>ON CONFLICT</c>, Anspruch auf Einladung und
@@ -35,7 +36,7 @@ public static class PostgresReadinessTests
         var id = Guid.NewGuid().ToString(); var now = DateTime.UtcNow;
         await db.ExecuteBatchAsync(new[]
         {
-            new DbStatement("INSERT INTO users (id, display_name, email, status, legacy_migrated, created_at, last_login_at) VALUES (@id,'PG','pg@example.org','active',1,@n,@n)", new (string, object?)[] { ("id", id), ("n", now) }, 1),
+            new DbStatement("INSERT INTO users (id, display_name, email, status, legacy_migrated, created_at, last_login_at) VALUES (@id,'PG',@em,'active',1,@n,@n)", new (string, object?)[] { ("id", id), ("em", "pg@example.org"), ("n", now) }, 1),
             new DbStatement("INSERT INTO user_roles (user_id, role, granted_by, granted_at) VALUES (@u,'admin',NULL,@n)", new (string, object?)[] { ("u", id), ("n", now) }, 1),
         });
         check((await db.QueryAsync("SELECT COUNT(*) AS n FROM user_roles WHERE user_id=@u", new (string, object?)[] { ("u", id) }))[0]["n"] == "1", "PostgreSQL: ExecuteBatchAsync schreibt eine Gruppe atomar");
@@ -55,7 +56,7 @@ public static class PostgresReadinessTests
         var invites = InvitationService.Create(db, users, settings, events);
         var created = await invites.CreateAsync(id, "pg-kunde@example.org", LearnerProfiles.B2cLearner);
         var results = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => invites.RedeemAsync(created.Token, new VerifiedExternalIdentity("https://pg.example/v2.0", "pg-sub", "pg-kunde@example.org", true))));
-        check(results.Count(r => r.Success) == 1 && (await db.QueryAsync("SELECT COUNT(*) AS n FROM users WHERE email='pg-kunde@example.org'"))[0]["n"] == "1", "PostgreSQL: acht parallele Einlösungen → genau ein Benutzer");
+        check(results.Count(r => r.Success) == 1 && (await db.QueryAsync("SELECT COUNT(*) AS n FROM users WHERE email=@em", new (string, object?)[] { ("em", "pg-kunde@example.org") }))[0]["n"] == "1", "PostgreSQL: acht parallele Einlösungen → genau ein Benutzer");
 
         var learners = new LearnerAdminService(db, users, null!, events);
         var module = Guid.NewGuid().ToString();
@@ -72,6 +73,50 @@ public static class PostgresReadinessTests
         var c2 = await invites.CreateAsync(id, "pg-zwei@example.org", LearnerProfiles.B2cLearner);
         var sends = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => delivery.SendAsync(id, c2.InvitationId, c2.Token, true)));
         check(sends.Count(s => s.Decision == SendDecision.Sent) == 1 && mails == 1, "PostgreSQL: acht parallele Versandanfragen → genau eine Mail (Slot in der Datenbank)");
+
+        await CoAuthorsAsync(db, users, check);
+    }
+
+    /// <summary>Co-Author-Modus (ADR 0052) auf echter PostgreSQL-Instanz: Schema, Schlüssel, CASCADE, Idempotenz und die wesentlichen Service-Operationen.</summary>
+    private static async Task CoAuthorsAsync(PostgresDatabase db, UserService users, Action<bool, string> check)
+    {
+        var cfg = new AppConfig();
+        var images = new CardImageService(db, new ImageStorageRegistry(cfg, db), new NullImageCache(), cfg, Microsoft.Extensions.Logging.Abstractions.NullLogger<CardImageService>.Instance);
+        var pool = new QuizPoolService(db);
+        var repo = new CardRepository(db, images, pool);
+        var modules = new ModuleTransferService(repo, images, pool, users, new CompetencyService(db, repo, users));
+        var topics = new TopicService(db, repo, users, pool, null!, modules, new ModuleVersionService(db, repo, users));
+        async Task<string> User(string name)
+        {
+            var id = Guid.NewGuid().ToString(); var n = DateTime.UtcNow;
+            await db.ExecuteAsync("INSERT INTO users (id, display_name, email, status, legacy_migrated, created_at, last_login_at) VALUES (@id,@n,@e,'active',1,@t,@t)", new (string, object?)[] { ("id", id), ("n", name), ("e", name.ToLowerInvariant() + "-" + id[..6] + "@example.org"), ("t", n) });
+            await db.ExecuteAsync("INSERT INTO user_roles (user_id, role, granted_by, granted_at) VALUES (@u,'user',NULL,@t)", new (string, object?)[] { ("u", id), ("t", n) });
+            return id;
+        }
+        var owner = await User("PgOwner"); var co = await User("PgCo"); var other = await User("PgOther");
+        var existing = await topics.CreateAsync(owner, "Bestehendes PG-Thema", "");   // „bestehendes“ Thema ohne Co-Autoren
+        await db.InitAsync();   // erneute Initialisierung (Migration einer vorhandenen Datenbank) lässt Themen unverändert
+        check((await db.QueryAsync("SELECT COUNT(*) AS n FROM topics WHERE id=@t AND owner_user_id=@o", new (string, object?)[] { ("t", existing.Id), ("o", owner) }))[0]["n"] == "1"
+            && (await db.QueryAsync("SELECT COUNT(*) AS n FROM topic_coauthors WHERE topic_id=@t", new (string, object?)[] { ("t", existing.Id) }))[0]["n"] == "0", "PostgreSQL: topic_coauthors idempotent angelegt, bestehendes Thema unverändert");
+        var cols = await db.QueryAsync("SELECT constraint_type FROM information_schema.table_constraints WHERE table_name='topic_coauthors'");
+        check(cols.Any(r => r["constraint_type"] == "PRIMARY KEY") && cols.Count(r => r["constraint_type"] == "FOREIGN KEY") >= 2, "PostgreSQL: topic_coauthors hat Primärschlüssel und Fremdschlüssel");
+        var del = await db.QueryAsync("SELECT DISTINCT rc.delete_rule FROM information_schema.referential_constraints rc JOIN information_schema.table_constraints tc ON tc.constraint_name=rc.constraint_name WHERE tc.table_name='topic_coauthors'");
+        check(del.Count == 1 && del[0]["delete_rule"] == "CASCADE", "PostgreSQL: Fremdschlüssel mit ON DELETE CASCADE");
+
+        var added = await topics.AddCoAuthorAsync(owner, existing.Id, co);
+        await topics.AddCoAuthorAsync(owner, existing.Id, co);
+        check(added.UserId == co && (await topics.GetCollaborationAsync(owner, existing.Id)).CoAuthors.Count == 1 && await topics.GetTopicRoleAsync(co, existing.Id) == TopicRole.CoAuthor && await topics.GetTopicRoleAsync(other, existing.Id) == TopicRole.None, "PostgreSQL: Co-Author hinzufügen (idempotent) und Rollenentscheidung");
+        var ov = await topics.ListOverviewAsync(co);
+        check(ov.CoAuthored.Any(t => t.Topic.Id == existing.Id), "PostgreSQL: Themenübersicht „Gemeinsam bearbeitet“");
+        await topics.UpdateAsync(co, existing.Id, "Von Co geändert", "x", existing.DraftRevision);
+        var revoked = false;
+        try { await topics.UpdateAsync(co, existing.Id, "Veraltet", "x", existing.DraftRevision); } catch (InvalidOperationException ex) when (ex.Message.StartsWith("Konflikt")) { revoked = true; }
+        check(revoked, "PostgreSQL: veraltete Entwurfsrevision → Konflikt");
+        await topics.RemoveCoAuthorAsync(owner, existing.Id, co);
+        check(await topics.GetTopicRoleAsync(co, existing.Id) == TopicRole.None, "PostgreSQL: Entzug wirkt sofort");
+        await topics.AddCoAuthorAsync(owner, existing.Id, co);
+        await db.ExecuteAsync("DELETE FROM topics WHERE id=@t", new (string, object?)[] { ("t", existing.Id) });   // nur Wegwerf-Datenbank
+        check((await db.QueryAsync("SELECT COUNT(*) AS n FROM topic_coauthors WHERE topic_id=@t", new (string, object?)[] { ("t", existing.Id) }))[0]["n"] == "0", "PostgreSQL: Löschen des Themas entfernt Co-Author-Einträge (CASCADE)");
     }
 
     private sealed class CountingMailer : IInvitationMailer

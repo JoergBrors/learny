@@ -20,6 +20,23 @@ if (!File.Exists(webDll) || !File.Exists(mcpDll))
     return 2;
 }
 
+// Schutz vor veralteten Build-Artefakten (z. B. gesperrtes bin/Debug): Ist eine Quelldatei neuer als die DLL, bricht der Lauf ab.
+// Bewusst übergehen nur mit TEST_ALLOW_STALE_DLL=1. Die verwendeten DLLs werden immer protokolliert.
+foreach (var (label, dll, srcDir) in new[] { ("Web", webDll, "LearnCards.Web"), ("MCP", mcpDll, "LearnCards.McpServer") })
+{
+    var dllTime = File.GetLastWriteTimeUtc(dll);
+    var srcRoot = Path.Combine(repoRoot, "src", srcDir);
+    var newest = Directory.EnumerateFiles(srcRoot, "*.*", SearchOption.AllDirectories)
+        .Where(f => (f.EndsWith(".cs") || f.EndsWith(".razor")) && !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}") && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
+        .Select(f => (f, t: File.GetLastWriteTimeUtc(f))).OrderByDescending(x => x.t).FirstOrDefault();
+    Console.WriteLine($"Test-DLL {label}: {dll} (gebaut {dllTime:u})");
+    if (newest.f is not null && newest.t > dllTime && Environment.GetEnvironmentVariable("TEST_ALLOW_STALE_DLL") != "1")
+    {
+        Console.Error.WriteLine($"Veraltete {label}-DLL: {Path.GetFileName(newest.f)} ist neuer ({newest.t:u}). Neu bauen oder TEST_WEB_DLL/TEST_MCP_DLL auf frischen Build setzen.");
+        return 2;
+    }
+}
+
 var tmp = Path.Combine(Path.GetTempPath(), "lc-it-" + Guid.NewGuid().ToString("N")[..8]);
 Directory.CreateDirectory(tmp);
 var port = FreePort();
@@ -230,6 +247,7 @@ try
     AvatarUnitTests.Run(Check);   // Avatar-Baukasten und Generator (ADR 0051)
     await ExternalIdUnitTests.RunAsync(Check, tmp);   // state-Einmaligkeit in der Datenbank, Anmeldung ohne Benutzeranlage (ADR 0048)
     await InvitationUnitTests.RunAsync(Check, tmp);   // Einladungen, Lernprofile, atomare Einlösung, Zugriffsregeln (ADR 0049)
+    await CoAuthorTests.RunAsync(Check, tmp);   // Co-Author-Modus: Berechtigungsmodell, Modulkontext, Konflikte, Entzug (ADR 0052)
     await MailDeliveryTests.RunAsync(Check, tmp);   // Mailtransport, Versandzustand, OTP-Extension, Verwaltung der Lernrechte (ADR 0044/0045/0049, Phase C)
     await PostgresReadinessTests.RunAsync(Check, tmp);   // nur mit LEARNY_TEST_POSTGRES; sonst ausdrücklich „nicht ausgeführt“
     DockerConfigTests.Run(Check, repoRoot);   // Docker-Hub-Veröffentlichung (ADR 0024)
@@ -2090,6 +2108,7 @@ try
     await TopicTransferTests.RunAsync(LoginAsync, () => NewClient(false), admin, mcpUrl, Check);   // Themenmodule, JSON, Klonen, MCP (ADR 0028)
     await TransferHardeningTests.RunAsync(LoginAsync, () => NewClient(false), mcpUrl, McpKey, PngLike, Check);   // Referenzen parallel, große Dateien, MCP-Matrix (ADR 0028)
     await TopicViewTests.RunAsync(LoginAsync, Check);   // Themenseite: Entwurf nur bei Abweichung
+    await CoAuthorTests.RunHttpAsync(LoginAsync, () => NewClient(false), Check);   // Co-Author-Modus über REST (ADR 0052)
     await CompetencyTests.RunAsync(LoginAsync, () => NewClient(false), Check);   // Kompetenzen, Prüfungssnapshot, Badge (ADR 0031)
     await TopicCredentialTests.RunAsync(LoginAsync, () => NewClient(false), admin, Check);   // Themenabschluss: Master-Badge + CLR (ADR 0032)
     await CredentialRegisterTests.RunAsync(LoginAsync, () => NewClient(false), admin, Check);   // Register, Testausstellung, Widerruf, JWT-Profil (ADR 0037/0038)

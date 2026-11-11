@@ -42,8 +42,15 @@
             {
                 <div class="module-versions" role="group" aria-label="Modulversionen">
                     <span class="badge @(_mv.HasUnpublishedChanges ? "badge-draft" : "")">@(_mv.LatestVersion == 0 ? "Noch nicht veröffentlicht" : $"Version {_mv.LatestVersion}")@(_mv.HasUnpublishedChanges && _mv.LatestVersion > 0 ? " + Entwurf mit Änderungen" : "")</span>
-                    <button class="btn btn-ghost btn-sm" @onclick="PublishModuleVersionAsync" disabled="@(!_mv.HasUnpublishedChanges || _versionBusy)"
-                            title="Friert den aktuellen Stand (Karten, Bilder, Quiz, Konfiguration, Fragenpool) als unveränderliche Modulversion ein.">⬆ Version veröffentlichen</button>
+                    @if (_coContext)
+                    {
+                        <span class="muted" title="Modulversionen veröffentlicht der Eigentümer des Moduls.">Mitarbeit als Co-Author — Modulversionen veröffentlicht der Eigentümer.</span>
+                    }
+                    else
+                    {
+                        <button class="btn btn-ghost btn-sm" @onclick="PublishModuleVersionAsync" disabled="@(!_mv.HasUnpublishedChanges || _versionBusy)"
+                                title="Friert den aktuellen Stand (Karten, Bilder, Quiz, Konfiguration, Fragenpool) als unveränderliche Modulversion ein.">⬆ Version veröffentlichen</button>
+                    }
                     @if (_mv.Versions.Count > 0)
                     {
                         <span class="muted">Frühere Stände (nur lesbar):</span>
@@ -435,8 +442,19 @@
     private void AddObjective() => _model.Objectives.Add(new LearningObjective { Id = "lz" + (_model.Objectives.Count + 1), Text = "" });
     private void AddCompetency() => _model.Competencies.Add(new Competency { Id = "k" + (_model.Competencies.Count + 1), Name = "", PassPercent = 60, MinQuestions = 1 });
 
+    /// <summary>Vor jedem Schreibzugriff: im Co-Author-Kontext die Berechtigung erneut gegen die Datenbank prüfen — ein Entzug wirkt sofort, auch in einer bereits geöffneten Sitzung (ADR 0052).</summary>
+    private async Task<bool> StillAllowedAsync()
+    {
+        if (!_coContext) return true;
+        var owner = await TopicSvc.ResolveModuleEditOwnerAsync(_actorSub, ModuleId);
+        if (!string.Equals(owner, _actorSub, StringComparison.OrdinalIgnoreCase)) { _userSub = owner; return true; }
+        _error = "Dein Co-Author-Zugriff auf dieses Modul wurde entzogen. Die Änderung wurde nicht gespeichert."; _status = null; _compMessage = _error; _compError = true; _poolError = _error;
+        return false;
+    }
+
     private async Task SaveCompetenciesAsync()
     {
+        if (!await StillAllowedAsync()) return;
         _compMessage = null; _compError = false;
         try
         {
@@ -466,7 +484,7 @@
         _versionBusy = true; _versionMessage = null;
         try
         {
-            var v = await ModuleVersions.PublishAsync(_userSub, ModuleId);
+            var v = await ModuleVersions.PublishAsync(_actorSub, ModuleId);   // nie im Co-Author-Kontext (ADR 0052)
             _versionMessage = $"Version {v.VersionNumber} veröffentlicht.";
         }
         catch (Exception e) when (e is InvalidOperationException or KeyNotFoundException) { _versionMessage = e.Message; }
@@ -474,7 +492,10 @@
         _versionBusy = false;
     }
     private static string UsageHref(ModuleTopicUsage u) => u.Versions.Count > 0 ? "/topics/" + u.TopicId + "?version=" + u.Versions.Max() : "/topics/" + u.TopicId + "/edit";
+    /// <summary>Handelnder Benutzer (angemeldet). <c>_userSub</c> ist der Benutzer, unter dessen Eigentum die Dienste arbeiten: der Handelnde selbst, im themenbezogenen Co-Author-Kontext (ADR 0052) der Moduleigentümer.</summary>
+    private string _actorSub = "";
     private string _userSub = "";
+    private bool _coContext;
     private bool _loading = true, _configOpen, _showArchived, _preview, _saving, _conflict, _quizPreviewOpen;
     private List<Card> _cards = new();
     private Draft? _draft;
@@ -490,7 +511,9 @@
     protected override async Task OnInitializedAsync()
     {
         var auth = await AuthState.GetAuthenticationStateAsync();
-        _userSub = auth.User.GetUserId() ?? throw new UnauthorizedAccessException();
+        _actorSub = auth.User.GetUserId() ?? throw new UnauthorizedAccessException();
+        _userSub = await TopicSvc.ResolveModuleEditOwnerAsync(_actorSub, ModuleId);   // nur Module, die im Entwurf eines Themas liegen, an dem man Co-Author ist
+        _coContext = !string.Equals(_userSub, _actorSub, StringComparison.OrdinalIgnoreCase);
         _module = await Repo.GetModuleAsync(ModuleId, _userSub);
         _usage = _module is null ? new() : (await TopicSvc.ListModuleUsageAsync(_userSub)).GetValueOrDefault(_module.Id) ?? new();   // nur eigene Module (Besitzprüfung in der SQL-Abfrage)
         await LoadVersionsAsync();
@@ -614,6 +637,7 @@
 
     private async Task MoveAsync(string cardId, int delta)
     {
+        if (!await StillAllowedAsync()) return;
         // Reihenfolge gilt je Kategorie (Anzeige: Kategorie, dann sort_order) — vertauscht wird nur innerhalb der Kategorie
         var active = (await Repo.ListCardsAsync(_userSub, ModuleId, null, archived: false)).ToList();
         var card = active.FirstOrDefault(c => c.Id == cardId);
@@ -632,6 +656,7 @@
 
     private async Task DuplicateAsync(string cardId)
     {
+        if (!await StillAllowedAsync()) return;
         if (!await ConfirmDiscardAsync()) return;
         var copy = await Repo.DuplicateCardAsync(cardId, _userSub);
         await LoadCardsAsync();
@@ -640,6 +665,7 @@
 
     private async Task ArchiveAsync(string cardId, bool archive)
     {
+        if (!await StillAllowedAsync()) return;
         if (_draft?.Id == cardId && !await ConfirmDiscardAsync()) return;
         await Repo.SetArchivedAsync(cardId, archive, _userSub);
         await LoadCardsAsync();
@@ -680,6 +706,7 @@
     private async Task SaveAsync()
     {
         if (_draft is null || _module is null) return;
+        if (!await StillAllowedAsync()) return;
         _saving = true; _error = null; _status = null; _conflict = false;
         try
         {
@@ -785,6 +812,7 @@
 
     private async Task SavePoolAsync()
     {
+        if (!await StillAllowedAsync()) return;
         if (_poolEdit is null || _draft?.Id is null) return;
         _poolError = null;
         _poolEdit.CardId = _draft.Id;
@@ -800,6 +828,7 @@
 
     private async Task TogglePoolActiveAsync(QuizPoolQuestion q)
     {
+        if (!await StillAllowedAsync()) return;
         try { await Quiz.SetQuestionActiveAsync(ModuleId, q.Id, !q.Active, _userSub); await LoadPoolAsync(); }
         catch (Exception e) when (e is KeyNotFoundException or UnauthorizedAccessException) { _poolError = e.Message; }
     }

@@ -31,13 +31,14 @@
                     @if (d.IsDraft) { <span class="badge badge-draft">Entwurf</span> } else { <span class="badge">Version @d.Version</span> }
                     @if (d.GlobalStatus == "active") { <span class="badge badge-pass">global veröffentlicht</span> }
                     else if (d.GlobalStatus == "pending_approval") { <span class="badge badge-warn">globale Freigabe offen</span> }
+                    @if (d.IsCoAuthor) { <span class="badge">Co-Author</span> }
                     @if (!d.IsOwner && d.Topic.OwnerName.Length > 0) { <span class="muted">von @d.Topic.OwnerName</span> }
                 </p>
                 @if (d.Topic.Description.Length > 0) { <p class="muted">@d.Topic.Description</p> }
             </div>
             <div class="page-head-actions">
                 <a class="btn btn-ghost" href="/topics">← Themen</a>
-                @if (d.IsOwner)
+                @if (d.CanEdit)
                 {
                     <a class="btn btn-primary" href="/topics/@d.Topic.Id/edit">✏️ Bearbeiten</a>
                 }
@@ -60,12 +61,12 @@
             <div class="alert alert-error" role="status">⚠️ @w</div>
         }
 
-        @if (_versions.Count > 1 || (d.IsOwner && _versions.Count > 0 && (d.DraftDiffers || d.IsDraft)))
+        @if (_versions.Count > 1 || (d.CanEdit && _versions.Count > 0 && (d.DraftDiffers || d.IsDraft)))
         {
             <div class="form-row topic-versions">
                 <label for="ver">Ansicht</label>
                 <select id="ver" class="input" @onchange="e => ChangeVersion(e.Value?.ToString())">
-                    @if (d.IsOwner && (d.DraftDiffers || d.IsDraft)) { <option value="0" selected="@d.IsDraft">Entwurf (unveröffentlichte Änderungen)</option> }
+                    @if (d.CanEdit && (d.DraftDiffers || d.IsDraft)) { <option value="0" selected="@d.IsDraft">Entwurf (unveröffentlichte Änderungen)</option> }
                     @foreach (var v in _versions)
                     {
                         <option value="@v.VersionNumber" selected="@(!d.IsDraft && d.Version == v.VersionNumber)">Version @v.VersionNumber (@(v.PublishedAt?.ToLocalTime().ToString("dd.MM.yyyy") ?? "—"))</option>
@@ -193,7 +194,7 @@
         try
         {
             _detail = await Topics.GetViewAsync(_userId, Id, Version);
-            _versions = _detail.IsOwner ? await Topics.ListVersionsAsync(_userId, Id) : new();
+            _versions = _detail.CanEdit ? await Topics.ListVersionsAsync(_userId, Id) : new();
             await ReloadProgressAsync();
             if (!_detail.IsDraft) await Topics.MarkSeenAsync(_userId, Id, _detail.Version);
         }

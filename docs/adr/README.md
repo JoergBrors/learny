@@ -59,6 +59,7 @@ Referenz dafür, *wie das System funktioniert und warum* — für Menschen und f
 | [0049](0049-einladungs-und-lernberechtigungsmodell.md) | Produktives Einladungs- und Lernberechtigungsmodell (Lernprofile, Zuweisungen, atomare Einlösung) | Akzeptiert |
 | [0050](0050-administration-einladungsversand-und-otp-in-learny.md) | Administration, Einladungsversand und OTP-Anbindung in Learny (Phase C) | **Vorgeschlagen** |
 | [0051](0051-immersives-dashboard-avatar-und-touch-bedienung.md) | Immersives Dashboard, Avatar-System/-Generator und Touch-Bedienung der Lernkarten | **Vorgeschlagen** |
+| [0052](0052-themenbezogene-co-author-berechtigungen.md) | Themenbezogene Co-Author-Berechtigungen | Akzeptiert und umgesetzt |
 | [0025](0025-sichere-speicherung-von-mcp-tokens.md) | Sichere Speicherung von MCP-Tokens, Codes und OAuth-Clients (Schutz bei Datenbankzugriff) | Akzeptiert und umgesetzt |
 
 Prüfberichte, die Anlass für ADRs sind, liegen unter [docs/reviews/](../reviews/) (aktuell: [Mehrbenutzer-Prüfbericht](../reviews/2026-10-24-mehrbenutzer-pruefbericht.md)).

@@ -235,6 +235,17 @@ Das private Ursprungsmodul bleibt geschützt; Widerruf entfernt nur das abgeleit
 
 Administratoren verwalten Einladungen, Lernrechte und das Ereignisprotokoll in `/admin` (Tabs; Komponenten ohne Geschäftslogik, die Dienste prüfen die Rolle gegen die Datenbank). `InvitationDeliveryService` steuert den Versandzustand (Slot und Lease in der Datenbank, Ergebnis + Ereignis + Audit atomar), `ExchangeOnlineMailService` ist reiner Transport (Graph `sendMail`, Postfach `learny@brors.link`, Anwendungsberechtigung per Exchange-RBAC begrenzt). `POST /extensions/otp-send` versendet die von Entra erzeugten Einmalcodes über denselben Mailservice (eigene Bearer-Prüfung, Codes nie gespeichert). Einladungslinks tragen den Token im URL-Fragment (`/invite#<token>`) und werden per POST übergeben, damit er in keinem Zugriffsprotokoll steht. Die Workforce-Anmeldung und das Bestandsprofil bleiben unverändert.
 
+## Zusammenarbeit an Themen (Co-Autoren)
+
+Ein Thema hat genau einen Eigentümer; zusätzlich können **Co-Autoren** (ADR 0052) den **Entwurf** mitbearbeiten. Co-Author ist eine Berechtigung je Thema (`topic_coauthors`), keine Rolle, keine Lernfreigabe und keine Zuweisung. Die einzige Entscheidungsstelle ist `TopicService.GetTopicRoleAsync` (Owner / CoAuthor / None, gegen die Datenbank). `RequireEditableTopicAsync` gilt für Bearbeitungen des Entwurfs; Veröffentlichen, Freigeben, Archivieren, Duplizieren, Modulbibliothek und Themen-JSON bleiben beim Eigentümer (`RequireOwnTopicAsync`).
+
+- **Eigentümer vs. Co-Author:** Co-Autoren bearbeiten Name, Beschreibung, Reihenfolge, Prüfungsstruktur, Themenfragen und die Inhalte der zugeordneten Module; sie verwalten weitere Co-Autoren (hinzufügen, entfernen, selbst austreten), aber nie den Eigentümer. Veröffentlichte Versionen und eingefrorene Kopien bleiben unveränderlich.
+- **Module und Karten:** Der Moduleigentümer bleibt der Eigentümer; die Weboberfläche arbeitet im themenbezogenen Kontext (`ResolveModuleEditOwnerAsync`) nur für Module im Entwurf eines Themas, an dem man Co-Author ist und das keinem anderen Thema angehört. REST-Karten-/Modulrouten und MCP bleiben eigentümergebunden.
+- **Entzug:** wirkt sofort (jede Anfrage prüft die Datenbank), löscht nur die Berechtigung.
+- **Gleichzeitige Änderungen:** `draft_revision` (Header `X-Topic-Draft-Revision` bzw. Oberfläche) → Konflikt 409 statt Überschreiben; Karten über `updated_at`.
+- **REST:** `/api/topics/{id}/coauthors` (GET, `candidates`, POST, DELETE `{userId}`, `leave`); nie für MCP-Tokens.
+- **Oberfläche:** Bereich „Zusammenarbeit“ im Themeneditor, Reiter „Gemeinsam bearbeitet“ und „Alle zugänglichen Themen“ in der Themenübersicht.
+
 ## Oberfläche: Listen, Details, Favoriten
 
 Listenseiten (Module, Themen, Abschlüsse) folgen einem gemeinsamen Muster: `ListToolbar` (Suche, seitenspezifische Filter, Favoritenfilter, Sortierung, Gruppierung über `ListGrouping` (Thema, Stand, Veröffentlichung, Fälligkeit, Monat), Umschalter Kacheln/Liste, Trefferzahl), Sterne (`FavoriteButton`, `FavoritesService`) und Details **immer** im Overlay (`DetailDrawer`: seitliche Schublade, Schließen per Schaltfläche, Hintergrund oder Esc). Die Administration ist in fünf Bereiche gegliedert (Benutzer, Einladungen, Inhalte, Mailversand, Protokoll). Gestaltungsbausteine liegen in `wwwroot/app.css` und nutzen die Farbvariablen (Dark Mode inklusive).

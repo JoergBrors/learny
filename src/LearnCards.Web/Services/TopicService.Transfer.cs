@@ -84,7 +84,8 @@ public partial class TopicService
     /// <summary>Exportiert den Entwurf eines eigenen Themas als portable Definition; optional mit den vollständigen Moduldefinitionen (dann ohne weitere Voraussetzungen importierbar).</summary>
     public async Task<TopicDefinition> ExportAsync(string ownerId, string topicId, bool includeModules)
     {
-        var topic = await RequireOwnTopicAsync(ownerId, topicId, allowArchived: true);
+        var topic = await RequireEditableTopicAsync(ownerId, topicId, allowArchived: true);
+        var actor = ownerId; ownerId = topic.OwnerUserId;   // Co-Autor (ADR 0052): Daten gehören dem Themeneigentümer, protokolliert wird der Handelnde
         var cfg = await LoadExamConfigAsync(topic.Id);
         var def = new TopicDefinition { Name = topic.Name, Description = topic.Description };
         var rows = await ListDraftModuleRowsAsync(topic.Id);
@@ -110,7 +111,7 @@ public partial class TopicService
         {
             Type = q.Type, Question = q.Question, Options = q.Options.ToList(), CorrectIndexes = q.CorrectIndexes.ToList(), Explanation = q.Explanation, Active = q.Active,
         }).ToList();
-        await _users.WriteAuditAsync(ownerId, "topic.export", topic.Id, includeModules ? "with-modules" : "");
+        await _users.WriteAuditAsync(actor, "topic.export", topic.Id, includeModules ? "with-modules" : "");
         return def;
     }
 

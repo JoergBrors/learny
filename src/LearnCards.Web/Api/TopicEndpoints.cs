@@ -20,7 +20,7 @@ public static partial class ApiEndpoints
         if (HttpMethods.IsPost(http.Request.Method) && path.Equals("/api/topics/import", StringComparison.OrdinalIgnoreCase)) return true;
         if (HttpMethods.IsPut(http.Request.Method) && System.Text.RegularExpressions.Regex.IsMatch(path, "^/api/topics/[0-9a-fA-F-]{36}/definition$")) return true;
         return HttpMethods.IsGet(http.Request.Method) && path.StartsWith("/api/topics", StringComparison.OrdinalIgnoreCase)
-               && !path.Contains("/shares", StringComparison.OrdinalIgnoreCase) && !path.Contains("/assignments", StringComparison.OrdinalIgnoreCase)
+               && !path.Contains("/shares", StringComparison.OrdinalIgnoreCase) && !path.Contains("/coauthors", StringComparison.OrdinalIgnoreCase) && !path.Contains("/assignments", StringComparison.OrdinalIgnoreCase)
                && !path.Contains("/attempts", StringComparison.OrdinalIgnoreCase) && !path.Contains("/progress", StringComparison.OrdinalIgnoreCase)
                && !path.Contains("/users", StringComparison.OrdinalIgnoreCase);
     }
@@ -61,6 +61,16 @@ public static partial class ApiEndpoints
         var bytes = System.Text.Encoding.UTF8.GetBytes(node.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
         return Results.File(bytes, "application/json", fileName);
     }
+
+    private static object CoAuthorDto(TopicCoAuthorInfo c) => new { user_id = c.UserId, display_name = c.DisplayName, email = c.Email, granted_by = c.GrantedByName, created_at = c.CreatedAt };
+    private static object CollaborationDto(TopicCollaboration c) => new
+    {
+        topic_id = c.TopicId, owner = new { user_id = c.OwnerUserId, display_name = c.OwnerName, email = c.OwnerEmail },
+        role = c.ViewerRole == TopicRole.Owner ? "owner" : "co_author", co_authors = c.CoAuthors.Select(CoAuthorDto),
+    };
+
+    /// <summary>Optionale Konflikterkennung des Entwurfs: <c>X-Topic-Draft-Revision</c> = <c>draft_revision</c> aus dem zuletzt geladenen Thema (fehlt der Header, wird nicht geprüft).</summary>
+    private static int? ExpectedRevision(HttpContext http) => int.TryParse(http.Request.Headers["X-Topic-Draft-Revision"].ToString(), out var n) ? n : null;
 
     private static object CompetencyModelDto(ModuleCompetencyModel m) => new { learning_objectives = m.Objectives, competencies = m.Competencies };
     private static object ModuleVersionDto(ModuleVersionInfo v) => new { version = v.VersionNumber, snapshot_module_id = v.SnapshotModuleId, published_at = v.PublishedAt, note = v.Note, cards = v.Cards, content_hash = v.ContentHash };
@@ -124,7 +134,7 @@ public static partial class ApiEndpoints
         t.MapGet("/{id}", (string id, int? version, HttpContext http, TopicService topics) =>
             GuardTopic(async () => Results.Ok(await topics.GetDetailAsync(Uid(http), id, version))));
         t.MapPut("/{id}", (string id, TopicWriteRequest req, HttpContext http, TopicService topics) =>
-            GuardTopic(async () => Results.Ok(await topics.UpdateAsync(Uid(http), id, req.Name, req.Description))));
+            GuardTopic(async () => Results.Ok(await topics.UpdateAsync(Uid(http), id, req.Name, req.Description, ExpectedRevision(http)))));
         t.MapPost("/{id}/archive", (string id, TopicArchiveRequest req, HttpContext http, TopicService topics) =>
             GuardTopic(async () => { await topics.SetArchivedAsync(Uid(http), id, req.Archived); return Results.NoContent(); }));
         t.MapPost("/{id}/duplicate", (string id, HttpContext http, TopicService topics) =>
@@ -157,7 +167,7 @@ public static partial class ApiEndpoints
         t.MapGet("/{id}/exam-config", (string id, HttpContext http, TopicService topics) =>
             GuardTopic(async () => Results.Ok(await topics.GetExamConfigAsync(Uid(http), id))));
         t.MapPut("/{id}/exam-config", (string id, TopicExamConfig cfg, HttpContext http, TopicService topics) =>
-            GuardTopic(async () => Results.Ok(await topics.SaveExamConfigAsync(Uid(http), id, cfg))));
+            GuardTopic(async () => Results.Ok(await topics.SaveExamConfigAsync(Uid(http), id, cfg, ExpectedRevision(http)))));
         t.MapGet("/{id}/questions", (string id, HttpContext http, TopicService topics) =>
             GuardTopic(async () => Results.Ok(await topics.ListQuestionsAsync(Uid(http), id))));
         t.MapPost("/{id}/questions", (string id, TopicQuestionRequest req, HttpContext http, TopicService topics) =>
@@ -182,6 +192,18 @@ public static partial class ApiEndpoints
             GuardTopic(async () => { await topics.GrantShareAsync(Uid(http), id, req.UserId); return Results.NoContent(); }));
         t.MapDelete("/{id}/shares/{userId}", (string id, string userId, HttpContext http, TopicService topics) =>
             GuardTopic(async () => await topics.RevokeShareAsync(Uid(http), id, userId) ? Results.NoContent() : Results.Json(new { detail = "Freigabe nicht gefunden." }, statusCode: 404)));
+        // Zusammenarbeit (ADR 0052): Co-Autoren eines Themas. Berechtigt sind Eigentümer und Co-Autoren dieses Themas (Prüfung im Service); nie per MCP-Token (siehe TokenMayReadTopics)
+        t.MapGet("/{id}/coauthors", (string id, HttpContext http, TopicService topics) =>
+            GuardTopic(async () => Results.Ok(CollaborationDto(await topics.GetCollaborationAsync(Uid(http), id)))));
+        t.MapGet("/{id}/coauthors/candidates", (string id, string? q, HttpContext http, TopicService topics) =>
+            GuardTopic(async () => Results.Ok((await topics.SearchCoAuthorCandidatesAsync(Uid(http), id, q)).Select(u => new { id = u.Id, display_name = u.DisplayName, email = u.Email }))));
+        t.MapPost("/{id}/coauthors", (string id, TopicUserRequest req, HttpContext http, TopicService topics) =>
+            GuardTopic(async () => Results.Json(CoAuthorDto(await topics.AddCoAuthorAsync(Uid(http), id, req.UserId)), statusCode: 201)));
+        t.MapDelete("/{id}/coauthors/{userId}", (string id, string userId, HttpContext http, TopicService topics) =>
+            GuardTopic(async () => await topics.RemoveCoAuthorAsync(Uid(http), id, userId) ? Results.NoContent() : Results.Json(new { detail = "Co-Author nicht gefunden." }, statusCode: 404)));
+        t.MapPost("/{id}/coauthors/leave", (string id, HttpContext http, TopicService topics) =>
+            GuardTopic(async () => await topics.LeaveCoAuthorAsync(Uid(http), id) ? Results.NoContent() : Results.Json(new { detail = "Keine Co-Author-Berechtigung." }, statusCode: 404)));
+
         // Zuweisungen gibt es hier nicht mehr: ausschließlich administrativ unter /api/topic-admin (ADR 0029)
 
         // Lernfortschritt und Prüfungen (Lernende und Eigentümer; Abgabe über /api/quiz/submit mit der Sitzung)

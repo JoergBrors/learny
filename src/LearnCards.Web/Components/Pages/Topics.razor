@@ -47,9 +47,11 @@
 
     <div class="tab-row" role="tablist" aria-label="Themenbereich wählen">
         <button class="chip @(_tab == "own" ? "chip-active" : "")" role="tab" aria-selected="@(_tab == "own")" @onclick='() => _tab = "own"'>Meine Themen (@_overview.Own.Count)</button>
+        <button class="chip @(_tab == "coauthored" ? "chip-active" : "")" role="tab" aria-selected="@(_tab == "coauthored")" @onclick='() => _tab = "coauthored"'>Gemeinsam bearbeitet (@_overview.CoAuthored.Count)</button>
         <button class="chip @(_tab == "shared" ? "chip-active" : "")" role="tab" aria-selected="@(_tab == "shared")" @onclick='() => _tab = "shared"'>Mit mir geteilt (@_overview.Shared.Count)</button>
         <button class="chip @(_tab == "assigned" ? "chip-active" : "")" role="tab" aria-selected="@(_tab == "assigned")" @onclick='() => _tab = "assigned"'>Mir zugewiesen (@_overview.Assigned.Count)</button>
         <button class="chip @(_tab == "global" ? "chip-active" : "")" role="tab" aria-selected="@(_tab == "global")" @onclick='() => _tab = "global"'>Globale Themen (@_overview.Global.Count)</button>
+        <button class="chip @(_tab == "all" ? "chip-active" : "")" role="tab" aria-selected="@(_tab == "all")" @onclick='() => _tab = "all"'>Alle zugänglichen Themen (@AllAccessible.Count)</button>
         @if (_tab == "own")
         {
             <label class="chip-check"><input type="checkbox" checked="@_archived" @onchange="async e => { _archived = (bool)(e.Value ?? false); await LoadAsync(); }" /> Archivierte anzeigen</label>
@@ -144,7 +146,8 @@
                         else if (t.GlobalStatus == "pending_approval") { <span class="badge badge-warn">Freigabe offen</span> }
                         else if (t.GlobalStatus == "rejected") { <span class="badge badge-warn">global abgelehnt</span> }
                         @if (t.NewerVersionAvailable) { <span class="badge badge-warn">neue Version verfügbar</span> }
-                        @if (t.Section != "own")
+                        @if (t.Section == "coauthored") { <span class="badge badge-coauthor" title="Du bearbeitest dieses Thema gemeinsam mit dem Eigentümer">Co-Author</span> }
+                        @if (t.Section is not ("own" or "coauthored"))
                         {
                             @if (t.Mandatory) { <span class="badge badge-warn">Pflicht</span> }
                             else if (t.Relation == "assigned_voluntary") { <span class="badge">zugewiesen · freiwillig</span> }
@@ -172,7 +175,7 @@
                     {
                         <p class="muted">@t.SharedWithCount geteilt · @t.AssignedCount zugewiesen</p>
                     }
-                    @if (t.Section == "own")
+                    @if (t.Section is "own" or "coauthored")
                     {
                         <span class="btn btn-ghost btn-sm" role="link">Öffnen</span>
                     }
@@ -263,16 +266,21 @@
 
     private List<TopicSummary> Current => _tab switch
     {
-        "shared" => _overview.Shared, "assigned" => _overview.Assigned, "global" => _overview.Global, _ => _overview.Own,
+        "coauthored" => _overview.CoAuthored, "shared" => _overview.Shared, "assigned" => _overview.Assigned, "global" => _overview.Global, "all" => AllAccessible, _ => _overview.Own,
     };
+
+    /// <summary>Alle Themen, die der Benutzer sehen darf — je Thema einmal, mit der stärksten Beziehung (eigen vor Co-Author vor zugewiesen vor geteilt vor global). Keine zusätzliche Berechtigung.</summary>
+    private List<TopicSummary> AllAccessible => _overview.Own.Concat(_overview.CoAuthored).Concat(_overview.Assigned).Concat(_overview.Shared).Concat(_overview.Global)
+        .GroupBy(t => t.Topic.Id, StringComparer.OrdinalIgnoreCase).Select(g => g.First()).OrderBy(t => t.Topic.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
 
     private string EmptyTitle => _tab switch
     {
-        "shared" => "Noch nichts mit dir geteilt", "assigned" => "Keine zugewiesenen Themen", "global" => "Noch keine globalen Themen", _ => "Noch kein Thema",
+        "coauthored" => "Keine gemeinsam bearbeiteten Themen", "all" => "Noch keine zugänglichen Themen", "shared" => "Noch nichts mit dir geteilt", "assigned" => "Keine zugewiesenen Themen", "global" => "Noch keine globalen Themen", _ => "Noch kein Thema",
     };
 
     private string EmptyText => _tab switch
     {
+        "coauthored" => "Themen, bei denen dich der Eigentümer als Co-Author hinzufügt, erscheinen hier.",
         "shared" => "Themen, die andere Benutzer für dich freigeben, erscheinen hier.",
         "assigned" => "Themen, die dir als Lernaufgabe zugewiesen werden, erscheinen hier.",
         "global" => "Vom Administrator freigegebene Themen erscheinen hier.",
@@ -282,7 +290,7 @@
     protected override async Task OnInitializedAsync()
     {
         if (ViewQuery is "tiles" or "list") _view = ViewQuery;
-        if (TabQuery is "own" or "shared" or "assigned" or "global") _tab = TabQuery;
+        if (TabQuery is "own" or "coauthored" or "shared" or "assigned" or "global" or "all") _tab = TabQuery;
         var auth = await AuthState.GetAuthenticationStateAsync();
         _userId = auth.User.GetUserId() ?? throw new UnauthorizedAccessException();
         _restricted = await Repo.IsRestrictedLearnerAsync(_userId);   // externe Lernprofile: kein Anlegen, kein Import
