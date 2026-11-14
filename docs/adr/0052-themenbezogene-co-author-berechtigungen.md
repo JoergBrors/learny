@@ -1,7 +1,9 @@
 # 0052 — Themenbezogene Co-Author-Berechtigungen
 
 - **Status:** Angenommen und umgesetzt (Abnahme 2026-11-11)
+- **Ergänzt durch:** [0054](0054-lern-und-pruefungsvorschau-fuer-content-co-autoren.md) (Lern- und Prüfungsvorschau für Themen-Co-Autoren im Testmodus; kein Lernrecht).
 - **Datum:** 2026-11-11
+- **Ergänzt durch:** [0053](0053-modulbezogene-co-author-berechtigungen-und-vererbung.md) (direkte Modul-Co-Autoren; Punkt 5 „Bearbeitungskontext für Module“ ist dort als zentrale Entscheidung `GetModuleEditAccessAsync` verallgemeinert, die Mehrfachzuordnungs-Regel bleibt)
 
 ## Kontext
 
@@ -68,4 +70,4 @@ oder das Eigentum an Modulen und Karten gelockert werden.
 
 - **Automatisch:** 1934/1934 Prüfungen auf SQLite und PostgreSQL 16 (Wegwerf-Container, `TEST_DB_PROVIDER=postgres`), danach 1919/1919 auf SQLite mit dem endgültigen Code; MCP-Token auf allen fünf Co-Author-Routen 403; Test-Runner erkennt veraltete DLLs.
 - **Browser (zwei getrennte Sitzungen, headless Chrome):** Themeneditor 26/26; Modul-/Kartenbearbeitung: Karte ändern, neue Karte anlegen, Eigentümer sieht beides, Modulbibliothek bleibt beim Eigentümer, Modul mit zusätzlichem nicht zugänglichem Thema nicht bearbeitbar, Konflikt (`updated_at`) ohne Überschreiben, Entzug wirkt in der offenen Sitzung sofort (Abweichung behoben, s. o.).
-- **Offen/bewusst nicht Teil:** Mobilgeräte, produktionsnahe PostgreSQL-Instanz (TLS), keine automatisierte Browsersuite (Schritte in `docs/testing.md`).
+- **Offen/bewusst nicht Teil:** Mobilgeräte, produktionsnahe PostgreSQL-Instanz (TLS); die Browserprüfungen sind optionale Skripte unter `tests/browser/` (nicht Teil der Suite). Endstand der Verifikation: `docs/testing.md`, Abschnitt „Abschlussstand“.

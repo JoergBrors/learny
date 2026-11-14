@@ -40,6 +40,7 @@
                 <a class="btn btn-ghost" href="/topics">← Themen</a>
                 @if (d.CanEdit)
                 {
+                    <a class="btn btn-ghost" href="/topics/@d.Topic.Id/preview" title="Entwurf als Lernender ausprobieren — nichts wird gespeichert">🧪 Vorschau testen</a>
                     <a class="btn btn-primary" href="/topics/@d.Topic.Id/edit">✏️ Bearbeiten</a>
                 }
             </div>
@@ -130,7 +131,12 @@
                         }
                         @if (mp is { Unlocked: false }) { <p class="alert alert-info">🔒 @mp.UnlockHint</p> }
                         <div class="topic-actions">
-                            @if (!m.Unavailable && (mp is null || mp.Unlocked))
+                            @if (d.IsDraft && d.CanEdit)
+                            {
+                                @* Entwurf (ADR 0054): Co-Autoren haben kein Lernrecht → Testmodus statt „Lernen“; der Eigentümer lernt weiterhin regulär und kann zusätzlich testen *@
+                                @if (!m.Unavailable) { <a class="btn btn-ghost btn-sm" href="/module/@m.ModuleId/preview" title="Als Lernender testen — nichts wird gespeichert">🧪 Testen</a> }
+                            }
+                            @if (!m.Unavailable && (mp is null || mp.Unlocked) && !(d.IsDraft && d.IsCoAuthor))
                             {
                                 <a class="btn btn-ghost btn-sm" href="/module/@m.ModuleId">📖 Lernen</a>
                             }

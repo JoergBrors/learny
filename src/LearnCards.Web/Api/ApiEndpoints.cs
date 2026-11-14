@@ -64,6 +64,8 @@ public static partial class ApiEndpoints
                 if (valid is null)
                     return Results.Json(new { detail = "Ungültiges, abgelaufenes oder widerrufenes MCP-Token." }, statusCode: 401);
                 var path = http.Request.Path.Value ?? "";
+                if (path.Contains("/coauthors", StringComparison.OrdinalIgnoreCase))   // Co-Author-Verwaltung (Themen und Module, ADR 0052/0053): nie per MCP-Token
+                    return Results.Json(new { detail = "Dieser Endpunkt ist für MCP-Tokens nicht verfügbar." }, statusCode: 403);
                 if (!TokenAllowedPrefixes.Any(p => path.StartsWith(p, StringComparison.OrdinalIgnoreCase)) && !TokenMayReadTopics(http))
                     return Results.Json(new { detail = "Dieser Endpunkt ist für MCP-Tokens nicht verfügbar." }, statusCode: 403);
                 http.Items[UserItem] = valid.Value.User;

@@ -141,9 +141,37 @@
         <button class="chip @(_tab == "private" ? "chip-active" : "")" role="tab" aria-selected="@(_tab == "private")" @onclick='() => _tab = "private"'>Meine Module (@_modules.Count)</button>
         <button class="chip @(_tab == "shared" ? "chip-active" : "")" role="tab" aria-selected="@(_tab == "shared")" @onclick='() => _tab = "shared"'>Mit mir geteilt (@_shared.Count)</button>
         <button class="chip @(_tab == "global" ? "chip-active" : "")" role="tab" aria-selected="@(_tab == "global")" @onclick='() => _tab = "global"'>Globale Module (@_global.Count)</button>
+        <button class="chip @(_tab == "coedit" ? "chip-active" : "")" role="tab" aria-selected="@(_tab == "coedit")" @onclick='() => _tab = "coedit"'>Gemeinsam bearbeitet (@_coEdited.Count)</button>
     </div>
 
-    @if (_loading)
+    @if (_tab == "coedit")
+    {
+        @* ADR 0053: nur Module mit aktuell gültigem Schreibzugriff — direkt freigegeben oder über ein gemeinsam bearbeitetes Thema; nie die übrige Bibliothek des Eigentümers *@
+        @if (_coEdited.Count == 0)
+        {
+            <div class="empty-state">
+                <div class="empty-icon" aria-hidden="true">🤝</div>
+                <p class="empty-title">Noch keine gemeinsam bearbeiteten Module.</p>
+                <p class="muted">Hier erscheinen Module, die ein Eigentümer direkt für dich zur Mitarbeit freigibt, sowie Module der Themen, an denen du als Co-Author mitarbeitest.</p>
+            </div>
+        }
+        else
+        {
+            <ul class="coauthor-list topic-search-results" aria-label="Gemeinsam bearbeitete Module">
+                @foreach (var ce in _coEdited)
+                {
+                    <li>
+                        <span><strong>@ce.Module.Icon @ce.Module.Name</strong> <span class="muted">von @ce.OwnerName</span></span>
+                        @if (ce.Direct) { <span class="badge badge-coauthor">Direkt als Co-Author</span> }
+                        @foreach (var t in ce.ViaTopics) { <span class="badge">Über Thema „@t.TopicName“</span> }
+                        <a class="btn btn-ghost btn-sm" href="/module/@ce.Module.Id/preview" title="Als Lernender testen — nichts wird gespeichert">🧪 Testen</a>
+                        <a class="btn btn-ghost btn-sm" href="/module/@ce.Module.Id/edit">✏ Bearbeiten</a>
+                    </li>
+                }
+            </ul>
+        }
+    }
+    else if (_loading)
     {
         <div class="spinner-wrap" aria-busy="true"><div class="spinner" role="status"></div></div>
     }
@@ -328,6 +356,7 @@
     private Dictionary<string, int> _latestVersions = new();
     private List<ModuleInfo> _shared = new();
     private List<ModuleInfo> _global = new();
+    private List<CoEditedModule> _coEdited = new();
     private string _tab = "private";
     private string _q = "", _sort = "fav", _view = "tiles", _flt = "";
     /// <summary>Direktlink auf eine Ansicht: <c>?view=list</c> bzw. <c>?view=tiles</c> (überschreibt die gemerkte Ansicht beim Start).</summary>
@@ -425,6 +454,7 @@
         _latestVersions = await ModuleVersions.ListLatestVersionNumbersAsync(_userId);
         _shared = await Repo.ListSharedWithMeAsync(_userId);
         _global = await Repo.ListGlobalModulesAsync(_userId);
+        try { _coEdited = await TopicSvc.ListCoEditedModulesAsync(_userId); } catch (Exception) { _coEdited = new(); }   // ein Fehler blockiert die Startseite nie
         // bestandene Module: jüngstes Zertifikat je Modul (bei globalen Modulen gehört es zur jeweiligen Version)
         try
         {

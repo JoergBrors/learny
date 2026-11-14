@@ -1,6 +1,7 @@
 # 0015 — Benutzerfreigaben, globale Lernmodule und Ergebniszuordnung
 
 - **Status:** Akzeptiert (ergänzt durch [0029](0029-themenzugriff-pflichtzuweisungen-und-themenadministration.md): themenbezogene Modulrechte, Pflichtzuweisungen)
+- **Klarstellung (2026-11-14):** Lernfreigabe und Lernrecht bleiben unverändert und eigenständig. Die Lern- und Prüfungsvorschau für Eigentümer/Co-Autoren ist ein **eigener, nicht persistierender Testmodus** ohne Lernrecht ([0054](0054-lern-und-pruefungsvorschau-fuer-content-co-autoren.md)); sie umgeht keine Freigabe.
 - **Datum:** 2026-10-24
 - **Baut auf:** [0011](0011-mehrbenutzerarchitektur.md) (Eigentum), [0012](0012-rollen-aus-entra-app-roles.md) (Rollen), [0013](0013-mcp-benutzergebundene-anmeldung.md) (MCP)
 - **Differenziert:** die Aussage „es gibt keinen gemeinsamen Kartenbestand“ — private Bestände bleiben isoliert, zusätzlich existieren **explizit verwaltete** freigegebene und globale Bereiche.

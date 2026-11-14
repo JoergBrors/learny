@@ -248,6 +248,9 @@ try
     await ExternalIdUnitTests.RunAsync(Check, tmp);   // state-Einmaligkeit in der Datenbank, Anmeldung ohne Benutzeranlage (ADR 0048)
     await InvitationUnitTests.RunAsync(Check, tmp);   // Einladungen, Lernprofile, atomare Einlösung, Zugriffsregeln (ADR 0049)
     await CoAuthorTests.RunAsync(Check, tmp);   // Co-Author-Modus: Berechtigungsmodell, Modulkontext, Konflikte, Entzug (ADR 0052)
+    await ModuleCoAuthorTests.RunAsync(Check, tmp);   // Modul-Co-Autoren, Rechtevererbung, Entzug (ADR 0053)
+    await QuizPoolCoAuthorTests.RunAsync(Check, tmp);   // Fragenpool und Quizkonfiguration bei Modul-Co-Autoren (ADR 0053)
+    await PreviewTests.RunAsync(Check, tmp);   // Lern- und Prüfungsvorschau für Content-Co-Autoren (ADR 0054)
     await MailDeliveryTests.RunAsync(Check, tmp);   // Mailtransport, Versandzustand, OTP-Extension, Verwaltung der Lernrechte (ADR 0044/0045/0049, Phase C)
     await PostgresReadinessTests.RunAsync(Check, tmp);   // nur mit LEARNY_TEST_POSTGRES; sonst ausdrücklich „nicht ausgeführt“
     DockerConfigTests.Run(Check, repoRoot);   // Docker-Hub-Veröffentlichung (ADR 0024)
@@ -2109,6 +2112,7 @@ try
     await TransferHardeningTests.RunAsync(LoginAsync, () => NewClient(false), mcpUrl, McpKey, PngLike, Check);   // Referenzen parallel, große Dateien, MCP-Matrix (ADR 0028)
     await TopicViewTests.RunAsync(LoginAsync, Check);   // Themenseite: Entwurf nur bei Abweichung
     await CoAuthorTests.RunHttpAsync(LoginAsync, () => NewClient(false), Check);   // Co-Author-Modus über REST (ADR 0052)
+    await ModuleCoAuthorTests.RunHttpAsync(LoginAsync, () => NewClient(false), Check);   // Modul-Co-Autoren über REST inkl. MCP-Sperre (ADR 0053)
     await CompetencyTests.RunAsync(LoginAsync, () => NewClient(false), Check);   // Kompetenzen, Prüfungssnapshot, Badge (ADR 0031)
     await TopicCredentialTests.RunAsync(LoginAsync, () => NewClient(false), admin, Check);   // Themenabschluss: Master-Badge + CLR (ADR 0032)
     await CredentialRegisterTests.RunAsync(LoginAsync, () => NewClient(false), admin, Check);   // Register, Testausstellung, Widerruf, JWT-Profil (ADR 0037/0038)

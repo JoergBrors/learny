@@ -117,6 +117,16 @@ public static class PostgresReadinessTests
         await topics.AddCoAuthorAsync(owner, existing.Id, co);
         await db.ExecuteAsync("DELETE FROM topics WHERE id=@t", new (string, object?)[] { ("t", existing.Id) });   // nur Wegwerf-Datenbank
         check((await db.QueryAsync("SELECT COUNT(*) AS n FROM topic_coauthors WHERE topic_id=@t", new (string, object?)[] { ("t", existing.Id) }))[0]["n"] == "0", "PostgreSQL: Löschen des Themas entfernt Co-Author-Einträge (CASCADE)");
+
+        // Modul-Co-Autoren und Rechtevererbung (ADR 0053) auf PostgreSQL
+        var mcols = await db.QueryAsync("SELECT constraint_type FROM information_schema.table_constraints WHERE table_name='module_coauthors'");
+        var mdel = await db.QueryAsync("SELECT DISTINCT rc.delete_rule FROM information_schema.referential_constraints rc JOIN information_schema.table_constraints tc ON tc.constraint_name=rc.constraint_name WHERE tc.table_name='module_coauthors'");
+        check(mcols.Any(r => r["constraint_type"] == "PRIMARY KEY") && mcols.Count(r => r["constraint_type"] == "FOREIGN KEY") >= 2 && mdel.Count == 1 && mdel[0]["delete_rule"] == "CASCADE", "PostgreSQL: module_coauthors hat Primärschlüssel, Fremdschlüssel und ON DELETE CASCADE");
+        var comp = new CompetencyService(db, repo, users);
+        await ModuleCoAuthorTests.CoreAsync("PostgreSQL", db, topics, repo, comp, User, null, check);
+        await QuizPoolCoAuthorTests.CoreAsync("PostgreSQL", db, topics, repo, pool, QuizPoolCoAuthorTests.Build(repo, pool, comp, db, users), User, check);
+        var (pvTopics, pvRepo, pvQuiz, pvPool) = PreviewTests.BuildServices(db, users);
+        await PreviewTests.CoreAsync("PostgreSQL", db, pvTopics, pvRepo, pvQuiz, pvPool, User, null, check);
     }
 
     private sealed class CountingMailer : IInvitationMailer

@@ -64,26 +64,8 @@ public partial class TopicService
     /// </summary>
     public async Task<string> ResolveModuleEditOwnerAsync(string actorId, string moduleId)
     {
-        if (!UserService.IsGuid(actorId) || !UserService.IsGuid(moduleId)) return actorId;
-        var mod = (await _db.QueryAsync("SELECT owner_user_id, scope FROM modules WHERE id = @m", new[] { ("m", (object?)moduleId) })).FirstOrDefault();
-        var owner = mod?.GetValueOrDefault("owner_user_id");
-        if (mod is null || string.IsNullOrEmpty(owner) || mod.GetValueOrDefault("scope") != "private") return actorId;
-        if (string.Equals(owner, actorId, StringComparison.OrdinalIgnoreCase)) return actorId;
-
-        var topics = await _db.QueryAsync("""
-            SELECT t.id, t.owner_user_id, t.status FROM topic_modules tm JOIN topics t ON t.id = tm.topic_id WHERE tm.module_id = @m
-            """, new[] { ("m", (object?)moduleId) });
-        if (topics.Count == 0) return actorId;
-        var viaCoAuthorTopic = false;
-        foreach (var t in topics)
-        {
-            var topic = await GetTopicRawAsync(t["id"] ?? "");
-            if (topic is null) continue;
-            var role = await RoleForAsync(actorId, topic);
-            if (role == TopicRole.None) return actorId;   // das Modul wird auch in einem Thema ohne Bearbeitungsrecht verwendet: keine gemeinsame Bearbeitung
-            if (role == TopicRole.CoAuthor && string.Equals(topic.OwnerUserId, owner, StringComparison.OrdinalIgnoreCase) && topic.Status == TopicStatuses.Active) viaCoAuthorTopic = true;
-        }
-        return viaCoAuthorTopic ? owner : actorId;
+        var access = await GetModuleEditAccessAsync(actorId, moduleId);   // ADR 0053: direkte und abgeleitete Berechtigung, jedes Mal gegen die Datenbank
+        return access.Kind is ModuleAccessKind.Direct or ModuleAccessKind.ViaTopic ? access.OwnerUserId : actorId;
     }
 
     // ─── Verwaltung der Co-Autoren ──────────────────────────────────────────

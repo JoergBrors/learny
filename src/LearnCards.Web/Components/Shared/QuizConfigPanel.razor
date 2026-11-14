@@ -86,6 +86,11 @@
 @code {
     [Parameter, EditorRequired] public string ModuleId { get; set; } = "";
     [Parameter] public EventCallback OnClose { get; set; }
+    /// <summary>
+    /// Optional (Modul-Editor, ADR 0053): liefert vor <b>jedem</b> Laden und Speichern den aktuell gültigen Bearbeitungskontext (Eigentümer bei Co-Author-Zugriff) bzw. <c>null</c>, wenn der Zugriff entzogen wurde.
+    /// Ohne Resolver gilt wie bisher die Identität des angemeldeten Benutzers (Eigentümer).
+    /// </summary>
+    [Parameter] public Func<Task<string?>>? ResolveUser { get; set; }
 
     private QuizConfigView? _view;
     private QuizConfig _cfg = new();
@@ -94,14 +99,20 @@
     private bool _busy, _saved;
     private string _loaded = "";
 
+    private async Task<string> CurrentUserAsync()
+    {
+        if (ResolveUser is not null) return await ResolveUser() ?? throw new UnauthorizedAccessException("Dein Co-Author-Zugriff auf dieses Modul wurde entzogen. Die Änderung wurde nicht gespeichert.");
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        return auth.User.GetUserId() ?? throw new UnauthorizedAccessException();
+    }
+
     protected override async Task OnParametersSetAsync()
     {
         if (_loaded == ModuleId) return;
         _loaded = ModuleId;
         try
         {
-            var auth = await AuthState.GetAuthenticationStateAsync();
-            _view = await Quiz.GetConfigViewAsync(ModuleId, auth.User.GetUserId() ?? throw new UnauthorizedAccessException());
+            _view = await Quiz.GetConfigViewAsync(ModuleId, await CurrentUserAsync());
             _cfg = _view.Config.Clone();
         }
         catch (Exception e) { _error = e.Message; }
@@ -129,8 +140,7 @@
         _busy = true; _saved = false; _errors.Clear();
         try
         {
-            var auth = await AuthState.GetAuthenticationStateAsync();
-            _view = await Quiz.SaveConfigAsync(ModuleId, _cfg, auth.User.GetUserId() ?? throw new UnauthorizedAccessException());
+            _view = await Quiz.SaveConfigAsync(ModuleId, _cfg, await CurrentUserAsync());
             _cfg = _view.Config.Clone();
             _saved = true;
         }

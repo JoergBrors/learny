@@ -244,6 +244,22 @@ Ein Thema hat genau einen Eigentümer; zusätzlich können **Co-Autoren** (ADR 0
 - **Entzug:** wirkt sofort (jede Anfrage prüft die Datenbank), löscht nur die Berechtigung.
 - **Gleichzeitige Änderungen:** `draft_revision` (Header `X-Topic-Draft-Revision` bzw. Oberfläche) → Konflikt 409 statt Überschreiben; Karten über `updated_at`.
 - **REST:** `/api/topics/{id}/coauthors` (GET, `candidates`, POST, DELETE `{userId}`, `leave`); nie für MCP-Tokens.
+
+### Lern- und Prüfungsvorschau (ADR 0054)
+
+- **Testmodus statt Lernrecht:** Eigentümer und Co-Autoren probieren den **Entwurfsstand** aus (`/module/{id}/preview`, `/topics/{id}/preview`). Das Vorschaurecht ist das Bearbeitungsrecht (`GetModuleEditAccessAsync` bzw. Themenrolle) — kein Lernrecht, keine Freigabe, keine Zuweisung; direkte Modulrechte gewähren keine Themenvorschau; Mehrfachzuordnung ohne Recht wird ausgeschlossen.
+- **Gleiche Engine, keine Persistenz:** Quizstart und Bewertung laufen durch `QuizService.StartSessionCoreAsync`/`GradeSessionAsync` mit Testmodus; Sitzungen nur im Arbeitsspeicher (`QuizService.Preview.cs`), Ergebnisse werden nicht gespeichert (kein Ergebnis, Versuch, Zertifikat, Snapshot, Fortschritt).
+- **Prüfungsstruktur:** Modul- und Abschlussprüfung des Themenentwurfs mit der Entwurfskonfiguration (`TopicService.Preview.cs`), ohne Freischaltung und Versuchsbindung.
+- **Entzug:** jede Aktion und die Abgabe prüfen neu; bei Entzug „Dein Zugriff auf diese Vorschau wurde entzogen.“, Sitzung verworfen.
+- **Keine REST-/MCP-Schnittstelle**; die regulären Lern- und Quiz-Endpunkte bleiben unverändert.
+
+### Modulzusammenarbeit und Vererbung (ADR 0053)
+
+- **Zwei Quellen, eine Entscheidung:** `TopicService.GetModuleEditAccessAsync` liefert `Owner`, `Direct` (Tabelle `module_coauthors`) oder `ViaTopic` (aus dem Themen-Co-Author **berechnet**, nie gespeichert). `ResolveModuleEditOwnerAsync` projiziert das für die Dienste (Eigentümer-ID bei gültigem Zugriff).
+- **Vererbung:** Themen-Co-Author eines aktiven Themas → alle Module im Entwurf, auch später hinzugefügte; Modul entfernt, Co-Author entfernt/ausgetreten oder Thema archiviert → Recht entfällt sofort. Liegt das Modul zusätzlich in einem Thema ohne Bearbeitungsrecht, entsteht kein abgeleitetes Recht (Mehrfachzuordnung); eine direkte Freigabe bleibt davon unabhängig.
+- **Direkte Co-Autoren** verwalten Eigentümer und direkte Co-Autoren (`/api/modules/{id}/coauthors`, nie per MCP-Token); ein nur abgeleitetes Recht nicht. Keine Lernfreigabe, Veröffentlichung oder Zuweisung.
+- **Offene Sitzungen:** Der Modul-Editor löst den Kontext vor jedem Schreibzugriff neu auf (`StillAllowedAsync`); Restfenster zwischen Auflösung und Schreiben in der ADR benannt.
+- **Oberfläche:** Modul-Editor „Zusammenarbeit“ (direkt und „Zugriff über Themen“ getrennt), Themeneditor-Link „Karten bearbeiten“, Modulübersicht „Gemeinsam bearbeitet“.
 - **Oberfläche:** Bereich „Zusammenarbeit“ im Themeneditor, Reiter „Gemeinsam bearbeitet“ und „Alle zugänglichen Themen“ in der Themenübersicht.
 
 ## Oberfläche: Listen, Details, Favoriten

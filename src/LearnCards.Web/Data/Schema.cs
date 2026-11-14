@@ -851,6 +851,30 @@ public static class Schema
             """;
         yield return "CREATE INDEX IF NOT EXISTS ix_topic_coauthors_user ON topic_coauthors(user_id)";
 
+        // Direkte Modul-Co-Autoren (ADR 0053): objektbezogene Berechtigung je Modul. Aus Themen abgeleitete Rechte werden bewusst NICHT gespeichert.
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS module_coauthors (
+                module_id  {id} NOT NULL REFERENCES modules(id) ON DELETE CASCADE,
+                user_id    {id} NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                granted_by {id} NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (module_id, user_id)
+            )
+            """;
+        yield return "CREATE INDEX IF NOT EXISTS ix_module_coauthors_user ON module_coauthors(user_id)";
+
+        // Direkte Modul-Co-Autoren (ADR 0053): objektbezogene Berechtigung je Modul. Aus Themen abgeleitete Rechte werden bewusst NICHT gespeichert.
+        yield return $"""
+            CREATE TABLE IF NOT EXISTS module_coauthors (
+                module_id  {id} NOT NULL REFERENCES modules(id) ON DELETE CASCADE,
+                user_id    {id} NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                granted_by {id} NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (module_id, user_id)
+            )
+            """;
+        yield return "CREATE INDEX IF NOT EXISTS ix_module_coauthors_user ON module_coauthors(user_id)";
+
         yield return $"""
             CREATE TABLE IF NOT EXISTS topic_assignments (
                 id          {id} PRIMARY KEY,

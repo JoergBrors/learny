@@ -1,0 +1,188 @@
+@page "/module/{ModuleId}/preview"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject TopicService TopicSvc
+@inject AuthenticationStateProvider AuthState
+
+@* Lernvorschau / Testmodus für Eigentümer und Modul-/Themen-Co-Autoren (ADR 0054): Entwurfsstand, dieselben Lernkomponenten, aber nichts wird gespeichert und es gibt kein Lernrecht. *@
+<PageTitle>Testmodus — @(_module?.Name ?? "Modul") — LearnCards</PageTitle>
+
+<div class="container module-page">
+    @if (_loading)
+    {
+        <div class="spinner-wrap" aria-busy="true"><div class="spinner" role="status"></div></div>
+    }
+    else if (_module is null)
+    {
+        <div class="alert alert-error" role="alert">@(_error ?? "Das Modul wurde nicht gefunden oder du darfst es nicht testen.")</div>
+        <a class="btn btn-primary" href="/">Zur Übersicht</a>
+    }
+    else
+    {
+        <div class="alert alert-info preview-banner" role="status">
+            <strong>🧪 Testmodus</strong> — Vorschau des <strong>Entwurfsstands</strong>. Es wird nichts gespeichert: kein Lernfortschritt, keine Quizergebnisse, keine Prüfungsversuche, keine Zertifikate.
+            Das ist kein reguläres Lernen und keine Lernfreigabe.
+        </div>
+        @if (_error is not null) { <div class="alert alert-error" role="alert">@_error</div> }
+
+        <section class="module-hero card">
+            <h1><span aria-hidden="true">@_module.Icon</span> @_module.Name <span class="badge badge-coauthor">Testmodus</span></h1>
+            @if (_module.Description.Length > 0) { <p class="muted">@_module.Description</p> }
+            <p class="muted">Modul von @_ownerName · @_cards.Count Karten @(_category is null ? "" : $"in „{_category}“")</p>
+            <div class="page-head-actions">
+                <a class="btn btn-ghost" href="/module/@ModuleId/edit">✏ Karten bearbeiten</a>
+                <button class="btn btn-primary" @onclick="OpenQuizConfig" disabled="@(_revoked || _busy)">📝 Modulquiz testen</button>
+            </div>
+        </section>
+
+        @if (_categories.Count > 1 && !_revoked)
+        {
+            <div class="chip-row module-chip-row" role="tablist" aria-label="Kategorie wählen">
+                <button class="chip @(_category is null ? "chip-active" : "")" @onclick="() => SelectCategoryAsync(null)">Alle</button>
+                @foreach (var cat in _categories)
+                {
+                    <button class="chip @(_category == cat ? "chip-active" : "")" @onclick="() => SelectCategoryAsync(cat)">@cat</button>
+                }
+            </div>
+        }
+
+        @if (_revoked)
+        {
+            <div class="empty-state"><div class="empty-icon" aria-hidden="true">🔒</div><p class="empty-title">@TopicService.PreviewRevokedMessage</p></div>
+        }
+        else if (_cards.Count == 0)
+        {
+            <div class="empty-state"><div class="empty-icon" aria-hidden="true">🃏</div><p class="empty-title">Keine aktiven Karten@(_category is null ? "" : $" in „{_category}“").</p></div>
+        }
+        else
+        {
+            <FlashCardView Card="_cards[_index]" Index="_index" Total="_cards.Count" CanEdit="false" PreviewMode="true"
+                           MarkedKnown="_known.Contains(_cards[_index].Id)" MarkedReview="_review.Contains(_cards[_index].Id)"
+                           OnNext="NextAsync" OnPrev="PrevAsync"
+                           OnQuizCard="StartCardQuizAsync" OnPageQuizCard="StartCardQuizAsync"
+                           OnMarkKnown="id => Toggle(_known, id)" OnMarkReview="id => Toggle(_review, id)" />
+            <div class="session-stats" aria-live="polite">
+                <span class="stat stat-known">✔ @_known.Count gecheckt (nur in dieser Vorschau)</span>
+                <span class="stat stat-review">↻ @_review.Count zur Wiederholung</span>
+            </div>
+        }
+
+        @if (_quizPhase == QuizPhase.Config)
+        {
+            <section class="card panel" aria-label="Modulquiz testen">
+                <h2 class="panel-title">📝 Modulquiz testen <span class="badge badge-coauthor">Testmodus</span></h2>
+                @if (!string.IsNullOrEmpty(_quizCardTerm)) { <p class="muted">Nur zur Karte „@_quizCardTerm“.</p> }
+                <p class="muted">Konfiguration wie im regulären Quiz: bis zu @_quizMax Fragen, bestanden ab @_quizPass %. Fragen und Lösungen stammen aus dem Entwurfsstand.</p>
+                @if (_quizError is not null) { <div class="alert alert-error" role="alert">@_quizError</div> }
+                @if (string.IsNullOrEmpty(_quizCardId))
+                {
+                    <label class="form-label">Anzahl Fragen <input class="input" type="number" min="1" max="@_quizMax" @bind="_quizCount" aria-label="Anzahl der Fragen" /></label>
+                }
+                <div class="page-head-actions">
+                    <button class="btn btn-primary" @onclick="StartQuizAsync" disabled="@_busy">@(_busy ? "Startet…" : "Quiz starten")</button>
+                    <button class="btn btn-ghost" @onclick="CloseQuiz">Abbrechen</button>
+                </div>
+            </section>
+        }
+        else if (_quizPhase == QuizPhase.Running && _session is not null)
+        {
+            <section class="card panel" aria-label="Quiz im Testmodus">
+                <QuizRunner Session="_session" Preview="true" OnClose="CloseQuiz" OnRestart="RestartQuizAsync" />
+            </section>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public string ModuleId { get; set; } = "";
+
+    private enum QuizPhase { None, Config, Running }
+    private QuizPhase _quizPhase;
+    private ModuleInfo? _module;
+    private List<Card> _cards = new();
+    private List<string> _categories = new();
+    private string? _category;
+    private int _index;
+    private bool _loading = true, _revoked, _busy;
+    private string? _error, _quizError;
+    private string _actor = "", _ownerName = "";
+    private readonly HashSet<string> _known = new(), _review = new();   // nur im Arbeitsspeicher dieser Seite
+    private QuizStartResponse? _session;
+    private int _quizCount = 5, _quizMax = 5, _quizPass = 60;
+    private string _quizCardId = "", _quizCardTerm = "";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _actor = auth.User.GetUserId() ?? throw new UnauthorizedAccessException();
+        _loading = true; _error = null; _revoked = false; _quizPhase = QuizPhase.None; _session = null; _index = 0;
+        await LoadAsync();
+        _loading = false;
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            var (module, cards, categories, owner) = await TopicSvc.GetModulePreviewAsync(_actor, ModuleId, _category);   // Berechtigung bei jedem Laden neu
+            _module = module; _cards = cards; _categories = categories; _ownerName = owner;
+            if (_index >= _cards.Count) _index = Math.Max(0, _cards.Count - 1);
+        }
+        catch (KeyNotFoundException) { if (_module is null) _error = null; else Revoke(); }   // nie berechtigt → „nicht gefunden“; „entzogen“ nur, wenn der Zugriff zuvor bestand
+    }
+
+    /// <summary>Zugriff entzogen: Karten, Fragen und Lösungen werden nicht mehr angezeigt, eine offene Quizsitzung wird verworfen.</summary>
+    private void Revoke()
+    {
+        if (_session is not null) TopicSvc.DiscardPreview(_session.SessionId, _actor);
+        _cards = new(); _session = null; _quizPhase = QuizPhase.None; _revoked = true; _error = TopicService.PreviewRevokedMessage;
+        _loading = false;
+    }
+
+    private async Task<bool> StillAllowedAsync()
+    {
+        if (await TopicSvc.GetModulePreviewAccessAsync(_actor, ModuleId) is not null) return true;
+        Revoke();
+        return false;
+    }
+
+    private async Task NextAsync() { if (await StillAllowedAsync() && _index < _cards.Count - 1) _index++; }
+    private async Task PrevAsync() { if (await StillAllowedAsync() && _index > 0) _index--; }
+    private async Task SelectCategoryAsync(string? cat) { _category = cat; _index = 0; await LoadAsync(); }
+    private Task Toggle(HashSet<string> set, string id) { if (!set.Remove(id)) set.Add(id); return Task.CompletedTask; }
+
+    private async Task OpenQuizConfig() => await PrepareQuizAsync("", "");
+    private async Task StartCardQuizAsync(string cardId)
+    {
+        var card = _cards.FirstOrDefault(c => c.Id == cardId);
+        await PrepareQuizAsync(cardId, card?.Term ?? "");
+    }
+
+    private async Task PrepareQuizAsync(string cardId, string term)
+    {
+        _quizError = null; _quizCardId = cardId; _quizCardTerm = term;
+        try
+        {
+            var cfg = await TopicSvc.GetModulePreviewConfigAsync(_actor, ModuleId);
+            _quizMax = Math.Clamp(cfg.QuestionCount, 1, 20); _quizCount = _quizMax; _quizPass = cfg.PassPercent;
+            _quizPhase = QuizPhase.Config;
+        }
+        catch (KeyNotFoundException) { Revoke(); }
+    }
+
+    private async Task StartQuizAsync()
+    {
+        _busy = true; _quizError = null;
+        try
+        {
+            _session = await TopicSvc.StartModulePreviewQuizAsync(_actor, ModuleId, _category ?? "", string.IsNullOrEmpty(_quizCardId) ? null : _quizCardId, Math.Clamp(_quizCount, 1, _quizMax));
+            _quizPhase = QuizPhase.Running;
+        }
+        catch (KeyNotFoundException) { Revoke(); }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or QuizRuleException) { _quizError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task RestartQuizAsync() { _session = null; await PrepareQuizAsync(_quizCardId, _quizCardTerm); }
+    private void CloseQuiz() { if (_session is not null) TopicSvc.DiscardPreview(_session.SessionId, _actor); _session = null; _quizPhase = QuizPhase.None; _quizError = null; }
+}

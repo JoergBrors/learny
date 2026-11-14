@@ -29,11 +29,12 @@
     {
         var dirty = IsDirty;
         <section class="card panel editor-head">
-            <p class="muted breadcrumb"><a href="/">Module</a> › <a href="/module/@ModuleId">@_module.Name</a> › Bearbeiten</p>
+            <p class="muted breadcrumb"><a href="/">Module</a> › @if (_coContext) { <span>@_module.Name</span> } else { <a href="/module/@ModuleId">@_module.Name</a> } › Bearbeiten</p>
             <div class="editor-head-row">
                 <h1>✏ Karten bearbeiten <span class="badge badge-private">@_module.Name</span></h1>
                 <div class="page-head-actions">
-                    <a class="btn btn-ghost" href="/module/@ModuleId">← Zum Modul</a>
+                    @if (!_coContext) { <a class="btn btn-ghost" href="/module/@ModuleId">← Zum Modul</a> }
+                    <a class="btn btn-ghost" href="/module/@ModuleId/preview" title="Entwurf als Lernender ausprobieren — nichts wird gespeichert">🧪 Als Lernender testen</a>
                     <button class="btn btn-ghost" @onclick="ToggleConfig">⚙ Quiz-Einstellungen</button>
                     <button class="btn btn-primary" @onclick="NewCardAsync">+ Neue Karte</button>
                 </div>
@@ -112,9 +113,97 @@
             }
         </section>
 
+        @* ─── Zusammenarbeit (ADR 0053) ─── *@
+        @if (_mcollab is not null)
+        {
+            <section class="card panel" id="zusammenarbeit" aria-label="Zusammenarbeit am Modul">
+                <h2 class="panel-title">Zusammenarbeit</h2>
+                <p class="muted">Co-Autoren bearbeiten Karten, Quiz, Kompetenzen und Fragenpool dieses Moduls. Sie veröffentlichen keine Versionen, geben nichts frei und weisen nichts zu; das Modul bleibt Eigentum von <strong>@_mcollab.OwnerName</strong>.</p>
+                @if (_mcollab.ViewerKind == ModuleAccessKind.ViaTopic)
+                {
+                    <p>Du bearbeitest dieses Modul <strong>über ein gemeinsam bearbeitetes Thema</strong>:
+                        @foreach (var t in _mcollab.ViewerViaTopics) { <a class="badge badge-coauthor" href="/topics/@t.TopicId/edit">@t.TopicName</a> }
+                        Dieser Zugriff endet mit der Themenberechtigung oder der Modulzuordnung. Direkte Co-Autoren verwaltet der Eigentümer des Moduls.</p>
+                }
+                else
+                {
+                    <h3>Direkte Co-Autoren</h3>
+                    <ul class="topic-search-results coauthor-list" aria-label="Direkte Modul-Co-Autoren">
+                        <li><span><strong>@_mcollab.OwnerName</strong> <span class="muted">@_mcollab.OwnerEmail</span></span> <span class="badge badge-owner">Eigentümer</span></li>
+                        @foreach (var c in _mcollab.DirectCoAuthors)
+                        {
+                            <li>
+                                <span><strong>@c.DisplayName</strong> <span class="muted">@c.Email</span>@(c.UserId == _actorSub ? " (du)" : "")</span>
+                                <span class="badge">Direkt</span>
+                                @if (c.UserId == _actorSub)
+                                {
+                                    <button class="btn btn-ghost btn-sm" @onclick="() => _mConfirmLeave = true" disabled="@_mBusy">Zusammenarbeit beenden</button>
+                                }
+                                else
+                                {
+                                    <button class="btn btn-ghost btn-sm" @onclick="() => _mConfirmRemove = c" disabled="@_mBusy" aria-label="@($"{c.DisplayName} als Co-Author entfernen")">Entfernen</button>
+                                }
+                            </li>
+                        }
+                    </ul>
+                    @if (_mcollab.DirectCoAuthors.Count == 0) { <p class="muted">Noch keine direkten Co-Autoren.</p> }
+                    @if (_mcollab.DerivedAccess.Count > 0)
+                    {
+                        <h3>Zugriff über Themen</h3>
+                        <p class="muted">Diese Zugriffe sind <strong>keine</strong> direkten Freigaben: sie entstehen aus der Themenberechtigung, solange das Modul im Entwurf des Themas liegt, und enden mit ihr.</p>
+                        <ul class="topic-search-results coauthor-list" aria-label="Zugriff über Themen">
+                            @foreach (var d in _mcollab.DerivedAccess)
+                            {
+                                <li><span><strong>@d.DisplayName</strong></span> <span class="badge badge-coauthor">über Thema „@d.TopicName“</span></li>
+                            }
+                        </ul>
+                    }
+                    @if (_mConfirmRemove is not null)
+                    {
+                        <div class="alert alert-error" role="alertdialog" aria-label="Co-Author entfernen">
+                            <strong>@_mConfirmRemove.DisplayName</strong> verliert sofort die direkte Bearbeitung dieses Moduls (ein Zugriff über ein Thema bleibt davon unberührt). Inhalte werden nicht gelöscht.
+                            <button class="btn btn-primary btn-sm" @onclick="RemoveModuleCoAuthorAsync" disabled="@_mBusy">Ja, entfernen</button>
+                            <button class="btn btn-ghost btn-sm" @onclick="() => _mConfirmRemove = null">Abbrechen</button>
+                        </div>
+                    }
+                    @if (_mConfirmLeave)
+                    {
+                        <div class="alert alert-error" role="alertdialog" aria-label="Zusammenarbeit beenden">
+                            Du verlierst sofort die direkte Bearbeitung dieses Moduls. Deine Änderungen bleiben erhalten.
+                            <button class="btn btn-primary btn-sm" @onclick="LeaveModuleAsync" disabled="@_mBusy">Ja, beenden</button>
+                            <button class="btn btn-ghost btn-sm" @onclick="() => _mConfirmLeave = false">Abbrechen</button>
+                        </div>
+                    }
+                    <button class="btn btn-ghost" @onclick="() => { _mAddOpen = !_mAddOpen; _mCandidates = new(); _mPending = null; }" aria-expanded="@(_mAddOpen ? "true" : "false")">Co-Author hinzufügen</button>
+                    @if (_mAddOpen)
+                    {
+                        <input class="input" placeholder="Benutzer suchen (mindestens 3 Zeichen: Name oder E-Mail)" @bind="_mQuery" @bind:event="oninput" @onkeyup="SearchModuleCandidatesAsync" aria-label="Benutzer für die Modulzusammenarbeit suchen" />
+                        @if (_mCandidates.Count > 0 && _mPending is null)
+                        {
+                            <ul class="topic-search-results">
+                                @foreach (var u in _mCandidates)
+                                {
+                                    <li><span>@u.DisplayName <span class="muted">@u.Email</span></span><button class="btn btn-ghost btn-sm" @onclick="() => _mPending = u">Auswählen</button></li>
+                                }
+                            </ul>
+                        }
+                        @if (_mPending is not null)
+                        {
+                            <div class="alert alert-info" role="alertdialog" aria-label="Co-Author bestätigen">
+                                <strong>@_mPending.DisplayName</strong> (@_mPending.Email) darf die Karten, das Quiz und den Fragenpool dieses Moduls bearbeiten und weitere direkte Co-Autoren verwalten.
+                                <button class="btn btn-primary btn-sm" @onclick="AddModuleCoAuthorAsync" disabled="@_mBusy">Als Co-Author hinzufügen</button>
+                                <button class="btn btn-ghost btn-sm" @onclick="() => _mPending = null">Abbrechen</button>
+                            </div>
+                        }
+                    }
+                }
+                @if (_mMessage is not null) { <p class="@(_mError ? "alert alert-error" : "alert alert-ok")" role="status">@_mMessage</p> }
+            </section>
+        }
+
         @if (_configOpen)
         {
-            <QuizConfigPanel ModuleId="@ModuleId" OnClose="CloseConfig" />
+            <QuizConfigPanel ModuleId="@ModuleId" OnClose="CloseConfig" ResolveUser="EditUserAsync" />
         }
 
         <div class="editor-layout">
@@ -427,6 +516,13 @@
     }
 
     private ModuleInfo? _module;
+    private ModuleCollaboration? _mcollab;
+    private bool _mBusy, _mAddOpen, _mConfirmLeave, _mError;
+    private string _mQuery = "";
+    private string? _mMessage;
+    private List<UserSearchResult> _mCandidates = new();
+    private UserSearchResult? _mPending;
+    private TopicCoAuthorInfo? _mConfirmRemove;
     private List<ModuleTopicUsage> _usage = new();
     private ModuleCompetencyModel _model = new();
     private bool _compOpen;
@@ -441,6 +537,36 @@
 
     private void AddObjective() => _model.Objectives.Add(new LearningObjective { Id = "lz" + (_model.Objectives.Count + 1), Text = "" });
     private void AddCompetency() => _model.Competencies.Add(new Competency { Id = "k" + (_model.Competencies.Count + 1), Name = "", PassPercent = 60, MinQuestions = 1 });
+
+    private async Task SearchModuleCandidatesAsync() => _mCandidates = _mQuery.Trim().Length >= 3 ? await TopicSvc.SearchModuleCoAuthorCandidatesAsync(_actorSub, ModuleId, _mQuery) : new();
+    private async Task RunModuleCollabAsync(Func<Task> action, string ok)
+    {
+        _mBusy = true; _mMessage = null; _mError = false;
+        try { await action(); _mMessage = ok; _mcollab = await TopicSvc.GetModuleCollaborationAsync(_actorSub, ModuleId); }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException or UnauthorizedAccessException)
+        { _mMessage = ex is KeyNotFoundException ? "Du hast für dieses Modul keine Zusammenarbeitsrechte (mehr)." : ex.Message; _mError = true; }
+        _mBusy = false;
+    }
+    private Task AddModuleCoAuthorAsync()
+    {
+        var u = _mPending; if (u is null) return Task.CompletedTask;
+        return RunModuleCollabAsync(async () => { await TopicSvc.AddModuleCoAuthorAsync(_actorSub, ModuleId, u.Id); _mPending = null; _mAddOpen = false; _mQuery = ""; _mCandidates = new(); }, $"{u.DisplayName} ist jetzt direkter Co-Author.");
+    }
+    private Task RemoveModuleCoAuthorAsync()
+    {
+        var c = _mConfirmRemove; if (c is null) return Task.CompletedTask;
+        return RunModuleCollabAsync(async () => { await TopicSvc.RemoveModuleCoAuthorAsync(_actorSub, ModuleId, c.UserId); _mConfirmRemove = null; }, $"{c.DisplayName} wurde als direkter Co-Author entfernt.");
+    }
+    private async Task LeaveModuleAsync()
+    {
+        _mBusy = true;
+        try { await TopicSvc.LeaveModuleCoAuthorAsync(_actorSub, ModuleId); Nav.NavigateTo("/"); }
+        catch (Exception ex) when (ex is KeyNotFoundException or InvalidOperationException) { _mMessage = ex.Message; _mError = true; _mConfirmLeave = false; }
+        _mBusy = false;
+    }
+
+    /// <summary>Aktueller Bearbeitungskontext für untergeordnete Komponenten (Quiz-Einstellungen): vor jeder Nutzung neu geprüft, <c>null</c> bei entzogenem Zugriff.</summary>
+    private async Task<string?> EditUserAsync() => await StillAllowedAsync() ? _userSub : null;
 
     /// <summary>Vor jedem Schreibzugriff: im Co-Author-Kontext die Berechtigung erneut gegen die Datenbank prüfen — ein Entzug wirkt sofort, auch in einer bereits geöffneten Sitzung (ADR 0052).</summary>
     private async Task<bool> StillAllowedAsync()
@@ -515,7 +641,8 @@
         _userSub = await TopicSvc.ResolveModuleEditOwnerAsync(_actorSub, ModuleId);   // nur Module, die im Entwurf eines Themas liegen, an dem man Co-Author ist
         _coContext = !string.Equals(_userSub, _actorSub, StringComparison.OrdinalIgnoreCase);
         _module = await Repo.GetModuleAsync(ModuleId, _userSub);
-        _usage = _module is null ? new() : (await TopicSvc.ListModuleUsageAsync(_userSub)).GetValueOrDefault(_module.Id) ?? new();   // nur eigene Module (Besitzprüfung in der SQL-Abfrage)
+        _usage = _module is null || _coContext ? new() : (await TopicSvc.ListModuleUsageAsync(_userSub)).GetValueOrDefault(_module.Id) ?? new();   // nur eigene Module (Besitzprüfung in der SQL-Abfrage)
+        if (_module is not null) { try { _mcollab = await TopicSvc.GetModuleCollaborationAsync(_actorSub, ModuleId); } catch (KeyNotFoundException) { _mcollab = null; } }
         await LoadVersionsAsync();
         _model = _module is null ? new() : await CompetencySvc.GetModelRawAsync(_module.Id);
         if (_module is not null)
@@ -537,6 +664,7 @@
 
     private async Task LoadDraftAsync(string cardId)
     {
+        if (!await StillAllowedAsync()) return;   // auch Lesen: ein entzogener Co-Autor erhält in einer offenen Sitzung keine weiteren Karteninhalte (ADR 0053)
         var card = await Repo.GetCardAsync(cardId, _userSub);
         if (card is null) { _draft = null; return; }
         _draft = new Draft
@@ -564,6 +692,7 @@
     private async Task LoadPoolAsync()
     {
         _poolEdit = null; _poolEditId = null; _poolError = null;
+        if (!await StillAllowedAsync()) { _poolQs = new(); return; }   // enthält Lösungen: nach dem Entzug nicht mehr laden
         _poolQs = _draft?.Id is null ? new() : (await Quiz.ListQuestionsAsync(ModuleId, _userSub, _draft.Id))
             .Where(q => q.Source != QuizSources.CardJson).ToList();   // card_json-Fragen gehören dem Karten-JSON und werden oben mit der Karte bearbeitet
     }
@@ -632,6 +761,7 @@
     private async Task ToggleArchivedAsync(ChangeEventArgs e)
     {
         _showArchived = e.Value is true;
+        if (!await StillAllowedAsync()) return;
         await LoadCardsAsync();
     }
 

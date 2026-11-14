@@ -1,0 +1,138 @@
+@page "/topics/{Id}/preview"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject TopicService Topics
+@inject AuthenticationStateProvider AuthState
+
+@* Themenvorschau / Testmodus (ADR 0054): Entwurf des Themas für Eigentümer und Themen-Co-Autoren — Lernvorschau der Module und Prüfungsstruktur, ohne Speicherung, ohne Versuch, ohne Abschluss. *@
+<PageTitle>Testmodus — @(_d?.Topic.Name ?? "Thema") — LearnCards</PageTitle>
+
+<div class="container module-page">
+    @if (_loading)
+    {
+        <div class="spinner-wrap" aria-busy="true"><div class="spinner" role="status"></div></div>
+    }
+    else if (_d is null)
+    {
+        <div class="alert alert-error" role="alert">@(_error ?? "Das Thema wurde nicht gefunden oder du darfst es nicht testen.")</div>
+        <a class="btn btn-primary" href="/topics">Zu den Themen</a>
+    }
+    else
+    {
+        <div class="alert alert-info preview-banner" role="status">
+            <strong>🧪 Testmodus</strong> — Vorschau des <strong>Themenentwurfs</strong>. Es wird nichts gespeichert: kein Lernfortschritt, keine Prüfungsversuche, keine Ergebnisse, keine Abschlüsse oder Zertifikate.
+            Dies ist weder reguläres Lernen noch eine Zuweisung oder Freigabe.
+        </div>
+        @if (_error is not null) { <div class="alert alert-error" role="alert">@_error</div> }
+        @if (_notice is not null) { <div class="alert alert-info" role="status">@_notice</div> }
+
+        <section class="module-hero card">
+            <h1>🧪 @_d.Topic.Name <span class="badge badge-coauthor">Testmodus</span> <span class="badge badge-draft">Entwurf</span></h1>
+            <p class="muted">Thema von @_d.Topic.OwnerName@(_d.IsCoAuthor ? " · du arbeitest als Co-Author mit" : "") · @_d.Modules.Count Module</p>
+            <div class="page-head-actions">
+                <a class="btn btn-ghost" href="/topics/@Id/edit">✏ Thema bearbeiten</a>
+                @if (_d.FinalExam.Enabled)
+                {
+                    <button class="btn btn-primary" @onclick="StartFinalAsync" disabled="@(_busy || _revoked)">🎓 Abschlussprüfung testen</button>
+                }
+            </div>
+        </section>
+
+        @if (_revoked)
+        {
+            <div class="empty-state"><div class="empty-icon" aria-hidden="true">🔒</div><p class="empty-title">@TopicService.PreviewRevokedMessage</p></div>
+        }
+        else if (_session is not null)
+        {
+            <section class="card panel" aria-label="Prüfung im Testmodus">
+                <h2 class="panel-title">@_sessionLabel <span class="badge badge-coauthor">Testmodus</span></h2>
+                <QuizRunner Session="_session" Preview="true" OnClose="CloseSession" OnRestart="RestartAsync" />
+            </section>
+        }
+        else
+        {
+            <ol class="topic-modules" aria-label="Module des Themenentwurfs">
+                @foreach (var m in _d.Modules)
+                {
+                    var can = _previewable.GetValueOrDefault(m.ModuleId);
+                    <li class="card panel topic-module-row">
+                        <strong>@m.Icon @m.Name</strong>
+                        <span class="muted">@m.Cards Karten · @m.PoolQuestions Fragen</span>
+                        @if (m.Unavailable) { <span class="badge badge-warn">nicht mehr verfügbar</span> }
+                        else if (can)
+                        {
+                            <a class="btn btn-ghost btn-sm" href="/module/@m.ModuleId/preview" title="Karten und Modulquiz im Testmodus durchgehen">🧪 Lernen testen</a>
+                            @if (m.Exam.Enabled)
+                            {
+                                <button class="btn btn-primary btn-sm" @onclick="() => StartModuleExamAsync(m)" disabled="@(_busy || _revoked)" title="Modulprüfung des Entwurfs im Testmodus (zählt nicht)">📝 Modulprüfung testen</button>
+                            }
+                            <a class="btn btn-ghost btn-sm" href="/module/@m.ModuleId/edit">✏ Karten bearbeiten</a>
+                        }
+                        else
+                        {
+                            <span class="badge badge-warn" title="Das Modul liegt auch in einem Thema ohne dein Bearbeitungsrecht und kann deshalb nicht gemeinsam getestet werden (ADR 0053/0054).">nicht gemeinsam testbar</span>
+                        }
+                    </li>
+                }
+            </ol>
+            @if (_d.Modules.Count == 0) { <p class="muted">Noch keine Module zugeordnet.</p> }
+            @if (_d.FinalExam.Enabled) { <p class="muted">Abschlussprüfung: @_d.FinalExam.QuestionCount Fragen · bestanden ab @_d.FinalExam.PassPercent % · eigene Themenfragen (aktiv): @_topicQuestions</p> }
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public string Id { get; set; } = "";
+
+    private TopicDetail? _d;
+    private Dictionary<string, bool> _previewable = new();
+    private int _topicQuestions;
+    private bool _loading = true, _revoked, _busy;
+    private string? _error, _notice, _sessionLabel;
+    private string _actor = "";
+    private QuizStartResponse? _session;
+    private Func<Task<QuizStartResponse>>? _restart;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _actor = auth.User.GetUserId() ?? throw new UnauthorizedAccessException();
+        _loading = true; _error = null; _revoked = false; _session = null;
+        await LoadAsync();
+        _loading = false;
+    }
+
+    private async Task LoadAsync()
+    {
+        try { (_d, _previewable, _topicQuestions) = await Topics.GetTopicPreviewAsync(_actor, Id); }
+        catch (KeyNotFoundException) { if (_d is null) _error = null; else Revoke(); }   // nie berechtigt → „nicht gefunden“; „entzogen“ nur, wenn der Zugriff zuvor bestand
+    }
+
+    private void Revoke()
+    {
+        if (_session is not null) Topics.DiscardPreview(_session.SessionId, _actor);
+        _session = null; _revoked = true; _error = TopicService.PreviewRevokedMessage; _loading = false;
+        if (_d is not null) { _d.Modules = new(); }
+    }
+
+    private async Task RunAsync(string label, Func<Task<QuizStartResponse>> start)
+    {
+        _busy = true; _error = null; _notice = null;
+        try { _session = await start(); _sessionLabel = label; _restart = start; }
+        catch (KeyNotFoundException) { Revoke(); }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or QuizRuleException) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private Task StartModuleExamAsync(TopicModuleView m) => RunAsync($"📝 Modulprüfung: {m.Name}", () => Topics.StartPreviewModuleExamAsync(_actor, Id, m.ModuleId));
+
+    private Task StartFinalAsync() => RunAsync("🎓 Abschlussprüfung", async () =>
+    {
+        var (session, excluded) = await Topics.StartPreviewFinalExamAsync(_actor, Id);
+        if (excluded > 0) _notice = $"{excluded} Modul(e) mit Mehrfachzuordnung ohne dein Bearbeitungsrecht sind nicht einbezogen.";
+        return session;
+    });
+
+    private async Task RestartAsync() { var r = _restart; _session = null; if (r is not null) await RunAsync(_sessionLabel ?? "", r); }
+    private void CloseSession() { if (_session is not null) Topics.DiscardPreview(_session.SessionId, _actor); _session = null; }
+}

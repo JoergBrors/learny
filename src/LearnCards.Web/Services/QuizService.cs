@@ -140,9 +140,16 @@ public partial class QuizService
     /// <paramref name="requestedCount"/> kann den konfigurierten Umfang nur verkleinern.
     /// </summary>
     public async Task<QuizStartResponse> StartSessionAsync(string moduleId, string category, string? cardId, int requestedCount, string userSub, CancellationToken ct = default)
+        => (await StartSessionCoreAsync(null, moduleId, category, cardId, requestedCount, userSub, ct)).Response;
+
+    /// <summary>
+    /// Gemeinsamer Kern für reguläre Quizze und die Vorschau (ADR 0054). <paramref name="previewAccess"/> ≠ null: Testmodus — Zugriff vom vertrauenswürdigen Aufrufer (<c>TopicService</c>) bereits
+    /// geprüft, <paramref name="userSub"/> ist dann der Eigentümerkontext; es werden <b>nichts</b> gespeichert (keine Sitzung, kein Pool, kein Fortschritt), keine Wiederholungsgrenze, alle aktiven Karten statt der markierten.
+    /// </summary>
+    private async Task<(QuizStartResponse Response, QuizSessionRecord Session)> StartSessionCoreAsync(ModuleAccess? previewAccess, string moduleId, string category, string? cardId, int requestedCount, string userSub, CancellationToken ct)
     {
-        await CleanupSessionsIfDueAsync(false, ct);
-        var access = await _repo.ResolveModuleAccessAsync(userSub, moduleId)
+        if (previewAccess is null) await CleanupSessionsIfDueAsync(false, ct);
+        var access = previewAccess ?? await _repo.ResolveModuleAccessAsync(userSub, moduleId)
             ?? throw new InvalidOperationException("Das ausgewählte Modul wurde nicht gefunden.");
         var module = access.Module;
         var config = await _pool.GetConfigAsync(module.Id, ct);
@@ -154,11 +161,11 @@ public partial class QuizService
         if (!config.Enabled) throw new QuizRuleException("Das Quiz ist für dieses Modul deaktiviert.", 403);
         if (cardQuiz && config.Scope == QuizConfig.ScopeModule) throw new QuizRuleException("Für dieses Modul sind nur modulweite Quizze erlaubt.", 403);
         if (!cardQuiz && config.Scope == QuizConfig.ScopeCard) throw new QuizRuleException("Für dieses Modul sind nur Karten-Quizze erlaubt.", 403);
-        if (!config.AllowRetry && (await _repo.QuizHistoryAsync(userSub, module.Id, cardQuiz ? cardId : null, 200))
+        if (previewAccess is null && !config.AllowRetry && (await _repo.QuizHistoryAsync(userSub, module.Id, cardQuiz ? cardId : null, 200))
                 .Any(r => !string.IsNullOrEmpty(r.SessionId) && (cardQuiz || string.IsNullOrEmpty(r.CardId))))
             throw new QuizRuleException("Wiederholungen sind für dieses Quiz nicht erlaubt.", 409);
 
-        var cards = await ResolveQuizCardsAsync(module.Id, category, userSub, cardId);
+        var cards = previewAccess is null ? await ResolveQuizCardsAsync(module.Id, category, userSub, cardId) : await ResolvePreviewCardsAsync(new[] { module.Id }, category, cardId);
         if (cards.Count == 0)
             throw new InvalidOperationException(cardQuiz
                 ? "Die ausgewählte Karte wurde nicht gefunden oder ist nicht aktiv."
@@ -199,7 +206,7 @@ public partial class QuizService
         {
             try
             {
-                var persist = access.CanEdit;   // Lernende in freigegebenen/globalen Modulen verändern den Pool nie
+                var persist = access.CanEdit && previewAccess is null;   // Lernende in freigegebenen/globalen Modulen und die Vorschau verändern den Pool nie
                 var existingFp = stored.Select(q => q.Fingerprint).ToHashSet();
                 var generated = await GenerateQuestionsAsync(module.Id, cards, allowed, missing, persist, existingFp, module.GlobalVersion, ct);
                 picked.AddRange(generated);
@@ -240,9 +247,9 @@ public partial class QuizService
             UserSub = userSub, ModuleId = module.Id, CardId = cardQuiz ? cardId : null, Category = category ?? "", Context = access.Context,
             ModuleVersion = module.GlobalVersion, Config = config, Questions = picked,
         };
-        await _pool.SaveSessionAsync(session);
+        if (previewAccess is null) await _pool.SaveSessionAsync(session);
 
-        return new QuizStartResponse
+        return (new QuizStartResponse
         {
             SessionId = session.Id, ModuleId = module.Id, Category = session.Category, CardId = cardQuiz ? cardId! : "",
             PassPercent = config.PassPercent, ShowCorrectAnswers = config.ShowCorrectAnswers, Notices = notices,
@@ -251,7 +258,7 @@ public partial class QuizService
                 Question = q.Question, Topic = q.Topic, SourceCardId = q.CardId ?? "", SourceTerm = q.SourceTerm,
                 QuestionId = SessionQuestionKey(q, picked), Type = q.Type, Options = q.Options.ToList(),
             }).ToList(),
-        };
+        }, session);
     }
 
     private static bool OriginAllowed(QuizConfig c, string origin) => c.Origin switch
@@ -431,7 +438,7 @@ public partial class QuizService
 
     private sealed record FreeItem(int Index, string Question, string UserAnswer, string SourceCardId, string Explanation);
 
-    private async Task<QuizResultResponse> GradeSessionAsync(QuizSessionRecord session, QuizSubmitRequest req, string userSub, ModuleAccess access, CancellationToken ct)
+    private async Task<QuizResultResponse> GradeSessionAsync(QuizSessionRecord session, QuizSubmitRequest req, string userSub, ModuleAccess access, CancellationToken ct, IReadOnlyList<string>? previewModuleIds = null)
     {
         var cfg = session.Config;
         var graded = new GradedAnswer?[session.Questions.Count];
@@ -467,7 +474,7 @@ public partial class QuizService
         string overallFeedback = "";
         if (freeItems.Count > 0)
         {
-            var cards = await ResolveCardsForEvaluationAsync(session.ModuleId, session.Category, session.CardId, userSub);
+            var cards = previewModuleIds is null ? await ResolveCardsForEvaluationAsync(session.ModuleId, session.Category, session.CardId, userSub) : await ResolvePreviewCardsAsync(previewModuleIds, session.Category, session.CardId);
             var (freeGraded, feedback) = await GradeFreeTextAsync(freeItems, cards, session.Category, ct);
             overallFeedback = feedback;
             foreach (var (item, g) in freeItems.Zip(freeGraded))
@@ -489,13 +496,15 @@ public partial class QuizService
             ? $"{all.Count(g => g.Correct == true)} von {choiceCount} Auswahlfragen richtig."
             : overallFeedback;
 
-        var checkedCards = await ResolveQuizCardsAsync(session.ModuleId, session.Category, userSub, session.CardId);
+        var checkedCards = previewModuleIds is null ? await ResolveQuizCardsAsync(session.ModuleId, session.Category, userSub, session.CardId) : await ResolvePreviewCardsAsync(previewModuleIds, session.Category, session.CardId);
         var result = new QuizResultResponse
         {
             Score = total, MaxScore = max, Percentage = pct, Grade = GradeFor(pct), Feedback = feedbackText, GradedAnswers = all,
             Stats = BuildQuizStats(session.Questions.Select(q => new QuizAnswerItem { Question = q.Question, SourceCardId = q.CardId ?? "" }).ToList(), checkedCards),
             SessionId = session.Id, Passed = passed, PassPercent = cfg.PassPercent, ModuleVersion = session.ModuleVersion, ShowCorrectAnswers = cfg.ShowCorrectAnswers,
         };
+
+        if (previewModuleIds is not null) return result;   // Testmodus (ADR 0054): kein Ergebnis, kein Versuch, kein Zertifikat, keine Statistik
 
         var record = new QuizResultRecord
         {

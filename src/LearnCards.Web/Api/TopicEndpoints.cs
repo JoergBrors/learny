@@ -112,9 +112,37 @@ public static partial class ApiEndpoints
             Run(async () => Results.Json(ModuleSummaryDto(await modules.CloneGlobalAsync(Uid(http), moduleId, http.RequestAborted)), statusCode: 201)));
     }
 
+    /// <summary>
+    /// Direkte Modul-Co-Autoren (ADR 0053). Berechtigt sind Eigentümer und direkte Modul-Co-Autoren (Prüfung im Service gegen die Datenbank); ein aus einem Thema abgeleitetes Recht verwaltet
+    /// sie nicht. Der Pfad liegt unter /api/modules, ist für MCP-Tokens aber ausdrücklich gesperrt (Filter in ApiEndpoints: „/coauthors“).
+    /// </summary>
+    private static void MapModuleCoAuthorEndpoints(RouteGroupBuilder secured)
+    {
+        secured.MapGet("/modules/{moduleId}/coauthors", (string moduleId, HttpContext http, TopicService topics) =>
+            GuardTopic(async () => Results.Ok(ModuleCollaborationDto(await topics.GetModuleCollaborationAsync(Uid(http), moduleId)))));
+        secured.MapGet("/modules/{moduleId}/coauthors/candidates", (string moduleId, string? q, HttpContext http, TopicService topics) =>
+            GuardTopic(async () => Results.Ok((await topics.SearchModuleCoAuthorCandidatesAsync(Uid(http), moduleId, q)).Select(u => new { id = u.Id, display_name = u.DisplayName, email = u.Email }))));
+        secured.MapPost("/modules/{moduleId}/coauthors", (string moduleId, TopicUserRequest req, HttpContext http, TopicService topics) =>
+            GuardTopic(async () => Results.Json(CoAuthorDto(await topics.AddModuleCoAuthorAsync(Uid(http), moduleId, req.UserId)), statusCode: 201)));
+        secured.MapDelete("/modules/{moduleId}/coauthors/{userId}", (string moduleId, string userId, HttpContext http, TopicService topics) =>
+            GuardTopic(async () => await topics.RemoveModuleCoAuthorAsync(Uid(http), moduleId, userId) ? Results.NoContent() : Results.Json(new { detail = "Co-Author nicht gefunden." }, statusCode: 404)));
+        secured.MapPost("/modules/{moduleId}/coauthors/leave", (string moduleId, HttpContext http, TopicService topics) =>
+            GuardTopic(async () => await topics.LeaveModuleCoAuthorAsync(Uid(http), moduleId) ? Results.NoContent() : Results.Json(new { detail = "Keine direkte Co-Author-Berechtigung." }, statusCode: 404)));
+    }
+
+    private static object ModuleCollaborationDto(ModuleCollaboration c) => new
+    {
+        module_id = c.ModuleId, module_name = c.ModuleName, owner = new { user_id = c.OwnerUserId, display_name = c.OwnerName, email = c.OwnerEmail },
+        access = c.ViewerKind switch { ModuleAccessKind.Owner => "owner", ModuleAccessKind.Direct => "direct", _ => "via_topic" }, can_manage = c.CanManage,
+        direct_co_authors = c.DirectCoAuthors.Select(CoAuthorDto),
+        derived_access = c.DerivedAccess.Select(d => new { topic_id = d.TopicId, topic_name = d.TopicName, user_id = d.UserId, display_name = d.DisplayName }),
+        via_topics = c.ViewerViaTopics.Select(t => new { topic_id = t.TopicId, topic_name = t.TopicName }),
+    };
+
     private static void MapTopicEndpoints(RouteGroupBuilder secured)
     {
         MapModuleTransferEndpoints(secured);
+        MapModuleCoAuthorEndpoints(secured);
         var t = secured.MapGroup("/topics");
 
         t.MapGet("/", (HttpContext http, TopicService topics, bool include_archived = false) =>

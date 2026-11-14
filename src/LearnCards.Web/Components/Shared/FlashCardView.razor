@@ -142,7 +142,10 @@
             {
                 <a class="btn btn-ghost btn-sm" href="/module/@Card.ModuleId/edit?card=@Card.Id" aria-label="Diese Karte bearbeiten">✏ Bearbeiten</a>
             }
-            <button class="btn btn-primary btn-sm" @onclick="() => _chatOpen = !_chatOpen" aria-label="KI-Chatbot zu dieser Karte öffnen">💬 Chat</button>
+            @if (!PreviewMode)
+            {
+                <button class="btn btn-primary btn-sm" @onclick="() => _chatOpen = !_chatOpen" aria-label="KI-Chatbot zu dieser Karte öffnen">💬 Chat</button>
+            }
             <button class="btn btn-sm @(MarkedKnown ? "btn-known-active" : "btn-known")" @onclick="() => OnMarkKnown.InvokeAsync(Card.Id)"
                     aria-pressed="@MarkedKnown" aria-label="Als geprüft markieren">✔ Check</button>
             <button class="btn btn-sm @(MarkedReview ? "btn-review-active" : "btn-review")" @onclick="() => OnMarkReview.InvokeAsync(Card.Id)"
@@ -156,7 +159,7 @@
 
     <p class="kbd-hint"><kbd>←</kbd><kbd>→</kbd> navigieren · <kbd>G</kbd> Bekannt · <kbd>R</kbd> Wiederholen</p>
 
-    @if (_chatOpen)
+    @if (_chatOpen && !PreviewMode)
     {
         <ChatPanel Card="Card" OnClose="() => _chatOpen = false" />
     }
@@ -173,6 +176,8 @@
     [Parameter] public EventCallback<string> OnArchive { get; set; }
     /// <summary>Nur der Eigentümer darf archivieren; bei freigegebenen/globalen Modulen ausgeblendet (ADR 0015).</summary>
     [Parameter] public bool CanEdit { get; set; } = true;
+    /// <summary>Testmodus (ADR 0054): kein KI-Chat (er speichert einen Verlauf); alles Weitere steuert der Aufrufer über die Callbacks.</summary>
+    [Parameter] public bool PreviewMode { get; set; }
 
     /// <summary>
     /// Darstellbare Bilder (ADR 0017): Der Browser lädt jedes Bild erst bei Bedarf über <c>/api/images/{id}</c> (Berechtigung wie die Karte, unabhängig vom Bildspeicher);

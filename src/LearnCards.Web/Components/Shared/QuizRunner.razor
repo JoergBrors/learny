@@ -1,8 +1,13 @@
 @* Gemeinsame Quiz-Oberfläche für Karten- und Modulquiz (ADR 0019): Fragen beantworten (Single Choice, Multiple Response, Freitext) → serverseitig bewerten → Ergebnis *@
 @inject QuizService Quiz
 @inject AuthenticationStateProvider AuthState
+@inject TopicService TopicSvc
 
 <div class="card-quiz-runner">
+    @if (Preview)
+    {
+        <div class="alert alert-info" role="status"><strong>🧪 Testmodus</strong> — Auswertung nur zur Ansicht: Das Ergebnis wird nicht gespeichert und zählt nicht als Prüfung, Versuch oder Abschluss.</div>
+    }
     @if (_error is not null)
     {
         <div class="alert alert-error" role="alert">@_error</div>
@@ -152,6 +157,8 @@
     [Parameter] public EventCallback OnRestart { get; set; }
     /// <summary>Wird nach erfolgreicher Abgabe aufgerufen (z. B. um den Verlauf neu zu laden).</summary>
     [Parameter] public EventCallback OnSubmitted { get; set; }
+    /// <summary>Testmodus (ADR 0054): Abgabe über <c>TopicService.SubmitPreviewAsync</c> (erneute Berechtigungsprüfung, keine Speicherung).</summary>
+    [Parameter] public bool Preview { get; set; }
 
     private int _current;
     private List<HashSet<int>> _selected = new();
@@ -207,9 +214,10 @@
                     UserAnswer = _texts[i], SelectedIndexes = _selected[i].OrderBy(x => x).ToList(),
                 }).ToList(),
             };
-            _result = await Quiz.SubmitQuizAsync(req, userSub);
+            _result = Preview ? await TopicSvc.SubmitPreviewAsync(userSub, req) : await Quiz.SubmitQuizAsync(req, userSub);
             await OnSubmitted.InvokeAsync();
         }
+        catch (KeyNotFoundException ex) when (Preview) { _error = ex.Message; }   // „Dein Zugriff auf diese Vorschau wurde entzogen.“
         catch (Exception ex) { _error = "Bewertung fehlgeschlagen: " + ex.Message; }
         finally { _loading = false; }
     }

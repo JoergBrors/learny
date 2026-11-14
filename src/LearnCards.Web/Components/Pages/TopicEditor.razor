@@ -66,6 +66,7 @@
             <textarea id="tdesc" class="input" rows="3" maxlength="2000" @bind="_description"></textarea>
             <div class="page-head-actions topic-actions">
                 <button class="btn btn-primary" @onclick="SaveGeneralAsync" disabled="@(_d.Topic.Status == "archived")">Speichern</button>
+                <a class="btn btn-ghost" href="/topics/@Id/preview" title="Entwurf als Lernender ausprobieren — nichts wird gespeichert">🧪 Vorschau testen</a>
                 @if (_d.IsOwner)
                 {
                     <button class="btn btn-ghost" @onclick="DuplicateAsync">Duplizieren</button>
@@ -100,6 +101,15 @@
                             <span class="badge badge-warn">kein eigenes Modul</span>
                             <button class="btn btn-ghost btn-sm" @onclick="() => ReplaceWithCloneAsync(m.ModuleId)" disabled="@_busy"
                                     title="Klont das globale Modul in deine eigenen Module und ersetzt die Zuordnung (Position und Prüfung bleiben)">⧉ Durch eigene Kopie ersetzen</button>
+                        }
+                        @if (_editable.GetValueOrDefault(m.ModuleId))
+                        {
+                            <a class="btn btn-ghost btn-sm" href="/module/@m.ModuleId/edit" title="Karten, Quiz und Fragenpool dieses Moduls bearbeiten">✏ Karten bearbeiten</a>
+                            @if (_d.IsCoAuthor) { <span class="badge badge-coauthor" title="Zugriff über deine Co-Author-Berechtigung an diesem Thema">über dieses Thema</span> }
+                        }
+                        else if (_d.IsCoAuthor && !m.Unavailable)
+                        {
+                            <span class="badge badge-warn" title="Das Modul liegt auch in einem Thema ohne dein Bearbeitungsrecht und kann deshalb nicht gemeinsam bearbeitet werden (ADR 0053).">nicht gemeinsam bearbeitbar</span>
                         }
                         <span class="topic-row-actions">
                             <button class="icon-btn" title="Nach oben" aria-label="@($"{m.Name} nach oben")" @onclick="() => MoveAsync(idx, -1)" disabled="@(idx == 0)">▲</button>
@@ -423,6 +433,7 @@
     private string? _message;
     private string _userId = "";
     private TopicCollaboration? _collab;
+    private Dictionary<string, bool> _editable = new();
     private bool _conflict, _addOpen, _confirmLeave;
     private string _coQuery = "";
     private List<UserSearchResult> _candidates = new();
@@ -444,6 +455,8 @@
             if (!_d.CanEdit) { _d = null; return; }   // Eigentümer oder Co-Author (ADR 0052)
             _name = _d.Topic.Name; _description = _d.Topic.Description;
             _collab = await Topics.GetCollaborationAsync(_userId, Id);
+            _editable = new(StringComparer.OrdinalIgnoreCase);
+            foreach (var em in _d.Modules.Where(x => !x.Unavailable && !x.RequiresOwnCopy)) _editable[em.ModuleId] = await Topics.CanEditModuleAsync(_userId, em.ModuleId);   // ADR 0053: Link nur, wenn der Zugriff aktuell gilt
             _cfg = await Topics.GetExamConfigAsync(_userId, Id);
             _questions = await Topics.ListQuestionsAsync(_userId, Id);
             _shares = _d.IsOwner ? await Topics.ListSharesAsync(_userId, Id) : new();
