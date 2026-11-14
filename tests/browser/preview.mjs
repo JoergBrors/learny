@@ -36,6 +36,7 @@ try {
   ok(await b.waitText('Testmodus') && await b.waitText('Vorschaukarte'), 'Modulvorschau: Testmodus-Banner und Karte des Entwurfs');
   ok(!(await b.ev(`document.body.innerText.includes('💬 Chat')`)), 'Modulvorschau: kein KI-Chat (würde Verlauf speichern)');
   await b.click('📝 Modulquiz testen'); ok(await b.waitText('Quiz starten'), 'Quizkonfiguration im Testmodus');
+  await b.type('input[type=number]', '1');   // genau eine Frage: sonst ergänzt der Offline-Fallback weitere Fragen und „Abgeben“ erscheint erst auf der letzten
   await b.click('Quiz starten'); ok(await b.waitText('Welche Antwort stimmt?'), 'Quizfrage aus dem Entwurf erscheint');
   await b.clickContains('Richtig', 'button.quiz-option');
   await b.click('Abgeben & bewerten');
@@ -43,13 +44,14 @@ try {
   ok((await api(b, '/api/quiz/history')).s !== 200 || !(await api(b, '/api/quiz/history')).j.includes(m1), 'Kein Ergebnis im Verlauf des Co-Autors');
 
   // 4. Verlassen und erneut starten: neue Vorschau
-  await b.click('Fertig'); await sleep(600);
-  await b.click('📝 Modulquiz testen'); await b.click('Quiz starten');
+  await b.click('Fertig'); ok(await b.waitText('Modulquiz testen') && !(await b.text()).includes('Bestanden'), 'Nach „Fertig“: Auswertung geschlossen');
+  await b.click('📝 Modulquiz testen'); ok(await b.waitText('Quiz starten'), 'Neue Quizkonfiguration erscheint');
+  await b.type('input[type=number]', '1'); await b.click('Quiz starten');
   ok(await b.waitText('Welche Antwort stimmt?') && !(await b.text()).includes('Bestanden'), 'Erneuter Start beginnt eine neue Vorschau (ohne altes Ergebnis)');
 
   // 5. Entzug während geöffneter Vorschau
   await api(a, `/api/topics/${t}/coauthors/${meB.id}`, 'DELETE');
-  await b.clickContains('Richtig', 'button.quiz-option'); await b.click('Abgeben & bewerten'); await sleep(1500);
+  await b.clickContains('Richtig', 'button.quiz-option'); await b.click('Abgeben & bewerten'); await b.waitText('entzogen', 6000);
   const t5 = await b.text();
   ok(t5.includes('Dein Zugriff auf diese Vorschau wurde entzogen.') && !t5.includes('Bestanden'), 'Entzug in offener Vorschau: „Dein Zugriff auf diese Vorschau wurde entzogen.“, keine Auswertung');
   await b.go(`${B}/module/${m1}/preview`);
@@ -63,6 +65,17 @@ try {
   ok(await c.waitText('nicht gefunden') || await c.waitText('entzogen'), 'Direktes Modulrecht gewährt keine Themenvorschau');
   await c.go(`${C}/module/${m1}/preview`);
   ok(await c.waitText('nicht gefunden') || await c.waitText('entzogen'), 'Direkter Co-Autor: fremdes Modul gesperrt');
+
+  // 6b. Entzug des direkten Modulrechts in offener Vorschau
+  await c.go(`${C}/module/${m2}/preview`); await c.waitText('Direktkarte');
+  await c.click('📝 Modulquiz testen'); await c.waitText('Quiz starten'); await c.type('input[type=number]', '1'); await c.click('Quiz starten');
+  ok(await c.waitText('Welche Antwort stimmt?'), 'Direkter Co-Autor: Quiz in offener Vorschau');
+  await api(a, `/api/modules/${m2}/coauthors/${meC.id}`, 'DELETE');
+  await c.clickContains('Richtig', 'button.quiz-option'); await c.click('Abgeben & bewerten'); await c.waitText('entzogen', 6000);
+  const t6 = await c.text();
+  ok(t6.includes('Dein Zugriff auf diese Vorschau wurde entzogen.') && !t6.includes('Bestanden'), 'Entzug des direkten Modulrechts in offener Vorschau: Sperrmeldung, keine Auswertung');
+  await c.go(`${C}/module/${m2}/preview`);
+  ok(!(await c.text()).includes('Direktkarte'), 'Nach Entzug des direkten Rechts: Karteninhalt nicht sichtbar');
 
   // 7. Fremder
   const o = await newPage(`${C}/auth/login?devUser=pv-outsider`); await sleep(2500);
