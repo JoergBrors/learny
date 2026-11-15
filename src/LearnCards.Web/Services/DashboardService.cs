@@ -29,7 +29,7 @@ public sealed class DashboardService
     public async Task<DashboardData> LoadAsync(string userId)
     {
         if (!UserService.IsGuid(userId)) throw new UnauthorizedAccessException("Kein Benutzerkontext.");
-        var overview = await _topics.ListOverviewAsync(userId);
+        var overview = await _topics.ListOverviewAsync(userId, assignedOnly: true);   // Dashboard zeigt nur Zugewiesenes/Pflicht: keine Statistik der eigenen Themen berechnen
 
         // Zugewiesene und verpflichtende Themen (auch eigene/globale mit ausdrücklicher Pflichtzuweisung), ohne Doppelte
         var relevant = overview.Assigned.Concat(overview.Mandatory).Concat(overview.MandatoryDone)
@@ -60,7 +60,7 @@ public sealed class DashboardService
         }
 
         var certs = (await _certs.ListForUserAsync(userId)).Where(c => !c.IsRevoked).OrderByDescending(c => c.CompletedAt ?? c.IssuedAt).ToList();
-        var cont = await _landing.ResolveAsync(userId);
+        var cont = await _landing.ResolveAsync(userId, overview);   // keine zweite Themenübersicht laden
         return new DashboardData(cont, cont != "/", topics, next, progress,
             certs.Take(3).Select(c => new DashCertificate(c.Id, c.ModuleName, c.IsTopic, c.CompletedAt ?? c.IssuedAt)).ToList(), certs.Count, relevant.Any(t => t.Overdue));
     }

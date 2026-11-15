@@ -76,7 +76,7 @@ public partial class TopicService
     }
 
     /// <summary>Module des Entwurfs mit aktuellen Zahlen (Originale; nicht mehr zugreifbare Module sind als <c>Unavailable</c> markiert).</summary>
-    private async Task<List<TopicModuleView>> DraftModuleViewsAsync(string topicId, string viewerId)
+    private async Task<List<TopicModuleView>> DraftModuleViewsAsync(string topicId, string viewerId, bool includeState = true)
     {
         var cfg = await LoadExamConfigAsync(topicId);
         var list = new List<TopicModuleView>();
@@ -95,8 +95,11 @@ public partial class TopicService
                 // Anzeige aus dem festgelegten Modulstand (nicht aus dem veränderlichen Original)
                 var view = await ViewOfModuleAsync(frozen, pos++, exam);
                 view.ModuleId = row.ModuleId; view.SourceModuleId = row.ModuleId; view.Version = ver.VersionNumber;
-                var (latest, changed) = await _moduleVersions.GetStateAsync(access.Module);
-                view.LatestVersion = latest; view.ModuleHasUnpublishedChanges = changed; view.NewerAvailable = latest > ver.VersionNumber || changed;
+                if (includeState)   // Inhaltsfingerabdruck je Modul ist teuer; Zählwerte (Stats) brauchen ihn nicht
+                {
+                    var (latest, changed) = await _moduleVersions.GetStateAsync(access.Module);
+                    view.LatestVersion = latest; view.ModuleHasUnpublishedChanges = changed; view.NewerAvailable = latest > ver.VersionNumber || changed;
+                }
                 list.Add(view);
             }
             else list.Add(await ViewOfModuleAsync(access.Module, pos++, exam));
@@ -114,13 +117,14 @@ public partial class TopicService
 
     private async Task<TopicStats> DraftStatsAsync(string topicId, string viewerId)
     {
-        var views = (await DraftModuleViewsAsync(topicId, viewerId)).Where(v => !v.Unavailable).ToList();
+        var views = (await DraftModuleViewsAsync(topicId, viewerId, includeState: false)).Where(v => !v.Unavailable).ToList();   // Zählwerte: kein Versionsstatus nötig
         var fin = (await LoadExamConfigAsync(topicId)).FinalExam;
-        var topicQs = (await ListQuestionsRawAsync(topicId, activeOnly: true)).Where(q => fin.AllowedTypes().Contains(q.Type)).Count();
+        var allTopicQs = await ListQuestionsRawAsync(topicId, activeOnly: true);   // einmal laden (vorher zweimal)
+        var topicQs = allTopicQs.Where(q => fin.AllowedTypes().Contains(q.Type)).Count();
         return new TopicStats
         {
             Modules = views.Count, Cards = views.Sum(v => v.Cards), ChoiceQuestions = views.Sum(v => v.ChoiceQuestions), PoolQuestions = views.Sum(v => v.PoolQuestions),
-            TopicQuestions = (await ListQuestionsRawAsync(topicId, activeOnly: true)).Count, FinalExamQuestions = fin.Enabled ? fin.QuestionCount : 0,
+            TopicQuestions = allTopicQs.Count, FinalExamQuestions = fin.Enabled ? fin.QuestionCount : 0,
             FinalExamPool = fin.Enabled ? await FinalPoolSizeAsync(views.Select(v => v.ModuleId), fin, topicQs) : 0,
         };
     }

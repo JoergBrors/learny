@@ -29,13 +29,13 @@ public sealed class LandingService
         return rows.Select(r => r["module_id"]!).ToList();
     }
 
-    public async Task<string> ResolveAsync(string? userId)
+    public async Task<string> ResolveAsync(string? userId, TopicService.TopicOverview? overview = null)
     {
         if (!UserService.IsGuid(userId)) return "/";
         try
         {
             // 1) zugewiesene, noch nicht abgeschlossene Themen (Pflicht zuerst ist dort sichtbar)
-            var overview = await _topics.ListOverviewAsync(userId!);
+            overview ??= await _topics.ListOverviewAsync(userId!, assignedOnly: true);   // der Aufrufer (Dashboard) kann seine bereits geladene Übersicht übergeben
             if (overview.Assigned.Any(t => t.Progress?.Status != "completed")) return "/topics?tab=assigned";
             // eigene oder globale Themen mit ausdrücklicher Pflichtzuweisung erscheinen nicht unter „Mir zugewiesen“: dann direkt das erste offene Pflichtthema
             if (overview.Mandatory.FirstOrDefault() is { } mandatory) return $"/topics/{mandatory.Topic.Id}?version={mandatory.Version}";

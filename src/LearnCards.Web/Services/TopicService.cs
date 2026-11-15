@@ -541,13 +541,14 @@ public partial class TopicService
     }
 
     /// <summary>Vier Bereiche: meine Themen, mit mir geteilte, mir zugewiesene und globale Themen. Archivierte Themen erscheinen nur mit <paramref name="includeArchived"/>.</summary>
-    public async Task<TopicOverview> ListOverviewAsync(string userId, bool includeArchived = false)
+    /// <param name="assignedOnly">Nur für Aufrufer, die ausschließlich Zugewiesenes/Pflicht brauchen (Dashboard, Startziel): „Eigene“ und „Gemeinsam bearbeitet“ werden nicht geladen (deren Statistik ist der teuerste Teil). Berechtigung und Ergebnis der übrigen Abschnitte sind unverändert.</param>
+    public async Task<TopicOverview> ListOverviewAsync(string userId, bool includeArchived = false, bool assignedOnly = false)
     {
         var overview = new TopicOverview();
         var archivedFilter = includeArchived ? "" : " AND t.status = 'active'";
         var restricted = await _repo.IsRestrictedLearnerAsync(userId);   // ADR 0049: externe Lernprofile sehen nur ausdrücklich zugewiesene Themen
 
-        foreach (var r in restricted ? new List<Dictionary<string, string?>>() : await _db.QueryAsync(TopicSelect + " WHERE t.owner_user_id = @u" + archivedFilter + " ORDER BY t.name", new[] { ("u", (object?)userId) }))
+        foreach (var r in restricted || assignedOnly ? new List<Dictionary<string, string?>>() : await _db.QueryAsync(TopicSelect + " WHERE t.owner_user_id = @u" + archivedFilter + " ORDER BY t.name", new[] { ("u", (object?)userId) }))
         {
             var topic = MapTopic(r);
             var summary = new TopicSummary { Topic = topic, Section = TopicSections.Own, Version = topic.LatestVersion, GlobalStatus = await LatestGlobalStatusAsync(topic.Id) };
@@ -558,7 +559,7 @@ public partial class TopicService
         }
 
         // Gemeinsam bearbeitete Themen (ADR 0052): nur aktive, nicht eingeschränkte Benutzer; die Statistik zählt Moduldaten des Eigentümers im Themenkontext
-        foreach (var r in restricted ? new List<Dictionary<string, string?>>() : await _db.QueryAsync(TopicSelect + " JOIN topic_coauthors c ON c.topic_id = t.id AND c.user_id = @u WHERE t.owner_user_id <> @u" + archivedFilter + " ORDER BY t.name", new[] { ("u", (object?)userId) }))
+        foreach (var r in restricted || assignedOnly ? new List<Dictionary<string, string?>>() : await _db.QueryAsync(TopicSelect + " JOIN topic_coauthors c ON c.topic_id = t.id AND c.user_id = @u WHERE t.owner_user_id <> @u" + archivedFilter + " ORDER BY t.name", new[] { ("u", (object?)userId) }))
         {
             var topic = MapTopic(r);
             overview.CoAuthored.Add(new TopicSummary

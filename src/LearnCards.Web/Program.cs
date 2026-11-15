@@ -27,9 +27,12 @@ var cfg = AppConfig.Load();
 builder.Services.AddSingleton(cfg);
 builder.Services.AddHttpClient();
 
-builder.Services.AddSingleton<IDatabase>(_ => cfg.DbProvider == DbProvider.Postgres
-    ? new PostgresDatabase(cfg.Postgres)
-    : new SqliteDatabase(cfg.SqlitePath));
+builder.Services.AddSingleton<IDatabase>(_ =>
+{
+    IDatabase db = cfg.DbProvider == DbProvider.Postgres ? new PostgresDatabase(cfg.Postgres) : new SqliteDatabase(cfg.SqlitePath);
+    // Nur Development: Abfragen je Anfrage zählen/messen (Server-Timing); im Produktivbetrieb kein Mehraufwand
+    return builder.Environment.IsDevelopment() ? new TimingDatabase(db) : db;
+});
 // Bildspeicher (ADR 0017): Registry (primärer Provider + weitere konfigurierte), Cache, Bilddienst
 builder.Services.AddSingleton<ImageStorageRegistry>();
 builder.Services.AddSingleton<IImageCache>(sp => ImageCacheFactory.Create(cfg.ImageStorage, out FileImageCache? _));
@@ -186,6 +189,20 @@ if (app.Environment.IsDevelopment() && string.IsNullOrEmpty(cfg.Blockchain.Publi
     // Entwicklung ohne PUBLIC_BASE_URL: Badge-URLs zeigen auf die tatsächlich genutzte Adresse (Host/Port der Anfrage).
     var certSvc = app.Services.GetRequiredService<CertificateService>();
     app.Use(async (ctx, next) => { certSvc.ObservedOrigin ??= $"{ctx.Request.Scheme}://{ctx.Request.Host}"; await next(); });
+}
+if (app.Environment.IsDevelopment())
+{
+    // Server-Timing (nur Development): Gesamtdauer bis zum Versand der Antwort, Datenbankdauer und Anzahl der Abfragen — keine SQL-Texte, keine Parameter, keine Personendaten
+    app.Use(async (ctx, next) =>
+    {
+        var started = System.Diagnostics.Stopwatch.GetTimestamp(); var timing = LearnCards.Web.Data.RequestTiming.Begin();
+        ctx.Response.OnStarting(() =>
+        {
+            ctx.Response.Headers["Server-Timing"] = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"total;dur={System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds:0.#}, db;dur={timing.DbMs:0.#};desc=\"{timing.Count} queries\"");
+            return Task.CompletedTask;
+        });
+        await next();
+    });
 }
 app.UseAuthentication();
 app.UseAuthorization();

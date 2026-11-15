@@ -68,3 +68,37 @@ curl -s -X POST "https://<host>/_blazor/negotiate?negotiateVersion=1" -H "Conten
 - **Lokal geprüft** (Prüfskript des Schritts mit `pwsh` gegen die Dev-Instanz): Origin: Transporte `WebSockets, ServerSentEvents, LongPolling`, Handshake erfolgreich (State=Open), Ergebnis „bestanden“. Gegen `https://learny.brors.date` als öffentlicher Pfad: Negotiate bietet WebSockets nicht an → Warnung (mit `IIS_REQUIRE_WEBSOCKETS=true` Fehler) — der Schritt erkennt den Produktionsbefund also.
 - **Nicht lokal prüfbar:** der Installationsteil (`Install-WindowsFeature`, Windows-Server-Runner), der Origin-Handshake gegen IIS, Cloudflare-Pfad, Browser-Nachmessung (Transport, `/_blazor`-Anzahl, Navigation) und PWA/Suspend-Resume. Diese Punkte bleiben nach freigegebenem Deployment zu prüfen: `perf-baseline.mjs` gegen die Produktion ist ohne Anmeldung nicht möglich; stattdessen Chrome-Trace wie im Ausgangsbefund wiederholen und `availableTransports` sowie die Anzahl der `/_blazor`-Requests vergleichen.
 - **Risiken:** Ein WebSocket-Handshake am Origin beweist nicht, dass der öffentliche Pfad (Cloudflare) ihn durchlässt — daher `IIS_PUBLIC_URL`. `Install-WindowsFeature` braucht Administratorrechte des Runners; auf einem Client-Betriebssystem ist es nicht verfügbar (Warnung statt Abbruch).
+
+## Nachtrag 2: Langsame Menüwechsel Dashboard/Themen (Server-Phasen, N+1-Abfragen)
+
+**Trace 15.11.2026 17:54 (Auftrag):** Dashboard 2.014 ms (TTFB ≈ 1.996 ms), Themenübersicht ≈ 1.023 ms, Modul-/Themendetail 105–214 ms. WebSockets funktionieren inzwischen.
+
+**Bestätigte Ursache: viele einzelne Datenbankabfragen (N+1) bei der serverseitigen Datenbeschaffung**, nicht Rendering oder Transport. Messung mit dem neuen Development-Server-Timing (`Data/TimingDatabase.cs`, Header `Server-Timing: total, db;desc="N queries"`, nur in Development, ohne SQL-Text/Parameter) und `tests/browser/perf-server.mjs` (Benutzer mit 12 Themen à 4 Modulen, 5 Läufe, Median; SQLite im Prozess, daher kleine Millisekundenwerte — maßgeblich ist die **Abfrageanzahl**):
+
+| Seite | Abfragen vorher | Abfragen nachher | total ms vorher → nachher (lokal, SQLite) |
+|---|---|---|---|
+| `/dashboard` | 1.392 | **39** | 121 → 6 |
+| `/topics` | 684 | **384** | 48 → 28 |
+| `/` (Module) | 698 | 398 | 40 → 34 |
+| `/achievements` | 6 | 6 | 2 → 3 |
+
+Plausibilitätsprüfung (Annahme, nicht gemessen): Bei einem Datenbankserver mit rund 1,4–1,5 ms je Abfrage ergeben 1.392 bzw. 684 Abfragen ziemlich genau die gemessenen ≈ 2,0 s bzw. ≈ 1,0 s. Die Abfragezahlen der Produktionsdaten sind nicht bekannt (Datenmenge und Datenbank-Latenz des Traces unbekannt); die Größenordnung passt zum Muster „Dashboard ≈ doppelt so teuer wie Themenübersicht“.
+
+**Gefundene Einzelursachen**
+1. **Dashboard lud die Themenübersicht zweimal:** `DashboardService.LoadAsync` und danach `LandingService.ResolveAsync` riefen beide `TopicService.ListOverviewAsync`. → Die Übersicht wird einmal geladen und an `ResolveAsync` übergeben (optionaler Parameter).
+2. **Dashboard berechnete die Statistik aller eigenen Themen**, obwohl es nur Zugewiesenes/Pflicht anzeigt. → `ListOverviewAsync(…, assignedOnly: true)` lässt „Eigene“ und „Gemeinsam bearbeitet“ aus; Zugewiesen, geteilt, global und Pflicht (inkl. eigener/globaler Pflichtthemen) bleiben unverändert, Berechtigungsprüfungen (`ResolveVersionForLearnerAsync`, `ComputeProgressForUserAsync`) sind nicht berührt.
+3. **Je Modul eines Themenentwurfs wurde der teure Inhaltsfingerabdruck (`GetStateAsync`) berechnet**, nur um „neuere Version verfügbar“ anzuzeigen — für die Zählwerte (Module/Karten/Fragen) unnötig. → `DraftModuleViewsAsync(…, includeState: false)` in `DraftStatsAsync`; die Ansichten, die den Status brauchen, sind unverändert.
+4. `DraftStatsAsync` lud die Themenfragen zweimal. → einmal.
+
+**Doppelte Initialisierung durch Prerendering:** Seiten mit `@rendermode InteractiveServer` führen `OnInitializedAsync` beim Vorrendern und erneut in der Sitzung aus. Der Server-Timing-Header misst nur die Vorrender-Ausführung (HTTP). Die zweite Ausführung ist nicht gemessen und **nicht verändert** (Prerendering bleibt an; `PersistentComponentState` wäre ein eigener Auftrag).
+
+**Verbleibende Engpässe**
+- `/topics`: weiterhin ≈ 32 Abfragen je eigenem Thema (je Modul Zugriff auflösen, festgelegte Version/Original laden, Frage- und Kartenzählungen). Weitere Einsparung braucht eine gebündelte Abfrage über alle Module; wegen der Berechtigungsprüfung je Modul bewusst nicht in diesem Schritt.
+- `/` (Modulliste): 398 Abfragen bei 100 Modulen/12 Themen — nicht Gegenstand dieses Auftrags, gleiche Mustergruppe (Modulaktualisierungen/Entwurfserkennung).
+- Keine PostgreSQL-Messung der Laufzeiten und keine Messung in der Produktion; Zielwert „unter 300 ms“ ist nur über die Abfrageanzahl plausibel, nicht gemessen belegt.
+
+**Wahrgenommene Navigation:** Ladebalken und Notausgang (`pwa.js`, v0.1.32) sind vorhanden; der aktive Menüpunkt wird über `aria-current` markiert; die Sidebar wird nie blockiert. Eine „Sofortnavigation“ mit alten Inhalten wurde bewusst nicht eingeführt.
+
+**Reproduktion:** `LEARNY_BROWSER_TEST=1 PERF_RUNS=5 node tests/browser/perf-server.mjs` gegen eine Dev-Instanz (Development liefert `Server-Timing`).
+
+**Release:** v0.1.34 (nur IIS, per Tag; kein GitHub-Release, daher kein Docker-Build). Tests vor dem Release: Build ohne Fehler, Integrationstests 2474/2474 (SQLite im Prozess + PostgreSQL 16). Ausstehend: PostgreSQL-Laufzeitmessung, Produktionsmessung und PWA-Messung (mobil); `/topics` braucht weiter 384 Abfragen (12 Themen).
