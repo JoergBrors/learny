@@ -89,6 +89,7 @@ Unter GitHub → `Settings` → `Secrets and variables` → `Actions` → `Varia
 - `OIDC_WEB_SCOPE`
 - `OPENAI_MODEL`
 - `OPENAI_BASE_URL`
+- Optional (nicht Teil des Workflows; bei Bedarf in `web.env` ergänzen): `AVATAR_IMAGE_ENABLED`, `AVATAR_IMAGE_MODEL`, `AVATAR_IMAGE_EDIT_MODEL`, `AVATAR_IMAGE_QUALITY`, `AVATAR_IMAGE_SIZE`, `AVATAR_IMAGE_TIMEOUT_SECONDS`, `AVATAR_IMAGE_DAILY_LIMIT`, `AVATAR_IMAGE_MAX_CONCURRENT` (KI-Bildavatare, ADR 0056; Standardwerte im Code).
 - `DEV_USER_NAME`
 - `DEV_USER_EMAIL`
 - `MCP_SERVER_NAME`

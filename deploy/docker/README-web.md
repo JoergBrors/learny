@@ -72,6 +72,7 @@ Die vollständige Liste (alle Variablen, Pflicht/Standard) steht in der [Install
 | `OIDC_AUDIENCE`, `OIDC_WEB_SCOPE`, `OIDC_ROLE_MAP`, `ADMIN_SUBJECTS` | nein | — | Zielgruppe, Scopes, Rollenzuordnung, Admin-Bootstrap |
 | `PUBLIC_BASE_URL` | in Produktion | leer | öffentliche URL (Badge-Aussteller, Prüf-Links) |
 | `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_BASE_URL` | nein | — / `gpt-4o-mini` / OpenAI | KI-Funktionen |
+| `AVATAR_IMAGE_ENABLED`, `AVATAR_IMAGE_MODEL`, `AVATAR_IMAGE_EDIT_MODEL`, `AVATAR_IMAGE_QUALITY`, `AVATAR_IMAGE_SIZE`, `AVATAR_IMAGE_TIMEOUT_SECONDS`, `AVATAR_IMAGE_DAILY_LIMIT`, `AVATAR_IMAGE_MAX_CONCURRENT` | nein | `true` / `gpt-image-2.5-flare` / `gpt-image-2.5-sunburst` / `medium` / `1024x1024` / `120` / `10` / `4` | KI-Bildavatare (ADR 0056), kostenpflichtig, nur mit `OPENAI_API_KEY` |
 | `MCP_TOKEN_KEY` | **ja (immer)** | — | Hauptschlüssel (Base64, ≥ 32 Byte, `openssl rand -base64 32`) für MCP-Tokens, Einmal-Codes und OAuth-Clients in der Datenbank (ADR 0025); nie in der Datenbank/Backup, ohne ihn startet Learny nicht |
 | `MCP_API_KEY`, `MCP_PUBLIC_URL`, `MCP_TOKEN_DAYS` | bei MCP | — / — / `30` | Anbindung des MCP-Servers |
 | `BADGE_SIGNING_KEY_PEM` | nein | leer | Signaturschlüssel der Badges (leer = wird im Volume erzeugt) |

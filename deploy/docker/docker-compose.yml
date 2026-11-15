@@ -78,6 +78,15 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      # KI-Bildavatare (ADR 0056): nur mit OPENAI_API_KEY wirksam, kostenpflichtig; Abschalten mit AVATAR_IMAGE_ENABLED=false
+      AVATAR_IMAGE_ENABLED: ${AVATAR_IMAGE_ENABLED:-true}
+      AVATAR_IMAGE_MODEL: ${AVATAR_IMAGE_MODEL:-gpt-image-2.5-flare}
+      AVATAR_IMAGE_EDIT_MODEL: ${AVATAR_IMAGE_EDIT_MODEL:-gpt-image-2.5-sunburst}
+      AVATAR_IMAGE_QUALITY: ${AVATAR_IMAGE_QUALITY:-medium}
+      AVATAR_IMAGE_SIZE: ${AVATAR_IMAGE_SIZE:-1024x1024}
+      AVATAR_IMAGE_TIMEOUT_SECONDS: ${AVATAR_IMAGE_TIMEOUT_SECONDS:-120}
+      AVATAR_IMAGE_DAILY_LIMIT: ${AVATAR_IMAGE_DAILY_LIMIT:-10}
+      AVATAR_IMAGE_MAX_CONCURRENT: ${AVATAR_IMAGE_MAX_CONCURRENT:-4}
       # Zertifikate / Open Badges / Blockchain (ADR 0021/0022). Der Badge-Schlüssel wird beim ersten Start im Volume erzeugt
       # (/app/data/badge-signing-key.pem); BADGE_SIGNING_KEY_PEM (Secret-Verwaltung) hat Vorrang.
       BADGE_SIGNING_KEY_PEM: ${BADGE_SIGNING_KEY_PEM:-}

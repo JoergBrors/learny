@@ -212,6 +212,14 @@ Pflicht: **PostgreSQL-Betrieb** → `POSTGRES_PASSWORD`; **OIDC-Betrieb** → `O
 | `OPENAI_API_KEY` | web | nein | leer | OpenAI-Schlüssel für Chat/Quiz-Generierung/KI-Bewertung; ohne Schlüssel gilt der Offline-Fallback. |
 | `OPENAI_MODEL` | web | nein | `gpt-4o-mini` | Modell. |
 | `OPENAI_BASE_URL` | web | nein | `https://api.openai.com/v1` | Basis-URL einer OpenAI-kompatiblen API. |
+| `AVATAR_IMAGE_ENABLED` | web | nein | `true` | Schalter für KI-Bildavatare (ADR 0056); `false` = nur SVG-Baukasten. Nur mit `OPENAI_API_KEY` wirksam; kostenpflichtig. |
+| `AVATAR_IMAGE_MODEL` | web | nein | `gpt-image-2.5-flare` | Bildmodell ohne Referenzfoto (unabhängig von `OPENAI_MODEL`). |
+| `AVATAR_IMAGE_EDIT_MODEL` | web | nein | `gpt-image-2.5-sunburst` | Bildmodell mit Referenzfoto. |
+| `AVATAR_IMAGE_QUALITY` | web | nein | `medium` | `low`, `medium`, `high` oder `auto` (Kosten steigen mit der Qualität). |
+| `AVATAR_IMAGE_SIZE` | web | nein | `1024x1024` | Größe: Vielfache von 16, mindestens 655.360 Pixel. |
+| `AVATAR_IMAGE_TIMEOUT_SECONDS` | web | nein | `120` | Frist je Erzeugung. |
+| `AVATAR_IMAGE_DAILY_LIMIT` | web | nein | `10` | Erzeugungen je Benutzer und 24 h (je Instanz); `0` = keine. |
+| `AVATAR_IMAGE_MAX_CONCURRENT` | web | nein | `4` | Gleichzeitige Erzeugungen insgesamt. |
 | `BADGE_SIGNING_KEY_PEM` | web | nein | leer | Signaturschlüssel der Badges (ECDSA P-256, PKCS#8-PEM). Leer = Schlüssel wird beim ersten Start im Volume erzeugt. |
 | `PKI_PUBLIC_URL` | web | nein | leer (→ `PUBLIC_BASE_URL`) | Öffentliche Basis-URL für die Learny-PKI (ADR 0035); steht unveränderlich in den CRL-Verteilungspunkten. Ohne diese und `PUBLIC_BASE_URL` wird die PKI nicht automatisch eingerichtet. |
 | `PKI_AUTO_INIT` | web | nein | `true` | Einmalige automatische Einrichtung der PKI beim allerersten Start (nie bei späteren Starts). `false` = nur ausdrücklich unter Administration → PKI. |
