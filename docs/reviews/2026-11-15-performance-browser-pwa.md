@@ -171,3 +171,40 @@ Tests: `tests/browser/a11y-seo.mjs` (9 Prüfungen: Meta-Beschreibung, Sidebar-/D
 - **Tests:** Build ohne Fehler; Integrationstests 2248/2248 (SQLite); Browsertests `a11y-seo` 11/11, `pwa-nav` 5/5, `co-author-topic` 26/26, `module-list-updates` 28/28, `module-collaboration` 20/20.
 - **Semantik:** Beschreibende Labels der Listenkarten und der Flip-Karte bleiben bewusst erhalten (siehe oben).
 - **Offen / nicht geprüft:** installierte Produktions-PWA und Suspend/Resume auf einem Gerät; kein Service Worker (HTTP-Cache und fingerprintete Assets, keine eigene Cache-Strategie); Produktions-Lighthouse ohne Erweiterungen; N+1-Abfragen auf `/topics` und Modulliste; mobiler LCP lokal über 2,5 s (Dev unkomprimiert).
+
+## Produktions-Lighthouse v0.1.35
+
+Stand: 15.11.2026, nach dem IIS-Deployment von v0.1.35 (Tag `v0.1.35`, Commit `45f5740`; kein Docker-Build, kein GitHub-Release).
+
+**Zustand der Produktion:** Deployment-Lauf „Deploy To IIS On Tag“ erfolgreich, `/health` HTTP 200, `/_blazor/negotiate` bietet `WebSockets, ServerSentEvents, LongPolling` an, die Meta-Beschreibung steht in der ausgelieferten HTML-Seite.
+
+### Messbedingungen
+- Lighthouse 13.6.0 (CLI, außerhalb des Repositories installiert), Kategorien Performance, Accessibility, Best Practices, SEO.
+- Chrome headless (`--headless=new --disable-extensions --no-sandbox`) mit frischem Profil, **ohne Browser-Erweiterungen**, ohne Anmeldung.
+- Mobil: Standard-Simulation von Lighthouse (mobile Geräteemulation, simulierte Drosselung); Desktop: `--preset=desktop`.
+- Adresse `https://learny.brors.date`, also über Cloudflare und IIS. Gemessen von einem Entwicklungsrechner; Netzwerkstandort und -qualität sind nicht kontrolliert.
+- 5 Durchläufe je Seite und Geräteprofil; angegeben ist der Median, in Klammern Minimum–Maximum.
+
+### Ergebnisse (öffentliche Seiten)
+| Seite | Profil | Performance | Accessibility | Best Practices | SEO | FCP = LCP | TBT | CLS |
+|---|---|---|---|---|---|---|---|---|
+| `/login` | mobil | 100 (100–100) | 100 (100–100) | 100 (100–100) | 100 (100–100) | 1,22 s | 0 ms | 0 |
+| `/login` | Desktop | 100 (100–100) | 100 (100–100) | 100 (100–100) | 100 (100–100) | 0,30 s | 0 ms | 0 |
+| `/verify` | mobil | 100 (100–100) | 100 (100–100) | 100 (100–100) | 100 (100–100) | 1,21 s | 0 ms | 0 |
+| `/verify` | Desktop | 100 (100–100) | 100 (100–100) | 100 (100–100) | 100 (100–100) | 0,29 s | 0 ms | 0 |
+
+Alle 20 Durchläufe erreichten in allen vier Kategorien 100 Punkte; es gab keine Ausreißer.
+
+### Einordnung
+- Die Messungen bestätigen die sehr gute Performance der **öffentlichen** Seiten in Produktion (u. a. Meta-Beschreibung ausgeliefert, SEO 100).
+- Sie belegen **nicht** die Performance **authentifizierter Lernseiten**: `/login` und `/verify` sind kleine, statische Seiten ohne Anmeldung, ohne interaktive Blazor-Sitzung mit Datenbeschaffung und ohne Dashboard-/Themen-/Modullisten.
+- Der **ursprüngliche Lighthouse-Befund auf `/topics/{id}`** (Performance 89, Accessibility 96, Best Practices 100, SEO 92, TBT 410 ms, LCP 2,0 s) ist damit **nicht als behoben bestätigt**. Eine vergleichbare Produktionsmessung dieser Seite liegt nicht vor; die Korrekturen sind dort bisher nur in der Entwicklungsinstanz gemessen (siehe Nachträge oben).
+
+### Offener Lighthouse-Hinweis
+- **CSS-Minifizierung** (Audit „unminified-css“, Score 0,5): beobachtet in der Auswertung von `/login` mobil, Lauf 1; für die übrigen Profile und Seiten nicht gesondert ausgewertet. Gering priorisiert: Produktion liefert `app.*.css` bereits als Brotli (≈ 13,8 KB) mit `max-age=31536000, immutable`; die Lighthouse-Schätzung bezieht sich auf die unkomprimierte Größe.
+
+### Nicht gemessen / offene Prüfungen
+- `/topics/{id}`, `/dashboard`, `/topics` und `/` (angemeldete Sitzung) in Produktion — Anmeldung per OIDC nötig, kein Zugang für das Messskript.
+- Installierte iPhone-PWA.
+- Suspend/Resume der PWA.
+- WebSocket-Reconnect nach längerer Inaktivität.
