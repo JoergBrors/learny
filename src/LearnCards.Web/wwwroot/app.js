@@ -85,3 +85,9 @@ window.lcDash = { hour: function () { return new Date().getHours(); } };
     // Nach Blazor-Navigation/Enhanced-Updates Beschriftungen angleichen
     window.lcOnEnhanced(init);
 })();
+
+// Profil: neue Avatar-Vorschläge in den sichtbaren Bereich holen (rein optisch, keine Funktion hängt davon ab)
+window.learnyScrollTo = (id) => { const e = document.getElementById(id); if (e) e.scrollIntoView({ block: "nearest" }); };
+
+// Avatar-Galerie: Archiv aus einem Blazor-Stream als Datei speichern (der Server erzeugt das ZIP; das Passwort bleibt auf dem Server)
+window.learnyDownload = async (name, ref) => { const buf = await ref.arrayBuffer(); const url = URL.createObjectURL(new Blob([buf], { type: "application/zip" })); const a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 10000); };

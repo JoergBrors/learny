@@ -51,6 +51,9 @@ public class AppConfig
     public bool OpenAiConfigured =>
         !string.IsNullOrWhiteSpace(OpenAiApiKey) && OpenAiApiKey != "sk-..." && !OpenAiApiKey.StartsWith("replace", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>KI-Bildgenerierung für Profilavatare (ADR 0056): eigene Modelle, Limits, Hauptschalter.</summary>
+    public AvatarImageSettings AvatarImages { get; set; } = new();
+
     // Bildspeicher (ADR 0017)
     public ImageStorageSettings ImageStorage { get; set; } = new();
 
@@ -132,6 +135,7 @@ public class AppConfig
         }
 
         // ── Bildspeicher: Konfiguration laden und beim Start vollständig prüfen (ADR 0017) ──
+        cfg.AvatarImages = AvatarImageSettings.Load();
         cfg.ImageStorage = ImageStorageSettings.Load();
         cfg.ImageStorage.EnsureValid();
 

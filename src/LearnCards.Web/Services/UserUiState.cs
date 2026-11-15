@@ -8,7 +8,11 @@ public sealed class UserUiState
 {
     public string AvatarPreset { get; private set; } = "";
     public bool AvatarHidden { get; private set; }
+    /// <summary>Stimmungen, für die die aktive KI-Figur ein eigenes Bild besitzt (leer bei Baukasten-Avataren); steuert den Hinweis bei fehlenden Varianten.</summary>
+    public IReadOnlySet<string> AvatarMoods { get; private set; } = new HashSet<string>();
     public event Action? Changed;
+
+    public void SetMoods(IReadOnlySet<string> moods) { AvatarMoods = moods; Changed?.Invoke(); }
 
     public void SetAvatar(string preset, bool hidden)
     {

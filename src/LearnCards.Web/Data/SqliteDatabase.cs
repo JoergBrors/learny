@@ -71,6 +71,7 @@ public sealed class SqliteDatabase : IDatabase
             ExecRaw("CREATE INDEX IF NOT EXISTS ix_certificates_test ON certificates(is_test, status)");   // erst nach dem Ergänzen der Spalte (Altdatenbanken)
             EnsureColumn("user_preferences", "avatar", "TEXT NOT NULL DEFAULT ''");   // Avatar-Voreinstellung (reine Darstellung, ADR 0051)
             EnsureColumn("user_preferences", "avatar_hidden", "INTEGER NOT NULL DEFAULT 0");
+            EnsureColumn("avatar_gallery", "figure_id", "TEXT NOT NULL DEFAULT ''");   // Stimmungsvarianten einer Figur (ADR 0058)
             EnsureColumn("user_identities", "kind", "TEXT NOT NULL DEFAULT 'workforce'");   // ADR 0049: 'workforce' (Bestand, Dev) | 'external' (Entra External ID); Altbestand = workforce
             EnsureColumn("topic_assignments", "topic_version", "INTEGER NULL");   // ADR 0029: Zuweisung an eine konkrete Themenversion (NULL = Altbestand: neueste veröffentlichte)
             EnsureColumn("topic_assignments", "mandatory", "INTEGER NOT NULL DEFAULT 1");   // 1 = verpflichtend (Altbestand = Lernaufgabe)

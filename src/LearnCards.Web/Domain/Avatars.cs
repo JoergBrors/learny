@@ -1,7 +1,7 @@
 namespace LearnCards.Web.Domain;
 
 /// <summary>Eine vordefinierte Avatar-Variante (ADR 0051). Rein dekorativ: leitet nichts aus der Identität ab und verleiht keine Rechte.</summary>
-public sealed record AvatarPreset(string Id, string Name, string Skin, string Hair, string HairStyle, string Outfit, string Accessory);
+public sealed record AvatarPreset(string Id, string Name, string Skin, string Hair, string HairStyle, string Outfit, string Accessory, string Face = "oval", string Beard = "none");
 
 /// <summary>Vordefinierte, selbst gezeichnete Lernbegleiter (SVG, ohne externe Dienste). Unterschiedliche Hauttöne, Frisuren, Kleidung und Accessoires; keine Ableitung persönlicher Merkmale.</summary>
 public static class Avatars
@@ -21,7 +21,10 @@ public static class Avatars
     /// <summary>Zulässige Zustände (Stimmung) der Darstellung.</summary>
     public static readonly IReadOnlySet<string> States = new HashSet<string> { "neutral", "happy", "motivating", "success", "encouraging" };
 
-    public static readonly IReadOnlySet<string> HairStyles = new HashSet<string> { "short", "long", "bob", "curly", "bun" };
+    public static readonly IReadOnlySet<string> HairStyles = new HashSet<string> { "short", "long", "bob", "curly", "bun", "buzz", "spiky", "sidepart", "afro", "bald" };
+    /// <summary>Gesichtsformen und Bartformen des erweiterten Baukastens (ADR 0055); fehlen sie in der Kennung, gelten „oval“ und „none“ (Altbestand bleibt gültig).</summary>
+    public static readonly IReadOnlySet<string> FaceShapes = new HashSet<string> { "oval", "round", "square", "long" };
+    public static readonly IReadOnlySet<string> Beards = new HashSet<string> { "none", "stubble", "short", "full" };
     public static readonly IReadOnlySet<string> Accessories = new HashSet<string> { "none", "beanie", "cap", "headphones", "glasses" };
     private const string CustomPrefix = "custom:";
     private static readonly System.Text.RegularExpressions.Regex HexColor = new("^#[0-9A-Fa-f]{6}$", System.Text.RegularExpressions.RegexOptions.Compiled);
@@ -32,19 +35,33 @@ public static class Avatars
         if (id is not null && id.StartsWith(CustomPrefix, StringComparison.Ordinal))
         {
             var parts = id[CustomPrefix.Length..].Split('|');
-            return parts.Length == 5 ? Custom(parts[0], parts[1], parts[2], parts[3], parts[4]) : null;
+            return parts.Length switch { 5 => Custom(parts[0], parts[1], parts[2], parts[3], parts[4]), 7 => Custom(parts[0], parts[1], parts[2], parts[3], parts[4], parts[5], parts[6]), _ => null };
         }
         return All.FirstOrDefault(a => string.Equals(a.Id, id, StringComparison.Ordinal));
     }
 
     /// <summary>Baut einen eigenen Avatar nur aus geprüften Werten (Hexfarben, feste Listen) — nie aus freiem Text/SVG.</summary>
-    public static AvatarPreset? Custom(string skin, string hair, string style, string outfit, string accessory)
+    public static AvatarPreset? Custom(string skin, string hair, string style, string outfit, string accessory, string face = "oval", string beard = "none")
     {
-        if (!HexColor.IsMatch(skin) || !HexColor.IsMatch(hair) || !HexColor.IsMatch(outfit) || !HairStyles.Contains(style) || !Accessories.Contains(accessory)) return null;
-        return new AvatarPreset(Encode(skin, hair, style, outfit, accessory), "Eigener Avatar", skin.ToUpperInvariant(), hair.ToUpperInvariant(), style, outfit.ToUpperInvariant(), accessory);
+        if (!HexColor.IsMatch(skin) || !HexColor.IsMatch(hair) || !HexColor.IsMatch(outfit) || !HairStyles.Contains(style) || !Accessories.Contains(accessory)
+            || !FaceShapes.Contains(face) || !Beards.Contains(beard)) return null;
+        return new AvatarPreset(Encode(skin, hair, style, outfit, accessory, face, beard), "Eigener Avatar", skin.ToUpperInvariant(), hair.ToUpperInvariant(), style, outfit.ToUpperInvariant(), accessory, face, beard);
     }
 
-    public static string Encode(string skin, string hair, string style, string outfit, string accessory) =>
-        $"{CustomPrefix}{skin.ToUpperInvariant()}|{hair.ToUpperInvariant()}|{style}|{outfit.ToUpperInvariant()}|{accessory}";
-    public static bool IsValid(string? id) => Find(id) is not null;
+    /// <summary>Standardform (oval, ohne Bart) bleibt im bisherigen 5-teiligen Format, damit gespeicherte und neue Kennungen kompatibel sind.</summary>
+    public static string Encode(string skin, string hair, string style, string outfit, string accessory, string face = "oval", string beard = "none") =>
+        $"{CustomPrefix}{skin.ToUpperInvariant()}|{hair.ToUpperInvariant()}|{style}|{outfit.ToUpperInvariant()}|{accessory}" + (face == "oval" && beard == "none" ? "" : $"|{face}|{beard}");
+    private const string ImagePrefix = "img:";
+    private static readonly System.Text.RegularExpressions.Regex ImageVersion = new("^[0-9a-f]{16}$", System.Text.RegularExpressions.RegexOptions.Compiled);
+    /// <summary>Kennung eines KI-generierten Bildavatars (ADR 0056): „img:“ + 16 Hex-Zeichen (Version des gespeicherten Bildes). Das Bild selbst liegt in <c>avatar_images</c>.</summary>
+    public static bool IsImageId(string? id) => id is not null && id.StartsWith(ImagePrefix, StringComparison.Ordinal) && ImageVersion.IsMatch(id[ImagePrefix.Length..]);
+    public static string ImageId(string version) => ImagePrefix + version;
+    public static string ImageVersionOf(string id) => id[ImagePrefix.Length..];
+    private const string GalleryPrefix = "gal:";
+    private static readonly System.Text.RegularExpressions.Regex GalleryHex = new("^[0-9a-f]{32}$", System.Text.RegularExpressions.RegexOptions.Compiled);
+    /// <summary>Kennung eines Galerie-Bildavatars (ADR 0057): „gal:“ + 32 Hex-Zeichen = Eintrag der eigenen Galerie (<c>avatar_gallery</c>).</summary>
+    public static bool IsGalleryId(string? id) => id is not null && id.StartsWith(GalleryPrefix, StringComparison.Ordinal) && GalleryHex.IsMatch(id[GalleryPrefix.Length..]);
+    public static string GalleryId(string entryId) => GalleryPrefix + entryId;
+    public static string GalleryEntryId(string id) => id[GalleryPrefix.Length..];
+    public static bool IsValid(string? id) => Find(id) is not null || IsImageId(id) || IsGalleryId(id);
 }

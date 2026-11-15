@@ -41,6 +41,8 @@ builder.Services.AddSingleton<OpenAiClient>();
 builder.Services.AddSingleton<QuizService>();
 builder.Services.AddSingleton<ChatService>();
 builder.Services.AddSingleton<AvatarGeneratorService>();
+builder.Services.AddSingleton<AvatarImageService>();
+builder.Services.AddSingleton<LearnCards.Web.Services.AvatarGallery.AvatarGalleryService>();   // persönliche Avatar-Galerie (ADR 0057)   // echte KI-Bildavatare (ADR 0056)
 builder.Services.AddSingleton<OidcService>();   // Workforce (ADR 0005), unverändert
 builder.Services.AddSingleton<ExternalOidcService>();   // Entra External ID als zweiter, getrennter Anbieter (ADR 0048)
 builder.Services.AddSingleton<OidcStateStore>();   // Einmaligkeit des state über alle Instanzen (ADR 0048)

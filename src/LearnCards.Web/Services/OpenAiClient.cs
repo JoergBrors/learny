@@ -26,7 +26,8 @@ public class OpenAiClient
     public bool IsConfigured => _cfg.OpenAiConfigured;
 
     /// <summary>Eine Completion mit erzwungenem JSON-Objekt als Antwort.</summary>
-    public async Task<JsonDocument> CompleteJsonAsync(string userPrompt, int maxTokens, CancellationToken ct = default)
+    /// <param name="userContent">Optional: mehrteiliger Inhalt (Text + Bild) statt reinem Text; wird nie protokolliert.</param>
+    public async Task<JsonDocument> CompleteJsonAsync(string userPrompt, int maxTokens, CancellationToken ct = default, object? userContent = null)
     {
         var requestedMaxTokens = Math.Max(maxTokens, 1);
         Exception? lastJsonError = null;
@@ -40,7 +41,7 @@ public class OpenAiClient
             var payload = new
             {
                 model = _cfg.OpenAiModel,
-                messages = new[] { new { role = "user", content = userPrompt } },
+                messages = new[] { new { role = "user", content = userContent ?? userPrompt } },
                 response_format = new { type = "json_object" },
                 max_tokens = tokenBudget,
             };
@@ -76,6 +77,13 @@ public class OpenAiClient
 
         throw new InvalidOperationException(lastJsonError?.Message ?? "OpenAI-Antwort konnte nicht als JSON verarbeitet werden.");
     }
+
+    /// <summary>Text plus ein Bild (Data-URL, nur für diesen Aufruf) als mehrteiliger Nutzerinhalt; Bild-Detailstufe „low“ genügt für grobe Merkmale.</summary>
+    public static object ImageContent(string prompt, string mime, byte[] image) => new object[]
+    {
+        new { type = "text", text = prompt },
+        new { type = "image_url", image_url = new { url = $"data:{mime};base64,{Convert.ToBase64String(image)}", detail = "low" } },
+    };
 
     /// <summary>Streamt Antwort-Tokens für den Karten-Chat.</summary>
     public async IAsyncEnumerable<string> StreamChatAsync(

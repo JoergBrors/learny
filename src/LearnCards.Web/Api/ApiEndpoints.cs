@@ -148,6 +148,31 @@ public static partial class ApiEndpoints
             });
         });
 
+        // Eigenes KI-Avatarbild (ADR 0056): nur das Bild des angemeldeten Benutzers, nie per MCP-Token (nicht in TokenAllowedPrefixes); die Version in der Adresse macht es unveränderlich zwischenspeicherbar.
+        secured.MapGet("/me/avatar-image", async (HttpContext http, LearnCards.Web.Services.AvatarGallery.AvatarGalleryService gallery, string? mood) =>
+        {
+            var img = await gallery.GetActiveImageAsync(Uid(http), mood);   // Stimmung: echtes Bild dieser Stimmung, sonst die Hauptvariante (ADR 0058); kein KI-Aufruf
+            if (img is null) return Results.NotFound();
+            var etag = "\"" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(img.Value.Bytes))[..24].ToLowerInvariant() + "\"";
+            http.Response.Headers.CacheControl = "private, no-cache";   // Varianten können später entstehen: immer revalidieren (ETag), nie veraltet anzeigen
+            http.Response.Headers.ETag = etag;
+            if (http.Request.Headers.IfNoneMatch == etag) return Results.StatusCode(StatusCodes.Status304NotModified);
+            http.Response.Headers["X-Content-Type-Options"] = "nosniff";
+            http.Response.Headers["Content-Security-Policy"] = "default-src 'none'; sandbox";
+            return Results.File(img.Value.Bytes, img.Value.Mime);
+        });
+
+        // Ein Bild der eigenen Galerie (Vorschaukacheln): Besitzprüfung in SQL, Kennung unveränderlich → zwischenspeicherbar; nie per MCP-Token (nicht in TokenAllowedPrefixes).
+        secured.MapGet("/me/avatar-gallery/{id}/image", async (string id, HttpContext http, LearnCards.Web.Services.AvatarGallery.AvatarGalleryService gallery) =>
+        {
+            var img = await gallery.GetImageAsync(Uid(http), id);
+            if (img is null) return Results.NotFound();
+            http.Response.Headers.CacheControl = "private, max-age=31536000, immutable";
+            http.Response.Headers["X-Content-Type-Options"] = "nosniff";
+            http.Response.Headers["Content-Security-Policy"] = "default-src 'none'; sandbox";
+            return Results.File(img.Value.Bytes, img.Value.Mime);
+        });
+
         // Einzige selbst änderbare Profilangabe: Anzeigename. Rollen/Status nur über /admin.
         secured.MapPut("/me", async (DisplayNameUpdateRequest req, HttpContext http, UserService users) =>
         {

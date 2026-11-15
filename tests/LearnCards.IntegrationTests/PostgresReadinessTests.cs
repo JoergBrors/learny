@@ -30,6 +30,7 @@ public static class PostgresReadinessTests
         });
         await db.InitAsync();
         await db.InitAsync();
+        await AvatarGalleryUnitTests.RunAsync(check, tmp, db);   // Avatar-Galerie (ADR 0057) auf PostgreSQL
         check(true, "PostgreSQL: Schema und Migrationen sind wiederholbar (idempotent)");
 
         // atomare Gruppe

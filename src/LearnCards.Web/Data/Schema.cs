@@ -226,6 +226,44 @@ public static class Schema
             )
             """;
 
+        // KI-generierter Profilavatar (ADR 0056): höchstens ein übernommenes Bild je Benutzer; Bytes als Base64-Text (portabel für SQLite und PostgreSQL), Originalfotos nie.
+        yield return """
+            CREATE TABLE IF NOT EXISTS avatar_images (
+                user_sub    TEXT PRIMARY KEY,
+                version     TEXT NOT NULL,
+                mime        TEXT NOT NULL,
+                byte_size   INTEGER NOT NULL,
+                data_b64    TEXT NOT NULL,
+                model       TEXT NOT NULL DEFAULT '',
+                style       TEXT NOT NULL DEFAULT '',
+                created_at  TEXT NOT NULL
+            )
+            """;
+
+        // Persönliche Avatar-Galerie (ADR 0057): mehrere Einträge je Benutzer (KI-Bild oder Baukasten), Gruppen, Favoriten. Bytes als Base64-Text (portabel). Der aktive Avatar steht in user_preferences.avatar.
+        yield return """
+            CREATE TABLE IF NOT EXISTS avatar_gallery (
+                id             TEXT PRIMARY KEY,
+                user_sub       TEXT NOT NULL,
+                group_id       TEXT NOT NULL,
+                kind           TEXT NOT NULL,
+                name           TEXT NOT NULL,
+                description    TEXT NOT NULL DEFAULT '',
+                style          TEXT NOT NULL DEFAULT '',
+                mood           TEXT NOT NULL DEFAULT '',
+                mime           TEXT NOT NULL DEFAULT '',
+                byte_size      INTEGER NOT NULL DEFAULT 0,
+                sha256         TEXT NOT NULL DEFAULT '',
+                svg_id         TEXT NOT NULL DEFAULT '',
+                data_b64       TEXT NOT NULL DEFAULT '',
+                favorite       INTEGER NOT NULL DEFAULT 0,
+                created_at     TEXT NOT NULL,
+                legacy_version TEXT NOT NULL DEFAULT '',
+                figure_id      TEXT NOT NULL DEFAULT ''
+            )
+            """;
+        yield return "CREATE INDEX IF NOT EXISTS ix_avatar_gallery_user ON avatar_gallery(user_sub, created_at)";
+
         yield return $"""
             CREATE TABLE IF NOT EXISTS user_card_states (
                 user_sub      TEXT NOT NULL,

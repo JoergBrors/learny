@@ -1,0 +1,469 @@
+@using LearnCards.Web.Services.AvatarGallery
+@implements IDisposable
+@inject AvatarGalleryService Gallery
+@inject AuthenticationStateProvider AuthState
+@inject UserUiState UiState
+@inject AvatarImageService ImgGen
+@inject IJSRuntime JS
+
+@* Meine Avatar-Galerie (ADR 0057): dauerhaft gespeicherte Avatare mit Varianten-Gruppen, Favoriten, Export/Import (ZIP, optional AES-256). Nur die eigene Galerie; die Benutzerkennung kommt aus dem authentifizierten Kontext. *@
+<div class="card panel" id="avatar-gallery">
+    <h2 class="panel-title">Meine Avatar-Galerie</h2>
+    <p class="muted">Hier liegen alle Avatare, die du gespeichert hast (KI-Bilder und Baukasten-Avatare), samt Varianten. Nichts davon ist öffentlich oder für andere sichtbar. Gespeichert wird nur, was du ausdrücklich speicherst; Originalfotos werden nie gespeichert. Ein Archiv-Export enthält nur deine Avatare — keine Kontodaten.</p>
+
+    @if (_error is not null) { <div class="alert alert-error" role="alert">@_error</div> }
+    @if (_notice is not null) { <div class="alert alert-info" role="status">@_notice</div> }
+
+    @if (_loading) { <div class="spinner-wrap" aria-busy="true"><div class="spinner" role="status"></div></div> }
+    else
+    {
+        <div class="gallery-toolbar" role="group" aria-label="Galerie filtern und sortieren">
+            <label class="field"><span class="muted">Typ</span>
+                <select @bind="_fType"><option value="all">Alle</option><option value="image">KI-Bilder</option><option value="svg">Baukasten (SVG)</option></select></label>
+            <label class="field"><span class="muted">Stil</span>
+                <select @bind="_fStyle"><option value="all">Alle</option>@foreach (var st in AvatarImageStyles.All) { <option value="@st.Id">@st.Label</option>}</select></label>
+            <label class="field"><span class="muted">Sortierung</span>
+                <select @bind="_sort"><option value="new">Neueste zuerst</option><option value="old">Älteste zuerst</option></select></label>
+            <label class="pick"><input type="checkbox" @bind="_onlyFav" /> Nur Favoriten</label>
+        </div>
+
+        @if (_entries.Count == 0)
+        {
+            <div class="empty-state"><div class="empty-icon" aria-hidden="true">🖼️</div><p class="empty-title">Noch keine gespeicherten Avatare. Speichere Vorschläge aus dem Generator in der Galerie oder importiere ein Archiv.</p></div>
+        }
+        else if (Visible.Count == 0) { <p class="muted">Keine Avatare für diese Filter.</p> }
+
+        @foreach (var grp in Groups)
+        {
+            <section class="gallery-group" aria-label="@GroupTitle(grp)">
+                @if (grp.Count > 1)
+                {
+                    <div class="gallery-group-head">
+                        <h3 class="panel-subtitle">@GroupTitle(grp) <span class="badge">@grp.Count Varianten</span></h3>
+                        <span class="actions">
+                            <button type="button" class="btn btn-ghost btn-sm" @onclick="() => SelectGroup(grp, true)">Gruppe auswählen</button>
+                            <button type="button" class="btn btn-ghost btn-sm" disabled="@_busy" @onclick="() => AskExport(grp.Select(e => e.Id).ToList())">Gruppe exportieren</button>
+                            <button type="button" class="btn btn-ghost btn-sm" @onclick="() => AskDeleteGroup(grp)">Gruppe löschen</button>
+                        </span>
+                    </div>
+                }
+                <div class="gallery-grid">
+                    @foreach (var c in Cells(grp))
+                    {
+                        if (c.Kind == "head")
+                        {
+                            var fig = c.Figure!; var have = FigureMoods(fig).Count; var missing = AvatarMoods.All.Count - have; var anchor = Anchor(fig);
+                            <div class="gallery-figure-head">
+                                <strong>Figur: @FigureName(fig)</strong>
+                                <span class="badge @(missing == 0 ? "" : "badge-warn")">@have von @AvatarMoods.All.Count Stimmungen@(missing == 0 ? "" : " — unvollständig")</span>
+                                <span class="actions">
+                                    @if (ImgGen.Available && missing > 0)
+                                    {
+                                        <button type="button" class="btn btn-primary btn-sm" disabled="@(_busy || _moodBusy)" @onclick="() => RequestMoodsAsync(anchor.Id)">@(have == 1 ? "Alle 5 Stimmungen erstellen" : "Fehlende Stimmungen erstellen") (@missing Bilder)</button>
+                                    }
+                                    <button type="button" class="btn btn-ghost btn-sm" @onclick="() => SelectGroup(fig, true)">Figur auswählen</button>
+                                    <button type="button" class="btn btn-ghost btn-sm" disabled="@_busy" @onclick="() => AskExport(fig.Select(x => x.Id).ToList())">Figur exportieren</button>
+                                </span>
+                            </div>
+                            continue;
+                        }
+                        if (c.Kind == "missing")
+                        {
+                            var anchorM = c.Figure![0]; var mm = c.Mood!;
+                            <article class="gallery-tile gallery-tile-missing" aria-label="@(AvatarMoods.Label(mm) + " fehlt")">
+                                <div class="gallery-thumb gallery-missing-thumb" aria-hidden="true">?</div>
+                                <strong class="gallery-name">@AvatarMoods.Label(mm)</strong>
+                                <span class="muted">Noch kein Bild dieser Stimmung</span>
+                                @if (ImgGen.Available) { <button type="button" class="btn btn-ghost btn-sm" disabled="@(_busy || _moodBusy)" @onclick="() => RequestMoodsAsync(anchorM.Id, mm)">Erstellen (1 Bild)</button> }
+                            </article>
+                            continue;
+                        }
+                        var e = c.E!;
+                        var id = e.Id; var active = Active(e);
+                        <article class="gallery-tile @(active ? "gallery-tile-active" : "") @(_sel.Contains(id) ? "gallery-tile-selected" : "")" aria-label="@TileLabel(e, active)">
+                            <label class="gallery-select"><input type="checkbox" checked="@_sel.Contains(id)" @onchange="x => ToggleSel(id, x.Value is true)" aria-label="@(e.Name + " auswählen")" /></label>
+                            <div class="gallery-thumb">
+                                @if (e.IsImage) { <img class="avatar avatar-img" style="--av-size:112px" width="112" height="112" src="/api/me/avatar-gallery/@e.Id/image" alt="@e.Name" loading="lazy" decoding="async" /> }
+                                else { <Avatar Preset="@e.SvgId" Name="@e.Name" Size="112" Animate="false" /> }
+                            </div>
+                            @if (_renameId == id)
+                            {
+                                <input class="input" maxlength="@GalleryLimits.MaxNameLength" @bind="_renameText" @bind:event="oninput" aria-label="Neuer Name" />
+                                <span class="actions"><button type="button" class="btn btn-primary btn-sm" @onclick="SaveRename">Speichern</button><button type="button" class="btn btn-ghost btn-sm" @onclick="() => _renameId = null">Abbrechen</button></span>
+                            }
+                            else
+                            {
+                                <strong class="gallery-name">@e.Name</strong>
+                            }
+                            <span class="gallery-meta">
+                                @if (active) { <span class="badge badge-coauthor">Aktiver Profilavatar</span> }
+                                <span class="badge">@(e.IsImage ? "KI-Bild" : "Baukasten")</span>
+                                @if (e.IsImage) { <span class="badge badge-mood">@AvatarMoods.Label(e.Mood)</span> }
+                                @if (StyleLabel(e) is { Length: > 0 } sl) { <span class="badge">@sl</span> }
+                                <span class="muted">@e.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy")</span>
+                            </span>
+                            @if (e.Description.Length > 0) { <span class="muted gallery-desc">@e.Description</span> }
+                            <span class="gallery-actions">
+                                <button type="button" class="btn btn-primary btn-sm" disabled="@(active || _busy)" @onclick="() => Activate(id)">@(active ? "Aktiv" : "Verwenden")</button>
+                                <button type="button" class="btn btn-ghost btn-sm" aria-pressed="@(e.Favorite ? "true" : "false")" title="@(e.Favorite ? "Favorit entfernen" : "Als Favorit markieren")" @onclick="() => ToggleFav(e)">@(e.Favorite ? "★" : "☆")<span class="visually-hidden"> Favorit</span></button>
+                                <button type="button" class="btn btn-ghost btn-sm" @onclick="() => StartRename(e)">Umbenennen</button>
+                                @if (e.IsImage && e.EffectiveMood != AvatarMoods.Neutral && ImgGen.Available) { <button type="button" class="btn btn-ghost btn-sm" disabled="@(_busy || _moodBusy)" @onclick="() => RequestRegenerate(e)">Diese Stimmung neu erstellen</button> }
+                                @if (!e.IsImage) { <button type="button" class="btn btn-ghost btn-sm" aria-expanded="@(_moodsId == id ? "true" : "false")" @onclick="() => _moodsId = _moodsId == id ? null : id">Stimmungen</button> }
+                                <button type="button" class="btn btn-ghost btn-sm" disabled="@(active || _busy)" title="@(active ? "Der aktive Profilavatar kann nicht gelöscht werden." : "Löschen")" @onclick="() => AskDelete(new List<string> { id }, e.Name)">Löschen</button>
+                            </span>
+                            @if (!e.IsImage && _moodsId == id)
+                            {
+                                <div class="avatar-moods" role="group" aria-label="Stimmungen dieser Figur (Darstellungsvarianten, keine eigenen Bilder)">
+                                    @foreach (var st in Moods) { <figure class="avatar-mood"><Avatar Preset="@e.SvgId" Name="@st.Item2" Size="48" State="@st.Item1" Animate="false" /><figcaption>@st.Item2</figcaption></figure> }
+                                </div>
+                            }
+                        </article>
+                    }
+                </div>
+            </section>
+        }
+
+        @if (_moodPlan is not null)
+        {
+            <div class="alert alert-info" role="alertdialog" aria-label="Stimmungen erzeugen bestätigen">
+                <strong>@_moodPlan.Moods.Count Bild(er) für „@_moodPlan.Name“ erzeugen?</strong>
+                Das ist <strong>kostenpflichtig</strong> beim externen KI-Dienst (Größenordnung wenige Cent je Bild, nicht gemessen) und dauert je Bild bis zu @ImgGen.Settings.TimeoutSeconds s.
+                Das neutrale Hauptbild wird dazu als Referenz an den KI-Dienst gesendet (der Dienst hat eigene Aufbewahrungs- und Datenschutzbedingungen). Die Figur soll dieselbe bleiben; eine Garantie dafür gibt es nicht.
+                @(_moodPlan.Regenerate ? "Das vorhandene Bild dieser Stimmung wird erst nach erfolgreicher Erzeugung ersetzt." : "Vorhandene Bilder bleiben unverändert.")
+                Heute noch möglich: @ImgGen.RemainingToday(_userSub) von @ImgGen.Settings.DailyLimitPerUser Erzeugungen@(ImgGen.RemainingToday(_userSub) < _moodPlan.Moods.Count ? " — das reicht nicht für alle; die übrigen bleiben fehlend" : "").
+                <span class="actions"><button type="button" class="btn btn-primary btn-sm" disabled="@_moodBusy" @onclick="RunMoodPlanAsync">Jetzt erzeugen</button><button type="button" class="btn btn-ghost btn-sm" disabled="@_moodBusy" @onclick="() => _moodPlan = null">Abbrechen</button></span>
+            </div>
+        }
+        @if (_moodBusy) { <div class="alert alert-info" role="status" aria-busy="true">Die Stimmungen werden erzeugt … Das kann je Bild bis zu @ImgGen.Settings.TimeoutSeconds Sekunden dauern. Bitte die Seite geöffnet lassen.</div> }
+        @if (_moodReport.Count > 0)
+        {
+            <div class="alert @(_moodReport.Any(r => !r.Ok) ? "alert-error" : "alert-info")" role="status">
+                <strong>Ergebnis der Erzeugung:</strong>
+                <ul class="gallery-report">@foreach (var r in _moodReport) { <li>@(r.Ok ? "✅" : "❌") @AvatarMoods.Label(r.Mood)@(r.Ok ? " — erstellt und gespeichert" : " — fehlgeschlagen: " + r.Error)</li> }</ul>
+                @if (_moodReport.Any(r => !r.Ok)) { <span>Bereits erstellte Bilder bleiben erhalten. Du kannst gezielt nur die fehlenden Stimmungen erneut erzeugen.</span> }
+            </div>
+        }
+
+        @if (_confirmIds is not null)
+        {
+            <div class="alert alert-error" role="alertdialog" aria-label="Löschen bestätigen">
+                <strong>„@_confirmLabel“ endgültig löschen?</strong> Das kann nicht rückgängig gemacht werden (exportiere vorher ein Archiv, wenn du es behalten willst).
+                <span class="actions"><button type="button" class="btn btn-primary btn-sm" disabled="@_busy" @onclick="ConfirmDelete">Ja, löschen</button><button type="button" class="btn btn-ghost btn-sm" @onclick="() => _confirmIds = null">Abbrechen</button></span>
+            </div>
+        }
+
+        <h3 class="panel-subtitle" style="margin-top:1rem">Export</h3>
+        <p class="muted">Als ZIP-Archiv mit <code>manifest.json</code> und den Bilddateien (WebP/PNG/JPEG), die sich auch ohne Learny öffnen lassen. Es werden keine KI-Aufrufe ausgelöst.</p>
+        <label class="pick"><input type="checkbox" @bind="_protect" /> Archiv mit Passwort schützen (AES-256)</label>
+        @if (_protect)
+        {
+            <div class="gallery-pw">
+                <label class="field"><span class="muted">Passwort</span><input class="input" type="password" autocomplete="new-password" maxlength="@GalleryLimits.MaxPasswordLength" @bind="_pw1" @bind:event="oninput" /></label>
+                <label class="field"><span class="muted">Passwort bestätigen</span><input class="input" type="password" autocomplete="new-password" maxlength="@GalleryLimits.MaxPasswordLength" @bind="_pw2" @bind:event="oninput" /></label>
+                @if (_pw1.Length > 0 && AvatarGalleryService.PasswordHint(_pw1) is { } hint) { <p class="muted" role="status">@hint</p> }
+                @if (_pw2.Length > 0 && _pw1 != _pw2) { <p class="muted" role="status">Die Passwörter stimmen nicht überein.</p> }
+                <p class="muted"><strong>Wichtig:</strong> Ein vergessenes Passwort kann nicht wiederhergestellt werden — weder von dir noch von Learny. Das Passwort wird nicht gespeichert. Die Dateinamen im Archiv sind im ZIP-Format nicht verschlüsselt, die Inhalte schon.</p>
+            </div>
+        }
+        <div class="actions" style="margin-top:.5rem">
+            <button type="button" class="btn btn-primary btn-sm" disabled="@(_busy || _sel.Count == 0)" @onclick="() => AskExport(_sel.ToList())">Auswahl exportieren (@_sel.Count)</button>
+            <button type="button" class="btn btn-primary btn-sm" disabled="@(_busy || _entries.Count == 0)" @onclick="() => AskExport(null)">Gesamte Galerie exportieren (@_entries.Count)</button>
+            <button type="button" class="btn btn-ghost btn-sm" disabled="@(_entries.Count == 0)" @onclick="SelectAllVisible">Alle sichtbaren auswählen</button>
+            <button type="button" class="btn btn-ghost btn-sm" disabled="@(_sel.Count == 0)" @onclick="() => _sel.Clear()">Auswahl aufheben</button>
+        </div>
+        @if (_pendingExport is not null)
+        {
+            <div class="alert alert-info" role="alertdialog" aria-label="Nicht gespeicherte Vorschläge">
+                Du hast <strong>@PendingCount nicht gespeicherte Vorschläge</strong> im Generator. Sie sind nicht im Export enthalten, solange sie nicht in der Galerie liegen.
+                <span class="actions">
+                    <button type="button" class="btn btn-primary btn-sm" @onclick="ExportAfterSaving">Vorschläge speichern und exportieren</button>
+                    <button type="button" class="btn btn-ghost btn-sm" @onclick="ExportWithout">Ohne sie exportieren</button>
+                    <button type="button" class="btn btn-ghost btn-sm" @onclick="() => _pendingExport = null">Abbrechen</button>
+                </span>
+            </div>
+        }
+
+        <h3 class="panel-subtitle" style="margin-top:1rem">Import</h3>
+        <p class="muted">Wähle ein Learny-Avatar-Archiv (.zip, höchstens @(GalleryLimits.MaxArchiveBytes / (1024 * 1024)) MB). Es wird nur im Arbeitsspeicher geprüft; nichts wird übernommen, bevor du den Import bestätigst. Bestehende Avatare werden nie überschrieben, dein Profilavatar bleibt unverändert.</p>
+        @if (_import is null)
+        {
+            <InputFile OnChange="OnArchiveSelected" accept=".zip,application/zip" aria-label="Avatar-Archiv auswählen" disabled="@_busy" />
+            @if (_needPw)
+            {
+                <div class="gallery-pw">
+                    <label class="field"><span class="muted">Passwort des Archivs (@_impName)</span><input class="input" type="password" autocomplete="off" maxlength="@GalleryLimits.MaxPasswordLength" @bind="_impPw" @bind:event="oninput" /></label>
+                    <span class="actions"><button type="button" class="btn btn-primary btn-sm" disabled="@(_busy || _impPw.Length == 0)" @onclick="PreviewWithPassword">Archiv öffnen</button><button type="button" class="btn btn-ghost btn-sm" @onclick="CancelImport">Abbrechen</button></span>
+                </div>
+            }
+        }
+        else
+        {
+            <div class="gallery-import" role="group" aria-label="Importvorschau">
+                <p><strong>@_impName</strong> — Formatversion @_import.Version@(_import.ExportedAt is { } ex ? ", exportiert am " + ex.ToLocalTime().ToString("dd.MM.yyyy HH:mm") : ""), @_import.Avatars.Count Avatare@(_import.IgnoredFiles > 0 ? $", {_import.IgnoredFiles} nicht referenzierte Dateien werden ignoriert" : "").</p>
+                <ul class="gallery-import-list">
+                    @foreach (var a in _import.Avatars)
+                    {
+                        var aid = a.ArchiveId;
+                        <li>
+                            <label class="pick"><input type="checkbox" checked="@_impSel.Contains(aid)" @onchange="x => ToggleImp(aid, x.Value is true)" />
+                                @if (a.Kind == "image" && ShowThumbs && a.Bytes is not null) { <img src="@ThumbOf(a)" alt="" width="40" height="40" style="object-fit:cover;border-radius:50%" /> }
+                                else if (a.Kind == "svg") { <Avatar Preset="@a.SvgId" Name="@a.Name" Size="40" Animate="false" /> }
+                                <span>@a.Name</span> <span class="muted">· @(a.Kind == "image" ? "KI-Bild" : "Baukasten") @(a.Style.Length > 0 && a.Kind == "image" ? "· " + a.Style : "") @(Duplicate(a) ? "· schon vorhanden" : "")</span></label>
+                        </li>
+                    }
+                </ul>
+                <div class="role-toggles" role="radiogroup" aria-label="Umgang mit Duplikaten">
+                    <button type="button" role="radio" class="chip @(_dup == ImportDuplicates.Skip ? "chip-active" : "")" aria-checked="@(_dup == ImportDuplicates.Skip ? "true" : "false")" @onclick="() => _dup = ImportDuplicates.Skip">Duplikate überspringen</button>
+                    <button type="button" role="radio" class="chip @(_dup == ImportDuplicates.ImportAsNew ? "chip-active" : "")" aria-checked="@(_dup == ImportDuplicates.ImportAsNew ? "true" : "false")" @onclick="() => _dup = ImportDuplicates.ImportAsNew">Duplikate als neue Einträge</button>
+                </div>
+                <div class="actions" style="margin-top:.5rem">
+                    <button type="button" class="btn btn-primary btn-sm" disabled="@(_busy || _impSel.Count == 0)" @onclick="CommitImport">Import bestätigen (@_impSel.Count)</button>
+                    <button type="button" class="btn btn-ghost btn-sm" @onclick="() => { _impSel = _import.Avatars.Select(a => a.ArchiveId).ToHashSet(); }">Alle auswählen</button>
+                    <button type="button" class="btn btn-ghost btn-sm" @onclick="() => _impSel.Clear()">Keine</button>
+                    <button type="button" class="btn btn-ghost btn-sm" @onclick="CancelImport">Abbrechen</button>
+                </div>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    /// <summary>Anzahl noch nicht gespeicherter Vorschläge im Generator (Profilseite); wird vor einem Export zum Speichern angeboten.</summary>
+    [Parameter] public int PendingCount { get; set; }
+    /// <summary>Speichert alle Vorschläge des Generators in der Galerie (Profilseite).</summary>
+    [Parameter] public EventCallback OnSavePending { get; set; }
+
+    private static readonly (string, string)[] Moods = { ("neutral", "Neutral"), ("happy", "Freundlich"), ("motivating", "Motivierend"), ("success", "Erfolgreich"), ("encouraging", "Ermutigend") };
+    private List<GalleryEntry> _entries = new();
+    private string _active = "", _userSub = "";
+    private bool _loading = true, _busy;
+    private string? _error, _notice;
+    private string _fType = "all", _fStyle = "all", _sort = "new";
+    private bool _onlyFav;
+    private readonly HashSet<string> _sel = new();
+    private string? _renameId, _renameText = "", _moodsId;
+    private List<string>? _confirmIds; private string _confirmLabel = "";
+    // Export
+    private bool _protect; private string _pw1 = "", _pw2 = "";
+    private Func<Task>? _pendingExport;
+    // Import
+    private ParsedArchive? _import; private byte[]? _impBytes; private string _impName = "", _impPw = "";
+    private bool _needPw; private ImportDuplicates _dup = ImportDuplicates.Skip; private HashSet<string> _impSel = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        UiState.Changed += OnUi;
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _userSub = auth.User.GetUserId() ?? throw new UnauthorizedAccessException();
+        await ReloadAsync();
+    }
+
+    private void OnUi() => _ = InvokeAsync(async () => { _active = await Gallery.ActivePresetAsync(_userSub); StateHasChanged(); });
+    public void Dispose() => UiState.Changed -= OnUi;
+
+    public async Task ReloadAsync()
+    {
+        _error = null;
+        try { _entries = await Gallery.ListAsync(_userSub); _active = await Gallery.ActivePresetAsync(_userSub); _sel.RemoveWhere(id => _entries.All(e => e.Id != id)); }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException) { _error = "Die Galerie konnte nicht geladen werden."; }
+        _loading = false; StateHasChanged();
+    }
+
+    private static string TileLabel(GalleryEntry e, bool active) => active ? e.Name + " (aktiver Profilavatar)" : e.Name;
+    // ─── Figuren und Stimmungen (ADR 0058) ──────────────────────────────
+    private sealed record Cell(string Kind, GalleryEntry? E, string? Mood, List<GalleryEntry>? Figure);
+    private sealed record MoodPlan(string AnchorId, string Name, List<string> Moods, bool Regenerate);
+    private MoodPlan? _moodPlan; private bool _moodBusy;
+    private List<(string Mood, bool Ok, string? Error)> _moodReport = new();
+
+    private List<GalleryEntry> FigureOf(GalleryEntry e) => _entries.Where(x => x.FigureKey == e.FigureKey).OrderBy(x => AvatarMoods.All.ToList().FindIndex(m => m.Id == x.EffectiveMood)).ToList();
+    private static HashSet<string> FigureMoods(List<GalleryEntry> fig) => fig.Where(x => x.IsImage).Select(x => x.EffectiveMood).ToHashSet();
+    private static GalleryEntry Anchor(List<GalleryEntry> fig) => fig.FirstOrDefault(x => x.EffectiveMood == AvatarMoods.Neutral) ?? fig[0];
+    private static string FigureName(List<GalleryEntry> fig) { var n = Anchor(fig).Name; var i = n.IndexOf(" · ", StringComparison.Ordinal); return i > 0 ? n[..i] : n; }
+
+    /// <summary>Zellen eines Galerieblocks: je KI-Figur ein Kopf, die vorhandenen Stimmungsbilder und Platzhalter für fehlende Stimmungen (damit unvollständige Figuren sofort erkennbar sind); SVG-Einträge als einfache Kacheln.</summary>
+    private List<Cell> Cells(List<GalleryEntry> grp)
+    {
+        var cells = new List<Cell>(); var seen = new HashSet<string>();
+        foreach (var e in grp)
+        {
+            if (!e.IsImage) { cells.Add(new Cell("tile", e, null, null)); continue; }
+            if (!seen.Add(e.FigureKey)) continue;
+            var fig = FigureOf(e); var have = FigureMoods(fig);
+            cells.Add(new Cell("head", null, null, fig));
+            foreach (var m in AvatarMoods.All)
+            {
+                var ent = grp.FirstOrDefault(x => x.IsImage && x.FigureKey == e.FigureKey && x.EffectiveMood == m.Id);
+                if (ent is not null) cells.Add(new Cell("tile", ent, null, fig));
+                else if (!have.Contains(m.Id)) cells.Add(new Cell("missing", null, m.Id, fig));
+            }
+        }
+        return cells;
+    }
+
+    /// <summary>Plant eine Erzeugung (nur Bestätigungsdialog, noch kein Aufruf): ohne Angabe alle fehlenden Stimmungen der Figur.</summary>
+    public async Task RequestMoodsAsync(string entryId, string? only = null)
+    {
+        _error = _notice = null; _moodReport = new();
+        try
+        {
+            var e = await Gallery.GetAsync(_userSub, entryId) ?? throw new KeyNotFoundException("Avatar nicht gefunden.");
+            var missing = await Gallery.MissingMoodsAsync(_userSub, entryId);
+            var moods = only is null ? missing.Where(m => m != AvatarMoods.Neutral).ToList() : new List<string> { only };
+            if (moods.Count == 0) { _notice = "Diese Figur hat bereits alle Stimmungen."; return; }
+            _moodPlan = new MoodPlan(entryId, FigureName(FigureOf(e)), moods, false);
+        }
+        catch (Exception ex) when (ex is KeyNotFoundException or ArgumentException) { _error = ex.Message; }
+        StateHasChanged();
+    }
+
+    private void RequestRegenerate(GalleryEntry e) { _error = _notice = null; _moodReport = new(); _moodPlan = new MoodPlan(e.Id, FigureName(FigureOf(e)), new List<string> { e.EffectiveMood }, true); }
+
+    private async Task RunMoodPlanAsync()
+    {
+        var plan = _moodPlan; if (plan is null || _moodBusy) return;
+        _moodPlan = null; _moodBusy = true; _error = _notice = null; _moodReport = new();
+        try
+        {
+            if (plan.Regenerate)
+            {
+                try { await Gallery.RegenerateMoodAsync(_userSub, plan.AnchorId); _moodReport.Add((plan.Moods[0], true, null)); }
+                catch (AvatarImageException ex) { _moodReport.Add((plan.Moods[0], false, ex.Message)); }
+            }
+            else
+            {
+                var r = await Gallery.CreateMoodsAsync(_userSub, plan.AnchorId, plan.Moods);
+                _moodReport = r.Items.ToList();
+            }
+            await ReloadAsync();
+            UiState.SetMoods(await Gallery.ActiveMoodsAsync(_userSub));
+        }
+        catch (Exception ex) when (ex is KeyNotFoundException or ArgumentException) { _error = ex.Message; }
+        finally { _moodBusy = false; StateHasChanged(); }
+    }
+
+    private bool Active(GalleryEntry e) => AvatarGalleryService.IsActive(e, _active);
+    private string? StyleLabel(GalleryEntry e) => e.IsImage ? AvatarImageStyles.All.FirstOrDefault(s => s.Id == e.Style).Label : null;
+
+    private List<GalleryEntry> Visible => _entries
+        .Where(e => (_fType == "all" || e.Kind == _fType) && (_fStyle == "all" || e.Style == _fStyle) && (!_onlyFav || e.Favorite))
+        .OrderBy(e => _sort == "old" ? e.CreatedAt.Ticks : -e.CreatedAt.Ticks).ThenBy(e => e.Id, StringComparer.Ordinal).ToList();
+    private List<List<GalleryEntry>> Groups => Visible.GroupBy(e => e.GroupId).Select(g => g.ToList()).ToList();
+    private static string GroupTitle(List<GalleryEntry> g) => g[0].IsImage || g.Count > 1 ? g.OrderBy(e => e.CreatedAt).First().Name + (g.Count > 1 ? " & Varianten" : "") : g[0].Name;
+
+    private void ToggleSel(string id, bool on) { if (on) _sel.Add(id); else _sel.Remove(id); }
+    private void SelectGroup(List<GalleryEntry> g, bool on) { foreach (var e in g) { if (on) _sel.Add(e.Id); else _sel.Remove(e.Id); } }
+    private void SelectAllVisible() { foreach (var e in Visible) _sel.Add(e.Id); }
+
+    private async Task Activate(string id)
+    {
+        _error = _notice = null; _busy = true;
+        try { var preset = await Gallery.ActivateAsync(_userSub, id); UiState.SetAvatar(preset, false); UiState.SetMoods(await Gallery.ActiveMoodsAsync(_userSub)); _active = preset; _notice = "✅ Profilavatar gewechselt."; }
+        catch (Exception ex) when (ex is KeyNotFoundException or ArgumentException) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task ToggleFav(GalleryEntry e)
+    {
+        try { await Gallery.SetFavoriteAsync(_userSub, e.Id, !e.Favorite); await ReloadAsync(); } catch (KeyNotFoundException ex) { _error = ex.Message; }
+    }
+
+    private void StartRename(GalleryEntry e) { _renameId = e.Id; _renameText = e.Name; }
+    private async Task SaveRename()
+    {
+        try { await Gallery.RenameAsync(_userSub, _renameId!, _renameText); _renameId = null; await ReloadAsync(); }
+        catch (Exception ex) when (ex is KeyNotFoundException or ArgumentException) { _error = ex.Message; }
+    }
+
+    private void AskDeleteGroup(List<GalleryEntry> g) => AskDelete(g.Select(e => e.Id).ToList(), GroupTitle(g) + " (" + g.Count + " Varianten)");
+    private void AskDelete(List<string> ids, string label) { _confirmIds = ids; _confirmLabel = label; _error = _notice = null; }
+    private async Task ConfirmDelete()
+    {
+        if (_confirmIds is null) return;
+        _busy = true;
+        try { var n = await Gallery.DeleteAsync(_userSub, _confirmIds); _notice = $"🗑️ {n} Avatar(e) gelöscht."; foreach (var id in _confirmIds) _sel.Remove(id); _confirmIds = null; await ReloadAsync(); }
+        catch (Exception ex) when (ex is KeyNotFoundException or InvalidOperationException) { _error = ex.Message; _confirmIds = null; }
+        finally { _busy = false; }
+    }
+
+    // ─── Export ─────────────────────────────────────────────────────────
+    private async Task AskExport(List<string>? ids)
+    {
+        _error = _notice = null;
+        if (_protect)
+        {
+            if (_pw1.Length < GalleryLimits.MinPasswordLength) { _error = $"Das Passwort ist zu kurz (mindestens {GalleryLimits.MinPasswordLength} Zeichen)."; return; }
+            if (_pw1 != _pw2) { _error = "Die Passwörter stimmen nicht überein."; return; }
+        }
+        if (PendingCount > 0) { _pendingExport = () => ExportAsync(ids); return; }
+        await ExportAsync(ids);
+    }
+    private async Task ExportAfterSaving() { var a = _pendingExport; _pendingExport = null; await OnSavePending.InvokeAsync(); await ReloadAsync(); if (a is not null) await a(); }
+    private async Task ExportWithout() { var a = _pendingExport; _pendingExport = null; if (a is not null) await a(); }
+
+    private async Task ExportAsync(List<string>? ids)
+    {
+        _busy = true; _error = _notice = null;
+        try
+        {
+            var bytes = await Gallery.ExportAsync(_userSub, ids, _protect ? _pw1 : null);
+            var name = $"learny-avatar-galerie-{DateTime.Now:yyyyMMdd-HHmm}.zip";
+            using var stream = new MemoryStream(bytes);
+            using var reference = new DotNetStreamReference(stream);
+            await JS.InvokeVoidAsync("learnyDownload", name, reference);
+            _notice = $"📦 Archiv „{name}“ erstellt" + (_protect ? " (AES-256-geschützt; das Passwort wurde nicht gespeichert)." : ".");
+            _pw1 = _pw2 = "";   // Passwörter nicht im Zustand behalten
+        }
+        catch (Exception ex) when (ex is ArgumentException or KeyNotFoundException or ArchiveException) { _error = ex.Message; }
+        finally { _busy = false; StateHasChanged(); }
+    }
+
+    // ─── Import ─────────────────────────────────────────────────────────
+    private async Task OnArchiveSelected(InputFileChangeEventArgs e)
+    {
+        _error = _notice = null; CancelImport();
+        var f = e.File;
+        if (f.Size > GalleryLimits.MaxArchiveBytes) { _error = $"Das Archiv ist zu groß (höchstens {GalleryLimits.MaxArchiveBytes / (1024 * 1024)} MB)."; return; }
+        _busy = true;
+        try
+        {
+            using var ms = new MemoryStream();
+            await f.OpenReadStream(GalleryLimits.MaxArchiveBytes).CopyToAsync(ms);
+            _impBytes = ms.ToArray(); _impName = f.Name.Length > 80 ? f.Name[..80] : f.Name;
+            TryPreview(null);
+        }
+        catch (IOException) { _error = "Das Archiv konnte nicht gelesen werden."; }
+        finally { _busy = false; }
+    }
+
+    private void TryPreview(string? password)
+    {
+        try
+        {
+            _import = Gallery.PreviewImport(_impBytes!, password);
+            _impSel = _import.Avatars.Select(a => a.ArchiveId).ToHashSet(); _needPw = false; _impPw = "";
+        }
+        catch (ArchivePasswordException pe) { _needPw = true; _import = null; _error = pe.Missing ? null : pe.Message; _notice = pe.Missing ? pe.Message : null; _impPw = ""; }
+        catch (ArchiveException ex) { _error = ex.Message; _impBytes = null; _needPw = false; }
+    }
+    private void PreviewWithPassword() { _error = null; TryPreview(_impPw); }
+    private void CancelImport() { _import = null; _impBytes = null; _needPw = false; _impPw = ""; _impSel = new(); }
+    private void ToggleImp(string id, bool on) { if (on) _impSel.Add(id); else _impSel.Remove(id); }
+    private bool ShowThumbs => _import is { } p && p.Avatars.Count <= 12 && p.Avatars.All(a => (a.Bytes?.Length ?? 0) <= 300_000);
+    private static string ThumbOf(ParsedAvatar a) => $"data:{a.Mime};base64,{Convert.ToBase64String(a.Bytes!)}";
+    private bool Duplicate(ParsedAvatar a) => a.Kind == "image" ? _entries.Any(e => e.IsImage && e.Sha256 == a.Sha256) : _entries.Any(e => !e.IsImage && e.SvgId == a.SvgId);
+
+    private async Task CommitImport()
+    {
+        if (_import is null) return;
+        _busy = true; _error = _notice = null;
+        try
+        {
+            var r = await Gallery.CommitImportAsync(_userSub, _import, _impSel, _dup);
+            _notice = $"✅ {r.Imported} Avatar(e) importiert" + (r.SkippedDuplicates > 0 ? $", {r.SkippedDuplicates} Duplikat(e) übersprungen" : "") + ". Dein Profilavatar ist unverändert.";
+            CancelImport(); await ReloadAsync();
+        }
+        catch (ArgumentException ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+}

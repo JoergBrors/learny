@@ -1,6 +1,7 @@
 @page "/profile"
 @attribute [Authorize]
 @rendermode InteractiveServer
+@implements IDisposable
 @inject UserService Users
 @inject McpLinkService McpLinks
 @inject SharingService Sharing
@@ -9,6 +10,9 @@
 @inject AuthenticationStateProvider AuthState
 @inject UserUiState UiState
 @inject AvatarGeneratorService AvatarGen
+@inject AvatarImageService ImgGen
+@inject LearnCards.Web.Services.AvatarGallery.AvatarGalleryService Galleries
+@inject IJSRuntime JS
 
 <PageTitle>Mein Profil — LearnCards</PageTitle>
 
@@ -51,6 +55,7 @@
                             <button type="button" class="chip @(_avState == key ? "chip-active" : "")" aria-pressed="@(_avState == key ? "true" : "false")" @onclick="() => _avState = key">@st.Item2</button>
                         }
                     </div>
+                    @if (MoodMissingHint is not null) { <p class="muted avatar-mood-hint" role="status">@MoodMissingHint</p> }
                 </div>
                 <div>
                     <div class="avatar-picker" role="radiogroup" aria-label="Avatar auswählen">
@@ -62,9 +67,57 @@
                             </button>
                         }
                     </div>
+                    @if (ImgGen.Available)
+                    {
+                        <div class="avatar-gen avatar-ai" style="margin-top:1rem">
+                            <h3 class="panel-subtitle">KI-Bildavatar (echtes Bild)</h3>
+                            <p class="muted">Ein KI-Bildmodell zeichnet eine eigenständige Comicfigur als <strong>Bilddatei</strong>. Ein Foto ist nur Inspiration; es wird nicht exakt nachgebildet. Beschreibung und Foto werden dazu <strong>an den externen KI-Dienst gesendet</strong>, der eigene Aufbewahrungs- und Datenschutzbedingungen hat. Learny speichert das Foto nie und von den Vorschlägen nur den, den du übernimmst. Jede Erzeugung verursacht Kosten (Tageslimit: @ImgGen.Settings.DailyLimitPerUser, heute noch @ImgGen.RemainingToday(_user!.Id)).</p>
+                            <div class="role-toggles" role="radiogroup" aria-label="Stil">
+                                @foreach (var st in AvatarImageStyles.All)
+                                {
+                                    var sid = st.Id;
+                                    <button type="button" role="radio" class="chip @(_imgStyle == sid ? "chip-active" : "")" aria-checked="@(_imgStyle == sid ? "true" : "false")" @onclick="() => _imgStyle = sid">@st.Label</button>
+                                }
+                            </div>
+                            <div class="role-toggles" role="radiogroup" aria-label="Inspirationsquelle" style="margin-top:.4rem">
+                                @foreach (var src in new[] { ("photo", "Foto"), ("text", "Textbeschreibung"), ("both", "Foto und Text") })
+                                {
+                                    var sid = src.Item1;
+                                    <button type="button" role="radio" class="chip @(_imgSource == sid ? "chip-active" : "")" aria-checked="@(_imgSource == sid ? "true" : "false")" @onclick="() => _imgSource = sid">@src.Item2</button>
+                                }
+                            </div>
+                            @if (_imgSource != "text")
+                            {
+                                <div class="avatar-photo" style="margin-top:.5rem">
+                                    <span class="muted">Foto als Inspiration (@AvatarPhoto.AllowedFormatsText, höchstens @(AvatarPhoto.MaxBytes / (1024 * 1024)) MB).</span>
+                                    @if (_imgPhoto is null)
+                                    {
+                                        <InputFile OnChange="OnImgPhotoSelected" accept="image/png,image/jpeg,image/webp" aria-label="Foto für den KI-Bildavatar hochladen" />
+                                    }
+                                    else
+                                    {
+                                        <div class="actions" style="align-items:center">
+                                            <img src="@ImgPhotoPreview" alt="Vorschau des gewählten Fotos" width="64" height="64" style="object-fit:cover;border-radius:50%" />
+                                            <button type="button" class="btn btn-ghost btn-sm" @onclick="ClearImgPhoto">Foto entfernen</button>
+                                        </div>
+                                        <label class="pick"><input type="checkbox" @bind="_imgConsent" /> Ich bin einverstanden, dass das Foto einmalig an den externen KI-Dienst gesendet wird. Learny speichert es nicht.</label>
+                                    }
+                                </div>
+                            }
+                            @if (_imgSource != "photo")
+                            {
+                                <label class="field" style="margin-top:.5rem"><span class="muted">Beschreibung / Wünsche</span>
+                                    <textarea rows="2" maxlength="@AvatarGeneratorService.MaxDescriptionLength" @bind="_imgText" @bind:event="oninput" placeholder="z. B. graue kurze Haare, Vollbart, runde Brille, warmes Lächeln"></textarea></label>
+                            }
+                            @if (_imgError is not null) { <div class="alert alert-error" role="alert">@_imgError</div> }
+                            <div class="actions" style="margin-top:.5rem">
+                                <button type="button" class="btn btn-primary btn-sm" disabled="@(_imgBusy || !CanGenerateImage)" @onclick="GenerateImageAsync">@(_imgBusy ? "Das Bild wird erstellt … (bis zu " + ImgGen.Settings.TimeoutSeconds + " s)" : !_gallery.Any(v => v.IsImage) ? "Avatar erstellen" : "Neue Variante erstellen")</button>
+                            </div>
+                        </div>
+                    }
                     <div class="avatar-gen" style="margin-top:1rem">
-                        <h3 class="panel-subtitle">Avatar-Generator</h3>
-                        <p class="muted">Beschreibe deinen Avatar in einem Satz. @(AvatarGen.AiAvailable ? "Die KI wählt passende Merkmale aus dem Baukasten; der Text wird dazu an den KI-Dienst gesendet (nicht gespeichert)." : "Die KI ist nicht eingerichtet: Es werden Stichwörter ausgewertet (Offline-Hilfe).") Es entstehen keine Fotos oder freien Bilder.</p>
+                        <h3 class="panel-subtitle">@(ImgGen.Available ? "Einfacher Avatar-Baukasten (SVG, kein KI-Bild)" : "Avatar-Generator")</h3>
+                        <p class="muted">Beschreibe deinen Avatar in einem Satz. @(AvatarGen.AiAvailable ? "Die KI wählt passende Merkmale aus dem Baukasten; der Text wird dazu an den KI-Dienst gesendet (nicht gespeichert)." : "Die KI ist nicht eingerichtet: Es werden Stichwörter ausgewertet (Offline-Hilfe).") Es entstehen keine Fotos oder freien Bilder: Das Ergebnis ist immer eine Comicfigur aus dem Baukasten.</p>
                         <div class="actions" role="group" aria-label="Beispielbeschreibungen">
                             @foreach (var ex in AvatarExamples)
                             {
@@ -74,25 +127,69 @@
                         </div>
                         <label class="field" style="margin-top:.5rem"><span class="muted">Beschreibung (änderbar)</span>
                             <textarea rows="2" maxlength="@AvatarGeneratorService.MaxDescriptionLength" @bind="_genText" @bind:event="oninput" placeholder="z. B. freundliche Person mit roten Locken, Brille und grünem Pullover"></textarea></label>
-                        <div class="actions" style="margin-top:.5rem">
-                            <button type="button" class="btn btn-primary btn-sm" disabled="@(_genBusy || string.IsNullOrWhiteSpace(_genText))" @onclick="GenerateAvatarAsync">@(_genBusy ? "Erstelle …" : "Vorschlag erstellen")</button>
-                        </div>
-                        @if (_genId is not null)
+                        @if (AvatarGen.AiAvailable && !ImgGen.Available)
                         {
-                            <p class="muted" style="margin-top:.6rem" aria-live="polite">@_genSummary</p>
-                            <div class="avatar-moods" role="group" aria-label="Der Vorschlag in allen Stimmungen">
-                                @foreach (var st in new[] { ("neutral", "Neutral"), ("happy", "Freundlich"), ("motivating", "Motivierend"), ("success", "Erfolgreich"), ("encouraging", "Ermutigend") })
+                            <div class="avatar-photo" style="margin-top:.5rem">
+                                <span class="muted">Optional: Foto als Inspiration (@AvatarPhoto.AllowedFormatsText, höchstens @(AvatarPhoto.MaxBytes / (1024 * 1024)) MB). Es entsteht keine Ähnlichkeit auf Fotoebene, sondern eine eigenständige Comicfigur mit Frisur, Haarfarbe, Gesichtsform, Bart und Brille.</span>
+                                @if (_photo is null)
                                 {
-                                    <figure class="avatar-mood"><Avatar Preset="@_genId" Name="@st.Item2" Size="72" State="@st.Item1" /><figcaption>@st.Item2</figcaption></figure>
+                                    <InputFile OnChange="OnPhotoSelected" accept="image/png,image/jpeg,image/webp" aria-label="Foto als Inspiration hochladen" />
                                 }
-                            </div>
-                            <div class="actions" style="margin-top:.5rem">
-                                <button type="button" class="btn btn-primary btn-sm" @onclick="AcceptGeneratedAsync">Übernehmen</button>
-                                <button type="button" class="btn btn-ghost btn-sm" @onclick="GenerateAvatarAsync" disabled="@_genBusy">Neu erzeugen</button>
-                                <button type="button" class="btn btn-ghost btn-sm" @onclick="() => _genId = null">Verwerfen</button>
+                                else
+                                {
+                                    <div class="actions" style="align-items:center">
+                                        <img src="@PhotoPreview" alt="Vorschau des gewählten Fotos" width="64" height="64" style="object-fit:cover;border-radius:50%" />
+                                        <button type="button" class="btn btn-ghost btn-sm" @onclick="ClearPhoto">Foto entfernen</button>
+                                    </div>
+                                    <label class="pick"><input type="checkbox" @bind="_photoConsent" /> Das Foto wird einmalig zur Auswertung an den KI-Dienst gesendet und nicht gespeichert. Ich bin damit einverstanden.</label>
+                                }
+                                @if (_photoError is not null) { <div class="alert alert-error" role="alert">@_photoError</div> }
                             </div>
                         }
+                        <div class="actions" style="margin-top:.5rem">
+                            <button type="button" class="btn btn-primary btn-sm" disabled="@(_genBusy || (string.IsNullOrWhiteSpace(_genText) && _photo is null) || (_photo is not null && !_photoConsent))" @onclick="GenerateAvatarAsync">@(_genBusy ? "Erstelle …" : _gallery.Any(v => !v.IsImage) ? "Neue Variante erstellen" : "Vorschlag erstellen")</button>
+                        </div>
                     </div>
+                    @if (_gallery.Count > 0)
+                    {
+                        var sel = _gallery.FirstOrDefault(v => v.Id == _selId) ?? _gallery[^1];
+                        <div class="avatar-gen avatar-variants-wrap" id="avatar-variants" style="margin-top:1rem">
+                            <h3 class="panel-subtitle">Vorschläge (@_gallery.Count von @MaxVariants) — noch nicht gespeichert</h3>
+                            <p class="muted">Wähle eine Variante aus und übernimm sie. Vorschläge gehen verloren, wenn du die Seite verlässt oder neu lädst; dein gespeicherter Avatar bleibt, bis du „Übernehmen“ klickst.</p>
+                            <div class="avatar-variants" role="radiogroup" aria-label="Avatar-Varianten">
+                                @foreach (var v in _gallery)
+                                {
+                                    var vid = v.Id;
+                                    var on = vid == sel.Id;
+                                    <button type="button" role="radio" class="avatar-variant @(on ? "avatar-variant-on" : "")" aria-checked="@(on ? "true" : "false")" title="@v.Label" @onclick="() => SelectVariant(vid)">
+                                        @if (v.IsImage) { <Avatar ImageSrc="@v.Src" Name="@v.Label" Size="112" Animate="false" /> }
+                                        else { <Avatar Preset="@v.SvgId" Name="@v.Label" Size="112" Animate="false" /> }
+                                        <span class="avatar-variant-label">@v.Label</span>
+                                        @if (on) { <span class="badge badge-coauthor">Ausgewählt</span> }
+                                    </button>
+                                }
+                            </div>
+                            @if (sel.Summary is not null || sel.Note is not null) { <p class="muted" style="margin-top:.5rem" aria-live="polite">@sel.Summary@(sel.Note is null ? "" : " " + sel.Note)</p> }
+                            @if (!sel.IsImage)
+                            {
+                                <p class="muted">Einfacher Baukasten-Avatar (SVG), kein KI-Bild. Die Auswahl in allen Stimmungen:</p>
+                                <div class="avatar-moods" role="group" aria-label="Die ausgewählte Variante in allen Stimmungen">
+                                    @foreach (var st in new[] { ("neutral", "Neutral"), ("happy", "Freundlich"), ("motivating", "Motivierend"), ("success", "Erfolgreich"), ("encouraging", "Ermutigend") })
+                                    {
+                                        <figure class="avatar-mood"><Avatar Preset="@sel.SvgId" Name="@st.Item2" Size="64" State="@st.Item1" /><figcaption>@st.Item2</figcaption></figure>
+                                    }
+                                </div>
+                            }
+                            <div class="actions" style="margin-top:.6rem">
+                                <button type="button" class="btn btn-primary btn-sm" disabled="@(_imgBusy || _genBusy)" @onclick="AcceptSelectedAsync" title="In der Galerie speichern und als Profilavatar verwenden">Übernehmen</button>
+                                <button type="button" class="btn btn-ghost btn-sm" disabled="@(_imgBusy || _genBusy)" @onclick="SaveSelectedToGalleryAsync" title="Nur in der Galerie speichern, Profilavatar bleibt unverändert">In Galerie speichern</button>
+                                @if (sel.IsImage && ImgGen.Available) { <button type="button" class="btn btn-ghost btn-sm" disabled="@(_imgBusy || _genBusy)" @onclick="SaveAndPlanMoodsAsync" title="Speichern und die vier weiteren Stimmungen vorbereiten (kostenpflichtig, mit Bestätigung)">Speichern + Stimmungen …</button> }
+                                @if (_gallery.Count > 1) { <button type="button" class="btn btn-ghost btn-sm" disabled="@(_imgBusy || _genBusy)" @onclick="SaveAllPendingAsync">Alle in Galerie speichern (@_gallery.Count)</button> }
+                                <button type="button" class="btn btn-ghost btn-sm" @onclick="DiscardSelected">Verwerfen</button>
+                                @if (_gallery.Count > 1) { <button type="button" class="btn btn-ghost btn-sm" @onclick="DiscardAll">Alle verwerfen</button> }
+                            </div>
+                        </div>
+                    }
                     <div class="actions" style="margin-top:.8rem">
                         <label class="pick"><input type="checkbox" checked="@UiState.AvatarHidden" @onchange="e => HideAvatarAsync(e.Value is true)" /> Avatar ausblenden (nur Initialen)</label>
                         <button type="button" class="btn btn-ghost btn-sm" @onclick="ResetAvatarAsync">Zurücksetzen</button>
@@ -100,6 +197,8 @@
                 </div>
             </div>
         </div>
+
+        <LearnCards.Web.Components.Shared.AvatarGalleryPanel @ref="_galleryPanel" PendingCount="_gallery.Count" OnSavePending="SaveAllPendingAsync" />
 
         <div class="card panel">
             <h2 class="panel-title">Persönliche Angaben</h2>
@@ -334,6 +433,10 @@
     private List<McpLink> _links = new();
     private bool _mcpAllowed;
     private string _avState = "happy";
+    /// <summary>Fehlt für die gewählte Stimmung ein eigenes KI-Bild, wird ersatzweise die Hauptvariante gezeigt — mit ausdrücklichem Hinweis; nie das Bild einer anderen Stimmung als „diese“ Stimmung und nie ein automatischer KI-Aufruf.</summary>
+    private string? MoodMissingHint => (Avatars.IsGalleryId(UiState.AvatarPreset) || Avatars.IsImageId(UiState.AvatarPreset)) && !UiState.AvatarHidden && _avState != "neutral" && !UiState.AvatarMoods.Contains(_avState)
+        ? $"Für „{AvatarMoods.Label(_avState)}“ gibt es noch kein eigenes Bild; angezeigt wird ersatzweise die Hauptvariante. Du kannst die Stimmung in „Meine Avatar-Galerie“ erstellen (kostenpflichtig, nur nach deiner Bestätigung)."
+        : null;
 
         private static readonly string[] AvatarExamples =
     {
@@ -343,22 +446,197 @@
         "Person mit dunkler Haut, langen schwarzen Haaren und gelber Jacke",
     };
     private string _genText = "";
-    private string? _genId, _genSummary;
+    // Vorschläge (flüchtig, nur Arbeitsspeicher dieser Sitzung): KI-Bilder und SVG-Baukasten in einer Galerie; Auswahl getrennt vom gespeicherten Avatar (UiState)
+    private sealed record Variant(Guid Id, bool IsImage, string Label, string? Summary, string? Note, string? SvgId = null, byte[]? Bytes = null, string? Model = null, string? Style = null, string? Src = null);
+    private const int MaxVariants = 4;
+    private readonly List<Variant> _gallery = new();
+    private Guid _selId;
+    private void SelectVariant(Guid id) => _selId = id;
+    private async Task AddVariantAsync(Variant v)
+    {
+        _gallery.Add(v); _selId = v.Id;
+        StateHasChanged(); await Task.Yield();
+        try { await JS.InvokeVoidAsync("learnyScrollTo", "avatar-variants"); } catch (JSException) { /* rein optisch */ } catch (InvalidOperationException) { /* Schaltkreis getrennt */ }
+    }
+    private void DiscardSelected()
+    {
+        var idx = _gallery.FindIndex(v => v.Id == _selId);
+        if (idx < 0) idx = _gallery.Count - 1;
+        if (idx >= 0) _gallery.RemoveAt(idx);
+        _selId = _gallery.Count > 0 ? _gallery[Math.Min(idx, _gallery.Count - 1)].Id : Guid.Empty;
+        if (_gallery.Count == 0) { ClearPhoto(); ClearImgPhoto(); }
+    }
+    private void DiscardAll() { _gallery.Clear(); _selId = Guid.Empty; ClearPhoto(); ClearImgPhoto(); }
+    private LearnCards.Web.Components.Shared.AvatarGalleryPanel? _galleryPanel;
+    private string _batchGroup = Guid.NewGuid().ToString("N");   // Vorschläge eines Generatorlaufs werden in der Galerie als Varianten einer Gruppe geführt
+
+    private NewGalleryEntry ToEntry(Variant v) => v.IsImage
+        ? new NewGalleryEntry("image", v.Label + " " + DateTime.Now.ToString("dd.MM. HH:mm"), "", v.Style ?? "", v.Bytes, null)
+        : new NewGalleryEntry("svg", "Baukasten " + DateTime.Now.ToString("dd.MM. HH:mm"), "", "svg", null, v.SvgId);
+
+    /// <summary>Speichert Vorschläge in der persönlichen Galerie (nie ersetzend); bereits vorhandene Bilder/Figuren werden wiederverwendet. Liefert die Galerie-Kennung je Vorschlag.</summary>
+    private async Task<Dictionary<Guid, string>> StoreAsync(IReadOnlyList<Variant> variants)
+    {
+        var existing = await Galleries.ListAsync(_user!.Id);
+        var map = new Dictionary<Guid, string>(); var fresh = new List<(Variant V, NewGalleryEntry E)>();
+        foreach (var v in variants)
+        {
+            var hit = v.IsImage ? existing.FirstOrDefault(e => e.IsImage && e.Sha256 == Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(v.Bytes!)).ToLowerInvariant())
+                                : existing.FirstOrDefault(e => !e.IsImage && e.SvgId == v.SvgId);
+            if (hit is not null) map[v.Id] = hit.Id; else fresh.Add((v, ToEntry(v) with { GroupKey = _batchGroup }));
+        }
+        if (fresh.Count > 0)
+        {
+            var added = await Galleries.AddAsync(_user.Id, fresh.Select(f => f.E).ToList());
+            for (var i = 0; i < added.Count; i++) map[fresh[i].V.Id] = added[i].Id;
+        }
+        return map;
+    }
+
+    private async Task SaveSelectedToGalleryAsync()
+    {
+        var v = _gallery.FirstOrDefault(x => x.Id == _selId) ?? _gallery.LastOrDefault();
+        if (v is null) return;
+        try { await StoreAsync(new[] { v }); _gallery.Remove(v); AfterGalleryChange("✅ In der Galerie gespeichert (Profilavatar unverändert)."); }
+        catch (ArgumentException ex) { _message = "❌ " + ex.Message; _messageOk = false; }
+        if (_galleryPanel is not null) await _galleryPanel.ReloadAsync();
+    }
+
+    /// <summary>Speichert den Vorschlag als neutrales Hauptbild einer Figur und öffnet in der Galerie die kostenpflichtige Erzeugung der weiteren Stimmungen — gestartet wird erst nach ausdrücklicher Bestätigung dort.</summary>
+    private async Task SaveAndPlanMoodsAsync()
+    {
+        var v = _gallery.FirstOrDefault(x => x.Id == _selId) ?? _gallery.LastOrDefault();
+        if (v is null || !v.IsImage) return;
+        try
+        {
+            var map = await StoreAsync(new[] { v });
+            _gallery.Remove(v); AfterGalleryChange("✅ In der Galerie gespeichert. Bestätige dort die Erzeugung der Stimmungen.");
+            if (_galleryPanel is not null) { await _galleryPanel.ReloadAsync(); await _galleryPanel.RequestMoodsAsync(map[v.Id]); }
+            try { await JS.InvokeVoidAsync("learnyScrollTo", "avatar-gallery"); } catch (JSException) { } catch (InvalidOperationException) { }
+        }
+        catch (ArgumentException ex) { _message = "❌ " + ex.Message; _messageOk = false; }
+    }
+
+    private async Task SaveAllPendingAsync()
+    {
+        if (_gallery.Count == 0) return;
+        try { var all = _gallery.ToList(); await StoreAsync(all); _gallery.Clear(); AfterGalleryChange($"✅ {all.Count} Vorschläge in der Galerie gespeichert (Profilavatar unverändert)."); }
+        catch (ArgumentException ex) { _message = "❌ " + ex.Message; _messageOk = false; }
+        if (_galleryPanel is not null) await _galleryPanel.ReloadAsync();
+    }
+
+    private void AfterGalleryChange(string message)
+    {
+        _message = message; _messageOk = true;
+        _selId = _gallery.Count > 0 ? _gallery[^1].Id : Guid.Empty;
+        if (_gallery.Count == 0) { ClearPhoto(); ClearImgPhoto(); _batchGroup = Guid.NewGuid().ToString("N"); }
+    }
+
+    /// <summary>„Übernehmen“: speichert den ausgewählten Vorschlag in der Galerie und verwendet ihn als Profilavatar. Andere Vorschläge und Galerieeinträge bleiben unberührt.</summary>
+    private async Task AcceptSelectedAsync()
+    {
+        var v = _gallery.FirstOrDefault(x => x.Id == _selId) ?? _gallery.LastOrDefault();
+        if (v is null) return;
+        try
+        {
+            var map = await StoreAsync(new[] { v });
+            var preset = await Galleries.ActivateAsync(_user!.Id, map[v.Id]);
+            UiState.SetAvatar(preset, false);
+            UiState.SetMoods(await Galleries.ActiveMoodsAsync(_user.Id));
+            _gallery.Remove(v);
+            AfterGalleryChange(v.IsImage ? "✅ KI-Avatar gespeichert und als Profilavatar übernommen." : "✅ Avatar gespeichert und als Profilavatar übernommen.");
+        }
+        catch (ArgumentException ex) { _imgError = ex.Message; _message = "❌ " + ex.Message; _messageOk = false; }
+        if (_galleryPanel is not null) await _galleryPanel.ReloadAsync();
+    }
     private bool _genBusy;
+
+    private string? _genNote, _photoError;
+    private byte[]? _photo;          // nur im Arbeitsspeicher dieser Sitzung; wird nie gespeichert (ADR 0055)
+    private string? _photoMime;
+    private bool _photoConsent;
+    private string PhotoPreview => _photo is null ? "" : $"data:{_photoMime};base64,{Convert.ToBase64String(_photo)}";
+
+    private async Task OnPhotoSelected(InputFileChangeEventArgs e)
+    {
+        _photoError = null; ClearPhoto();
+        var file = e.File;
+        if (file.Size > AvatarPhoto.MaxBytes) { _photoError = $"Das Foto ist zu groß (höchstens {AvatarPhoto.MaxBytes / (1024 * 1024)} MB)."; return; }
+        try
+        {
+            using var ms = new MemoryStream();
+            await file.OpenReadStream(AvatarPhoto.MaxBytes).CopyToAsync(ms);
+            var bytes = ms.ToArray();
+            var mime = AvatarPhoto.DetectMime(bytes);   // Inhalt zählt, nicht Dateiname oder gemeldeter Typ
+            if (mime is null) { _photoError = $"Das ist keine gültige Bilddatei. Erlaubt sind {AvatarPhoto.AllowedFormatsText}."; return; }
+            _photo = bytes; _photoMime = mime;
+        }
+        catch (IOException) { _photoError = $"Das Foto konnte nicht gelesen werden (höchstens {AvatarPhoto.MaxBytes / (1024 * 1024)} MB)."; }
+    }
+
+    private void ClearPhoto() { _photo = null; _photoMime = null; _photoConsent = false; }
+
+
+    // ─── KI-Bildavatar (ADR 0056): echte Bilddatei; Vorschläge und Referenzfoto nur im Arbeitsspeicher, gespeichert wird erst „Übernehmen“ ───
+    private string _imgStyle = AvatarImageStyles.Realistic, _imgSource = "photo", _imgText = "";
+    private byte[]? _imgPhoto; private string? _imgPhotoMime, _imgError;
+    private bool _imgConsent, _imgBusy;
+    private string ImgPhotoPreview => _imgPhoto is null ? "" : $"data:{_imgPhotoMime};base64,{Convert.ToBase64String(_imgPhoto)}";
+    private bool CanGenerateImage =>
+        (_imgSource == "text" ? !string.IsNullOrWhiteSpace(_imgText)
+        : _imgSource == "photo" ? _imgPhoto is not null && _imgConsent
+        : _imgPhoto is not null && _imgConsent && !string.IsNullOrWhiteSpace(_imgText));
+
+    private void ClearImgPhoto() { _imgPhoto = null; _imgPhotoMime = null; _imgConsent = false; }
+
+    private async Task OnImgPhotoSelected(InputFileChangeEventArgs e)
+    {
+        _imgError = null; ClearImgPhoto();
+        var file = e.File;
+        if (file.Size > AvatarPhoto.MaxBytes) { _imgError = $"Das Foto ist zu groß (höchstens {AvatarPhoto.MaxBytes / (1024 * 1024)} MB)."; return; }
+        try
+        {
+            using var ms = new MemoryStream();
+            await file.OpenReadStream(AvatarPhoto.MaxBytes).CopyToAsync(ms);
+            var bytes = ms.ToArray();
+            var mime = AvatarPhoto.DetectMime(bytes);   // Inhalt zählt, nicht Dateiname oder gemeldeter Typ
+            if (mime is null) { _imgError = $"Das ist keine gültige Bilddatei. Erlaubt sind {AvatarPhoto.AllowedFormatsText}."; return; }
+            _imgPhoto = bytes; _imgPhotoMime = mime;
+        }
+        catch (IOException) { _imgError = $"Das Foto konnte nicht gelesen werden (höchstens {AvatarPhoto.MaxBytes / (1024 * 1024)} MB)."; }
+    }
+
+    private async Task GenerateImageAsync()
+    {
+        if (_imgBusy || !CanGenerateImage) return;   // Mehrfachklicks erzeugen keine zweite Anfrage
+        if (_gallery.Count >= MaxVariants) { _imgError = $"Du hast schon {MaxVariants} Vorschläge. Übernimm einen oder verwirf einen, um eine neue Variante zu erstellen."; return; }
+        _imgBusy = true; _imgError = null;
+        try
+        {
+            var usePhoto = _imgSource != "text" && _imgConsent ? _imgPhoto : null;
+            var useText = _imgSource != "photo" ? _imgText : null;
+            var r = await ImgGen.GenerateAsync(_user!.Id, _imgStyle, useText, usePhoto);
+            var label = AvatarImageStyles.All.First(x => x.Id == r.Style).Label;
+            await AddVariantAsync(new Variant(Guid.NewGuid(), true, label, null, null, Bytes: r.Bytes, Model: r.Model, Style: r.Style, Src: $"data:{r.Mime};base64,{Convert.ToBase64String(r.Bytes)}"));
+        }
+        catch (AvatarImageException ex) { _imgError = ex.Message; }   // der bisherige Avatar bleibt unverändert
+        finally { _imgBusy = false; }
+    }
 
     private async Task GenerateAvatarAsync()
     {
-        _genBusy = true;
-        try { var r = await AvatarGen.GenerateAsync(_genText); _genId = r.Id; _genSummary = r.Summary; }
+        if (_genBusy) return;
+        if (_gallery.Count >= MaxVariants) { _message = $"❌ Du hast schon {MaxVariants} Vorschläge. Übernimm einen oder verwirf einen."; _messageOk = false; return; }
+        _genBusy = true; _genNote = null;
+        try
+        {
+            var r = await AvatarGen.GenerateAsync(_genText, _photoConsent ? _photo : null);
+            var existing = _gallery.FirstOrDefault(v => !v.IsImage && v.SvgId == r.Id);
+            if (existing is not null) { _selId = existing.Id; _message = "ℹ️ Diese Eingabe ergibt denselben Vorschlag wie eine vorhandene Variante. Ändere die Beschreibung für eine andere Variante."; _messageOk = true; }
+            else await AddVariantAsync(new Variant(Guid.NewGuid(), false, "Baukasten (SVG)", r.Summary, r.Note, SvgId: r.Id));
+        }
         catch (ArgumentException ex) { _message = "❌ " + ex.Message; _messageOk = false; }
         finally { _genBusy = false; }
-    }
-
-    private async Task AcceptGeneratedAsync()
-    {
-        if (_genId is null) return;
-        try { await Repo.SaveAvatarAsync(_user!.Id, _genId, false); UiState.SetAvatar(_genId, false); _message = "✅ Avatar gespeichert."; _messageOk = true; _genId = null; }
-        catch (ArgumentException ex) { _message = "❌ " + ex.Message; _messageOk = false; }
     }
 
     private async Task PickAvatarAsync(string id)
@@ -377,6 +655,7 @@
     private async Task ResetAvatarAsync()
     {
         await Repo.SaveAvatarAsync(_user!.Id, "", false);
+       
         UiState.SetAvatar("", false);
         _message = "✅ Avatar zurückgesetzt (Initialen)."; _messageOk = true;
     }
@@ -389,11 +668,19 @@
     private List<Certificate> _certificates = new();
     private int _minGrade;
 
+    // Das Layout lädt den gespeicherten Avatar asynchron; ohne Abonnement bliebe die Vorschau nach dem Neuladen bei den Initialen stehen.
+    private void OnUiChanged() => _ = InvokeAsync(StateHasChanged);
+    public void Dispose() => UiState.Changed -= OnUiChanged;
+
     protected override async Task OnInitializedAsync()
     {
+        UiState.Changed += OnUiChanged;
         var auth = await AuthState.GetAuthenticationStateAsync();
         var uid = auth.User.GetUserId() ?? throw new UnauthorizedAccessException();
         _user = await Users.GetAsync(uid) ?? throw new UnauthorizedAccessException();
+        var (savedAvatar, savedHidden) = await Repo.GetAvatarAsync(uid);   // der Layout-Zustand lebt im statischen Render-Bereich; die interaktive Seite lädt den gespeicherten Avatar selbst
+        UiState.SetAvatar(savedAvatar, savedHidden);
+        UiState.SetMoods(await Galleries.ActiveMoodsAsync(uid));   // welche Stimmungen die aktive KI-Figur als eigenes Bild besitzt
         _displayName = _user.DisplayName;
         _identities = await Users.GetIdentitiesAsync(uid);
         _summary = await Repo.GetOwnedSummaryAsync(uid);

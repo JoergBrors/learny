@@ -2,6 +2,8 @@
 @attribute [Authorize]
 @rendermode InteractiveServer
 @inject DashboardService Dash
+@inject CardRepository Repo
+@inject LearnCards.Web.Services.AvatarGallery.AvatarGalleryService Galleries
 @inject AuthenticationStateProvider AuthState
 @inject UserUiState UiState
 @inject AppConfig Config
@@ -40,7 +42,7 @@
                     </div>
                 </div>
                 <div class="hero-avatar" aria-hidden="@(!ShowAvatar)">
-                    @if (ShowAvatar) { <Avatar Preset="@UiState.AvatarPreset" Name="@_name" Size="132" State="@AvatarState" /> }
+                    @if (ShowAvatar) { <Avatar Preset="@UiState.AvatarPreset" Name="@_name" Size="132" State="@AvatarState" /> @if (MoodSubstitute) { <span class="muted avatar-mood-hint">Hauptvariante (kein Bild für „@AvatarMoods.Label(AvatarState)“ – in der Avatar-Galerie erstellbar)</span> } }
                 </div>
             </section>
 
@@ -159,6 +161,8 @@
     private string FirstName => string.IsNullOrWhiteSpace(_name) ? "" : _name.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0];
     private string Greeting => _hourWord == "Hallo" ? "Dein Überblick über Lernstand, Zuweisungen und Abschlüsse." : $"{_hourWord}! Dein Überblick über Lernstand, Zuweisungen und Abschlüsse.";
     private bool ShowAvatar => !UiState.AvatarHidden;
+    /// <summary>Kein eigenes KI-Bild für die aktuelle Stimmung: Hauptvariante als Ersatz, mit Hinweis (kein automatischer KI-Aufruf).</summary>
+    private bool MoodSubstitute => (Avatars.IsGalleryId(UiState.AvatarPreset) || Avatars.IsImageId(UiState.AvatarPreset)) && AvatarState != "neutral" && !UiState.AvatarMoods.Contains(AvatarState);
     private string AvatarState => _data is null ? "neutral" : _data.HasOverdue ? "motivating" : _data.Progress is { Percent: 100 } ? "success" : "happy";
     private const double Circumference = 2 * Math.PI * 52;
     private string Circ => Circumference.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
@@ -174,6 +178,9 @@
             var uid = auth.User.GetUserId() ?? throw new UnauthorizedAccessException();
             _name = auth.User.Identity?.Name ?? "";
             _data = await Dash.LoadAsync(uid);   // nur Daten des angemeldeten Benutzers
+            var (savedAvatar, savedHidden) = await Repo.GetAvatarAsync(uid);   // Avatar-Zustand der interaktiven Sitzung (das Layout rendert statisch)
+            UiState.SetAvatar(savedAvatar, savedHidden);
+            UiState.SetMoods(await Galleries.ActiveMoodsAsync(uid));
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or InvalidOperationException or KeyNotFoundException)
         {

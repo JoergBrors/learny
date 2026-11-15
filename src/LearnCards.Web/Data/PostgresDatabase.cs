@@ -38,6 +38,7 @@ public sealed class PostgresDatabase : IDatabase
             await MigrateQuizResultColumnsAsync(ct);
             await EnsureTableColumnAsync("user_preferences", "avatar", "TEXT NOT NULL DEFAULT ''", ct);   // Avatar-Voreinstellung (reine Darstellung, ADR 0051)
             await EnsureTableColumnAsync("user_preferences", "avatar_hidden", "INTEGER NOT NULL DEFAULT 0", ct);
+            await EnsureTableColumnAsync("avatar_gallery", "figure_id", "TEXT NOT NULL DEFAULT ''", ct);   // Stimmungsvarianten einer Figur (ADR 0058)
             await EnsureTableColumnAsync("user_identities", "kind", "TEXT NOT NULL DEFAULT 'workforce'", ct);   // ADR 0049: Altbestand = workforce
             await EnsureTableColumnAsync("mcp_links", "hash_alg", "TEXT NOT NULL DEFAULT 'sha256'", ct);   // ADR 0025
             await EnsureTableColumnAsync("mcp_links", "key_id", "TEXT NOT NULL DEFAULT ''", ct);

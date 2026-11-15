@@ -554,6 +554,36 @@ public partial class CardRepository
             "user_sub");
     }
 
+    /// <summary>Übernimmt ein generiertes Avatarbild (nur Bytes, nie das Referenzfoto): prüft Inhalt und Größe erneut, speichert es und setzt die Kennung. Ersetzt ein früheres Bild des Benutzers.</summary>
+    public async Task<string> SaveAvatarImageAsync(string userSub, byte[] bytes, string model, string style, int maxBytes)
+    {
+        var mime = AvatarPhoto.DetectMime(bytes);
+        if (mime is null || bytes.Length > maxBytes) throw new ArgumentException("Das Avatarbild ist ungültig oder zu groß.");
+        var version = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes))[..16].ToLowerInvariant();
+        await UpsertAsync("avatar_images",
+            new[]
+            {
+                ("user_sub", (object?)userSub), ("version", version), ("mime", mime), ("byte_size", bytes.Length),
+                ("data_b64", Convert.ToBase64String(bytes)), ("model", model.Length > 80 ? model[..80] : model), ("style", style.Length > 20 ? style[..20] : style), ("created_at", DateTime.UtcNow),
+            },
+            "user_sub");
+        var id = Avatars.ImageId(version);
+        await SaveAvatarAsync(userSub, id, false);   // erst Bild, dann Kennung: bei Abbruch bleibt der bisherige Avatar unverändert
+        return id;
+    }
+
+    /// <summary>Das eigene Avatarbild (nur des angefragten Benutzers) oder null.</summary>
+    public async Task<(byte[] Bytes, string Mime, string Version)?> GetAvatarImageAsync(string userSub)
+    {
+        var rows = await _db.QueryAsync("SELECT mime, version, data_b64 FROM avatar_images WHERE user_sub = @u", new[] { ("u", (object?)userSub) });
+        if (rows.Count == 0) return null;
+        var b = Convert.FromBase64String(rows[0].GetValueOrDefault("data_b64") ?? "");
+        return (b, rows[0].GetValueOrDefault("mime") ?? "image/webp", rows[0].GetValueOrDefault("version") ?? "");
+    }
+
+    /// <summary>Entfernt das gespeicherte Avatarbild des Benutzers (nur auf dessen ausdrückliche Aktion: anderen Avatar wählen oder zurücksetzen).</summary>
+    public Task DeleteAvatarImageAsync(string userSub) => _db.ExecuteAsync("DELETE FROM avatar_images WHERE user_sub = @u", new[] { ("u", (object?)userSub) });
+
     public Task SaveThemeAsync(string userSub, string theme) =>
         UpsertAsync("user_preferences",
             new[]
