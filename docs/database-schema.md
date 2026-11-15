@@ -298,7 +298,7 @@ Nur für den Provider `database`: `storage_key` TEXT PK, `data_base64` TEXT NOT 
 |---|---|---|
 | user_sub | TEXT PK | |
 | theme | TEXT NOT NULL | Default `''` |
-| avatar | TEXT NOT NULL | Default `''` (Initialen); Voreinstellungs-Kennung oder `custom:Haut\|Haar\|Frisur\|Kleidung\|Accessoire` (nur geprüfte Hexfarben/feste Listen, ADR 0051) |
+| avatar | TEXT NOT NULL | Default `''` (Initialen); Voreinstellungs-Kennung oder `custom:Haut\|Haar\|Frisur\|Kleidung\|Accessoire` bzw. mit `\|Gesicht\|Bart` (nur geprüfte Hexfarben/feste Listen, ADR 0051/0055; Fotos werden nie gespeichert) |
 | avatar_hidden | INTEGER NOT NULL | Default 0 |
 | updated_at | TEXT NOT NULL | |
 
@@ -487,3 +487,37 @@ Eingefrorene Modulkopien liegen in `modules`/`cards` mit `scope='topic'` und ohn
 ### user_favorites / mail_settings (Phase C)
 - `user_favorites (user_id → users, kind 'module'|'topic'|'credential', item_id, created_at, PK (user_id, kind, item_id))` — Favoriten (Stern) je Benutzer; nur Kennungen, höchstens 500 je Benutzer, `ON DELETE CASCADE`. Ein Favorit gewährt nie Zugriff (die Oberfläche zeigt nur ohnehin sichtbare Einträge).
 - `mail_settings (id=1, allowed_recipients, updated_at, updated_by)` — in der Plattform gepflegte erlaubte Mailempfänger (ADR 0050); eine Zeile überschreibt `MAIL_ALLOWED_RECIPIENTS`, keine Zeile = Umgebungswert; leerer Wert = niemand. Beide Tabellen sind additiv (`CREATE TABLE IF NOT EXISTS`); PostgreSQL nicht live geprüft.
+
+### `avatar_images` (ADR 0056)
+Ein übernommenes KI-Avatarbild je Benutzer (nie das Referenzfoto). Wird nur über `/api/me/avatar-image` an den Besitzer ausgeliefert. `user_preferences.avatar` verweist mit `img:<version>` darauf.
+
+| Spalte | Typ | Bedeutung |
+|---|---|---|
+| user_sub | TEXT PK | Besitzer |
+| version | TEXT NOT NULL | 16 Hex-Zeichen (SHA-256-Präfix des Bildes), Teil der Bildkennung |
+| mime | TEXT NOT NULL | `image/webp`, `image/png` oder `image/jpeg` (nach Inhalt geprüft) |
+| byte_size | INTEGER NOT NULL | Größe der Bytes |
+| data_b64 | TEXT NOT NULL | Bilddaten als Base64 (portabel für SQLite und PostgreSQL) |
+| model, style | TEXT NOT NULL | verwendetes Bildmodell und Stil (nur zur Nachvollziehbarkeit) |
+| created_at | TEXT NOT NULL | ISO-8601-Zeitstempel |
+
+### `avatar_gallery` (ADR 0057)
+Persönliche Avatar-Galerie: mehrere gespeicherte Avatare je Benutzer (nie Referenzfotos). Der aktive Avatar steht in `user_preferences.avatar` (`gal:<id>` für Galeriebilder, sonst Baukasten-Kennung bzw. älteres `img:…`); „aktiv“ wird daraus berechnet.
+
+| Spalte | Typ | Bedeutung |
+|---|---|---|
+| id | TEXT PK | 32 Hex-Zeichen, serverseitig erzeugt |
+| user_sub | TEXT NOT NULL | Besitzer (jede Abfrage filtert danach), Index `ix_avatar_gallery_user (user_sub, created_at)` |
+| group_id | TEXT NOT NULL | Variantengruppe (Vorschläge eines Generatorlaufs bzw. eines Imports) |
+| kind | TEXT NOT NULL | `image` (KI-Bild) oder `svg` (Baukasten) |
+| name, description | TEXT | Anzeigename (≤ 60) und optionale Beschreibung (≤ 200) |
+| style | TEXT | Bildstil (`realistic`, `cartoon3d`, `classic`) oder `svg` |
+| mood | TEXT | reserviert für echte Stimmungsbilder (derzeit leer; Stimmungen sind Darstellungsparameter) |
+| mime, byte_size, sha256 | TEXT / INTEGER / TEXT | Bildtyp (nach Inhalt geprüft), Größe, SHA-256 (Duplikaterkennung, Export-Prüfsumme) |
+| svg_id | TEXT | gültige Baukasten-Kennung bei `kind = svg` |
+| data_b64 | TEXT | Bilddaten als Base64 (leer bei SVG) |
+| favorite | INTEGER | 0/1 |
+| created_at | TEXT | ISO-8601 |
+| legacy_version | TEXT | Marke für das einmalig übernommene ältere `avatar_images`-Bild (Idempotenz) |
+
+**Ergänzung `avatar_gallery` (ADR 0058):** Spalte `figure_id TEXT NOT NULL DEFAULT ''` — Einträge mit gleicher Figur sind Stimmungsvarianten derselben KI-Comicfigur (leer = Altbestand, jeder Eintrag ist eine Figur für sich). `mood` (bisher reserviert) enthält bei KI-Bildern `neutral|happy|motivating|success|encouraging`; leer gilt als Neutral. Migration: `CREATE TABLE` enthält die Spalte, bestehende Datenbanken erhalten sie idempotent per `EnsureColumn`/`EnsureTableColumnAsync` (SQLite/PostgreSQL); bestehende Zeilen bleiben unverändert.

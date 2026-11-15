@@ -62,6 +62,10 @@ Referenz dafür, *wie das System funktioniert und warum* — für Menschen und f
 | [0052](0052-themenbezogene-co-author-berechtigungen.md) | Themenbezogene Co-Author-Berechtigungen | Akzeptiert und umgesetzt |
 | [0053](0053-modulbezogene-co-author-berechtigungen-und-vererbung.md) | Modulbezogene Co-Author-Berechtigungen und Vererbung aus Themen | Akzeptiert und umgesetzt |
 | [0054](0054-lern-und-pruefungsvorschau-fuer-content-co-autoren.md) | Lern- und Prüfungsvorschau für Content-Co-Autoren | Akzeptiert und umgesetzt |
+| [0055](0055-comic-avatar-aus-foto-als-inspiration.md) | Comic-Avatar mit Foto als Inspiration und erweiterter Avatar-Baukasten | Akzeptiert und umgesetzt |
+| [0056](0056-ki-generierte-avatarbilder.md) | KI-generierte Avatarbilder (echte Bilddateien) statt nur parametrischer SVG-Figuren | Akzeptiert und umgesetzt |
+| [0057](0057-persoenliche-avatar-galerie-und-austauschformat.md) | Persönliche Avatar-Galerie, Austauschformat und passwortgeschützter ZIP-Export | Akzeptiert und umgesetzt |
+| [0058](0058-echte-stimmungsbilder-fuer-ki-avatare.md) | Echte Stimmungsbilder für KI-Comic-Avatare (Figuren mit fünf Varianten) | Akzeptiert und umgesetzt |
 | [0025](0025-sichere-speicherung-von-mcp-tokens.md) | Sichere Speicherung von MCP-Tokens, Codes und OAuth-Clients (Schutz bei Datenbankzugriff) | Akzeptiert und umgesetzt |
 
 Prüfberichte, die Anlass für ADRs sind, liegen unter [docs/reviews/](../reviews/) (aktuell: [Mehrbenutzer-Prüfbericht](../reviews/2026-10-24-mehrbenutzer-pruefbericht.md)).

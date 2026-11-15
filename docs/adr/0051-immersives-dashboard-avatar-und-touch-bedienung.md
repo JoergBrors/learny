@@ -14,3 +14,11 @@ Neues GUI (Violett-Palette, schmale Icon-Seitenleiste, Dashboard als Startseite)
 
 ## Folgen
 Keine API-/Karten-JSON-Änderung, keine neuen Pakete. Echte Geräte-Tests stehen aus (nur Logik-Tests der Gestenauswertung und Integrationstests).
+
+**Nachtrag (ADR 0055):** Der Baukasten kennt jetzt auch Gesichtsform, Bart und weitere Frisuren; optional kann ein Foto als Inspiration dienen (nie gespeichert). „Keine Fotos“ gilt für das Ergebnis des Avatars.
+
+**Nachtrag (ADR 0056):** Zusätzlich gibt es KI-generierte Bildavatare (`img:<Version>`, Tabelle `avatar_images`); der SVG-Baukasten bleibt Altbestand und Fallback ohne KI.
+
+**Nachtrag (ADR 0057):** Avatare (SVG und KI-Bild) liegen dauerhaft in einer persönlichen Galerie (`avatar_gallery`); die Stimmungen bleiben reine Darstellungsparameter der SVG-Figur und werden nie als eigene Bilder gespeichert oder exportiert.
+
+**Nachtrag (ADR 0058):** Bei KI-Bildavataren wählt die Stimmung (`State`) das echte Bild der Stimmung (oder die Hauptvariante als gekennzeichneten Ersatz); SVG-Avatare bleiben unverändert.
