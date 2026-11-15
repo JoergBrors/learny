@@ -214,6 +214,118 @@ public static class ModuleCoAuthorTests
         await repo.DeleteModuleAsync(delModule, owner);
         check((await db.QueryAsync("SELECT COUNT(*) AS n FROM module_coauthors WHERE module_id=@m", new (string, object?)[] { ("m", delModule) }))[0]["n"] == "0", p + "M35 Beim Löschen des Moduls entfallen seine direkten Berechtigungen (ON DELETE CASCADE)");
         check((await db.QueryAsync("SELECT COUNT(*) AS n FROM modules WHERE owner_user_id=@o AND id IN (@a,@b,@c,@d)", new (string, object?)[] { ("o", owner), ("a", m1), ("b", m2), ("c", m3), ("d", m4) }))[0]["n"] == "4", p + "M36 Alle Module gehören weiterhin dem ursprünglichen Eigentümer");
+        await VersionsCoreAsync(p, db, topics, repo, comp, newUser, restricted, check);
+    }
+
+    /// <summary>ADR 0059: Co-Autoren verwalten und veröffentlichen Modulversionen (Eigentümer, direkt, abgeleitet); getrennt von Lernfreigabe, globaler Freigabe und Themenveröffentlichung.</summary>
+    private static async Task VersionsCoreAsync(string p, IDatabase db, TopicService topics, CardRepository repo, CompetencyService comp, Func<string, Task<string>> newUser, string? restricted, Action<bool, string> check)
+    {
+        var owner = await newUser("Vera Owner"); var direct = await newUser("Dirk Direkt"); var via = await newUser("Viola Via"); var stranger = await newUser("Sven Fremd");
+        var sfx = Guid.NewGuid().ToString("N")[..6];
+        string mod1 = (await repo.CreateModuleAsync(new ModuleCreateRequest { Name = "VM1-" + sfx }, owner)).Id, mod2 = (await repo.CreateModuleAsync(new ModuleCreateRequest { Name = "VM2-" + sfx }, owner)).Id;
+        var card1 = await repo.CreateCardAsync(Json("VM1-" + sfx, "Karte 1", "alt"), owner);
+        var card2 = await repo.CreateCardAsync(Json("VM2-" + sfx, "Karte 2"), owner);
+        var tA = await topics.CreateAsync(owner, "VT-A " + sfx, ""); var tB = await topics.CreateAsync(owner, "VT-B " + sfx, "");
+        await topics.AddModuleAsync(owner, tA.Id, mod1);                       // Thema A bindet Modul 1 (festgelegte Version 1)
+        await topics.AddModuleAsync(owner, tA.Id, mod2); await topics.AddModuleAsync(owner, tB.Id, mod2);   // Modul 2 in zwei Themen (Mehrfachzuordnung)
+        async Task<string> Pin(string topic, string module) => (await db.QueryAsync("SELECT module_version FROM topic_modules WHERE topic_id=@t AND module_id=@m", new (string, object?)[] { ("t", topic), ("m", module) }))[0]["module_version"] ?? "";
+        async Task<int> Count(string module) => (await topics.GetModuleVersionOverviewAsync(owner, module)).Versions.Count;
+        async Task Edit(Card c, string module, string def, string actor) => await repo.UpdateCardAsync(c.Id, Json(module, c.Term, def), actor, (await repo.GetCardAsync(c.Id, owner))!.UpdatedAt);
+
+        // A Eigentümer
+        var ov0 = await topics.GetModuleVersionOverviewAsync(owner, mod1);
+        check(ov0.LatestVersion == 1 && !ov0.HasUnpublishedChanges, p + "V1 Ausgangslage: Version 1 (beim Festlegen im Thema erzeugt), Entwurf unverändert");
+        await Edit(card1, "VM1-" + sfx, "owner", owner);
+        var vo = await topics.PublishModuleVersionAsync(owner, mod1, "Eigentümer", null);
+        check(vo.VersionNumber == 2, p + "V2 (A) Eigentümer veröffentlicht Version 2");
+
+        // B direkter Co-Autor
+        await topics.AddModuleCoAuthorAsync(owner, mod1, direct);
+        var ctx = await topics.ResolveModuleEditOwnerAsync(direct, mod1);
+        await Edit(card1, "VM1-" + sfx, "direkt", ctx);
+        await repo.CreateCardAsync(Json("VM1-" + sfx, "Neue Karte"), ctx);
+        var ovd = await topics.GetModuleVersionOverviewAsync(direct, mod1);
+        check(ovd.HasUnpublishedChanges && ovd.LatestVersion == 2 && ovd.Versions.Count == 2, p + "V3 (B/K) Direkter Co-Autor sieht Historie und unveröffentlichte Änderungen");
+        var diff = await topics.CompareDraftWithVersionAsync(direct, mod1, 2);
+        check(diff.Added.Contains("Neue Karte") && diff.Changed.Contains("Karte 1"), p + "V4 (K) Vergleich Entwurf ↔ Version zeigt neue und geänderte Karten");
+        var v3 = await topics.PublishModuleVersionAsync(direct, mod1, "Co", ovd.DraftHash);
+        var row = (await db.QueryAsync("SELECT published_by FROM module_versions WHERE module_id=@m AND version_number=3", new (string, object?)[] { ("m", mod1) }))[0];
+        check(v3.VersionNumber == 3 && row["published_by"] == direct && (await repo.GetModuleAsync(mod1, owner))!.OwnerUserId == owner, p + "V5 (B) Co-Autor veröffentlicht Version 3; Handelnder in published_by, Eigentümer unverändert");
+        var (vv1, cards1) = await topics.GetModuleVersionCardsAsync(direct, mod1, 1); var (_, cards3) = await topics.GetModuleVersionCardsAsync(direct, mod1, 3);
+        check(cards1.Count == 1 && cards1[0].Definition == "alt" && cards3.Count == 2 && cards3.Any(c => c.Term == "Neue Karte") && vv1.VersionNumber == 1, p + "V6 (G/K) Version 1 bleibt unverändert, Version 3 enthält die neue Karte, beide für den Co-Autor lesbar");
+        check((await db.QueryAsync("SELECT COUNT(*) AS n FROM audit_log WHERE actor_user_id=@u AND action='module.version.publish'", new (string, object?)[] { ("u", direct) }))[0]["n"] == "1", p + "V7 Audit nennt den tatsächlich Handelnden");
+        check(await Denied(() => topics.PublishModuleVersionAsync(direct, mod1, null, null)), p + "V8 ohne Änderung keine Version");
+
+        // I Themen unverändert
+        check(await Pin(tA.Id, mod1) == "1" && (await db.QueryAsync("SELECT 1 FROM topic_versions WHERE topic_id=@t", new (string, object?)[] { ("t", tA.Id) })).Count == 0, p + "V9 (I) Thema bleibt auf Version 1, keine Themenversion entstanden");
+        check((await db.QueryAsync("SELECT COUNT(*) AS n FROM module_shares WHERE module_id=@m", new (string, object?)[] { ("m", mod1) }))[0]["n"] == "0", p + "V10 (J) keine Lernfreigabe erzeugt");
+
+        // H parallele Veröffentlichung
+        await Edit(card1, "VM1-" + sfx, "parallel", owner);
+        var results = await Task.WhenAll(Enumerable.Range(0, 4).Select(async i => { try { await topics.PublishModuleVersionAsync(i % 2 == 0 ? direct : owner, mod1, null, null); return 1; } catch (InvalidOperationException) { return 0; } }));
+        var nums = (await db.QueryAsync("SELECT version_number FROM module_versions WHERE module_id=@m", new (string, object?)[] { ("m", mod1) })).Select(r => r["version_number"]).ToList();
+        check(results.Sum() == 1 && nums.Count == 4 && nums.Distinct().Count() == 4, p + "V11 (H) vier parallele Veröffentlichungen erzeugen genau eine neue, eindeutige Version");
+
+        // Konflikt: veralteter Stand
+        var stale = (await topics.GetModuleVersionOverviewAsync(direct, mod1)).DraftHash;
+        await Edit(card1, "VM1-" + sfx, "anderer", owner);
+        check(await Denied(() => topics.PublishModuleVersionAsync(direct, mod1, null, stale)) && await Count(mod1) == 4, p + "V12 Veralteter Editorstand (Fingerabdruck) wird nicht veröffentlicht");
+
+        // C/D abgeleitet, Mehrfachzuordnung
+        await topics.AddCoAuthorAsync(owner, tA.Id, via);
+        check((await topics.PublishModuleVersionAsync(via, mod1, "Via", null)).VersionNumber == 5, p + "V13 (C) Themen-Co-Autor veröffentlicht Version bei gültiger abgeleiteter Berechtigung");
+        await Edit(card2, "VM2-" + sfx, "geändert", owner);
+        check(await Denied(() => topics.PublishModuleVersionAsync(via, mod2, null, null)) && await Denied(() => topics.GetModuleVersionOverviewAsync(via, mod2)), p + "V14 (D) Mehrfachzuordnung ohne Recht am zweiten Thema: weder lesen noch veröffentlichen");
+
+        // J: Co-Autoren lösen weder Themenveröffentlichung noch Übernahme aus
+        check(await Denied(() => topics.PublishAsync(via, tA.Id)) && await Denied(() => topics.PublishAsync(direct, tA.Id)), p + "V15 (J) Co-Autoren veröffentlichen keine Themenversion (Eigentümerbindung unverändert)");
+        check(await Pin(tA.Id, mod1) == "1", p + "V16 (I) Pin des Themas bleibt nach allen Veröffentlichungen auf Version 1");
+        var adopted = await topics.AdoptModuleVersionAsync(owner, tA.Id, mod1);
+        check(adopted == 5 && await Pin(tA.Id, mod1) == "5", p + "V17 Übernahme nur durch den Eigentümer und ausdrücklich");
+
+        // Automatische Modulversion durch Themen-Co-Autor (Übernahme ohne Versionsangabe): Handelnder statt Eigentümer
+        await Edit(card1, "VM1-" + sfx, "auto", owner);
+        var autoBefore = await Count(mod1);
+        await topics.AddCoAuthorAsync(owner, tA.Id, via);
+        var autoPin = await topics.AdoptModuleVersionAsync(via, tA.Id, mod1);
+        var autoRow = (await db.QueryAsync("SELECT published_by, note FROM module_versions WHERE module_id=@m AND version_number=@n", new (string, object?)[] { ("m", mod1), ("n", autoPin) }))[0];
+        check(await Count(mod1) == autoBefore + 1 && autoRow["published_by"] == via && (await repo.GetModuleAsync(mod1, owner))!.OwnerUserId == owner, p + "V21 Automatische Modulversion bei Übernahme durch den Themen-Co-Autor nennt den Handelnden in published_by, Eigentümer unverändert");
+        check((await db.QueryAsync("SELECT COUNT(*) AS n FROM audit_log WHERE actor_user_id=@u AND action='module.version.publish' AND target=@m AND detail=@d", new (string, object?)[] { ("u", via), ("m", mod1), ("d", $"version={autoPin}") }))[0]["n"] == "1", p + "V22 Audit der automatischen Version nennt den Handelnden");
+        check(await Denied(() => topics.PublishAsync(via, tA.Id)), p + "V23 Übernahme erlaubt dem Co-Autor weiterhin keine Themenveröffentlichung");
+        await topics.AdoptModuleVersionAsync(via, tA.Id, mod1);
+        check(await Count(mod1) == autoBefore + 1, p + "V24 Wiederholte Übernahme ohne Änderung erzeugt keine weitere Version");
+
+        // Inhaltsfingerabdruck: Lernziele und Kompetenzdefinitionen (ADR 0031)
+        async Task<string> Hash() => (await topics.GetModuleVersionOverviewAsync(owner, mod1)).DraftHash;
+        var h0 = await Hash();
+        var model = new ModuleCompetencyModel { Objectives = { new LearningObjective { Id = "lz1", Text = "Ziel A" } }, Competencies = { new Competency { Id = "k1", ObjectiveId = "lz1", Name = "Komp A" } } };
+        await comp.SaveModelAsync(owner, mod1, model); var h1 = await Hash();
+        await comp.SaveModelAsync(owner, mod1, new ModuleCompetencyModel { Objectives = { new LearningObjective { Id = "lz1", Text = "Ziel A" } }, Competencies = { new Competency { Id = "k1", ObjectiveId = "lz1", Name = "Komp A" } } });
+        check(h1 != h0 && await Hash() == h1, p + "V25 Neue Lernziele/Kompetenzen ändern den Fingerabdruck; erneutes Speichern identischer Inhalte nicht");
+        await comp.SaveModelAsync(owner, mod1, new ModuleCompetencyModel { Objectives = { new LearningObjective { Id = "lz1", Text = "Ziel B" } }, Competencies = { new Competency { Id = "k1", ObjectiveId = "lz1", Name = "Komp A" } } });
+        var h2 = await Hash();
+        await comp.SaveModelAsync(owner, mod1, new ModuleCompetencyModel { Objectives = { new LearningObjective { Id = "lz1", Text = "Ziel B" } }, Competencies = { new Competency { Id = "k1", ObjectiveId = "lz1", Name = "Komp B" } } });
+        check(h2 != h1 && await Hash() != h2, p + "V26 Änderung eines Lernziel-Textes und eines Kompetenznamens ändert jeweils den Fingerabdruck");
+        var cn = (await db.QueryAsync("SELECT 1 FROM module_versions WHERE module_id=@m", new (string, object?)[] { ("m", mod1) })).Count;
+        var vc = await topics.PublishModuleVersionAsync(owner, mod1, "Kompetenzen", null);
+        var snapModel = await comp.GetModelRawAsync(vc.SnapshotModuleId);
+        check(vc.VersionNumber == cn + 1 && snapModel.Competencies.Single().Name == "Komp B" && snapModel.Objectives.Single().Text == "Ziel B", p + "V27 Kompetenzänderung ist allein ein Versionsgrund; die Version enthält Lernziele und Kompetenzen");
+        await Edit(card1, "VM1-" + sfx, "x2", owner);
+        await repo.UpdateCardAsync(card1.Id, Json("VM1-" + sfx, "Karte 1", "x2"), owner, (await repo.GetCardAsync(card1.Id, owner))!.UpdatedAt);
+        check(await Denied(() => topics.PublishModuleVersionAsync(owner, mod1, null, vc.ContentHash)), p + "V28 Veralteter Fingerabdruck der Vorversion wird nicht als aktueller Stand akzeptiert");
+        check((await comp.GetModelRawAsync(mod1)).Objectives.Count == 1 && (await db.QueryAsync("SELECT 1 FROM module_versions WHERE module_id=@m AND version_number=1", new (string, object?)[] { ("m", mod1) })).Count == 1, p + "V29 Frühere Versionen bleiben unverändert vorhanden");
+
+        // F Fremder, E Entzug, L eingeschränktes Profil
+        check(await Denied(() => topics.PublishModuleVersionAsync(stranger, mod1, null, null)) && await Denied(() => topics.GetModuleVersionOverviewAsync(stranger, mod1)) && await Denied(() => topics.GetModuleVersionCardsAsync(stranger, mod1, 1)) && await Denied(() => topics.CompareDraftWithVersionAsync(stranger, mod1, 1)), p + "V18 (F) Fremder Benutzer kann weder lesen noch veröffentlichen");
+        await Edit(card1, "VM1-" + sfx, "nach-entzug", owner);
+        await topics.RemoveModuleCoAuthorAsync(owner, mod1, direct); await topics.RemoveCoAuthorAsync(owner, tA.Id, via);
+        var before = await Count(mod1);
+        check(await Denied(() => topics.PublishModuleVersionAsync(direct, mod1, null, null)) && await Denied(() => topics.PublishModuleVersionAsync(via, mod1, null, null)) && await Count(mod1) == before, p + "V19 (E) Entzogene Co-Autoren können nicht mehr veröffentlichen, keine unvollständige Version");
+        if (restricted is not null)
+        {
+            await db.ExecuteAsync("INSERT INTO module_coauthors (module_id, user_id, granted_by, created_at) VALUES (@m,@u,@a,@t)", new (string, object?)[] { ("m", mod1), ("u", restricted), ("a", owner), ("t", DateTime.UtcNow) });
+            check(await Denied(() => topics.PublishModuleVersionAsync(restricted, mod1, null, null)) && await Denied(() => topics.GetModuleVersionOverviewAsync(restricted, mod1)), p + "V20 (L) Eingeschränktes Lernprofil erhält trotz Co-Autor-Eintrag kein Recht");
+        }
     }
 
     // ─── REST ────────────────────────────────────────────────────────────────

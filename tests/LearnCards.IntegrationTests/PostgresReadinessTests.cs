@@ -124,7 +124,9 @@ public static class PostgresReadinessTests
         var mdel = await db.QueryAsync("SELECT DISTINCT rc.delete_rule FROM information_schema.referential_constraints rc JOIN information_schema.table_constraints tc ON tc.constraint_name=rc.constraint_name WHERE tc.table_name='module_coauthors'");
         check(mcols.Any(r => r["constraint_type"] == "PRIMARY KEY") && mcols.Count(r => r["constraint_type"] == "FOREIGN KEY") >= 2 && mdel.Count == 1 && mdel[0]["delete_rule"] == "CASCADE", "PostgreSQL: module_coauthors hat Primärschlüssel, Fremdschlüssel und ON DELETE CASCADE");
         var comp = new CompetencyService(db, repo, users);
-        await ModuleCoAuthorTests.CoreAsync("PostgreSQL", db, topics, repo, comp, User, null, check);
+        var restricted = await User("PgExtern");
+        await db.ExecuteAsync("INSERT INTO user_identities (provider, subject, user_id, created_at, kind) VALUES ('pg-test', @s, @u, @t, 'external')", new (string, object?)[] { ("s", "ext-" + restricted), ("u", restricted), ("t", DateTime.UtcNow) });   // externe Identität = eingeschränktes Lernprofil (ADR 0049); nur Testdaten in der Wegwerf-Datenbank
+        await ModuleCoAuthorTests.CoreAsync("PostgreSQL", db, topics, repo, comp, User, restricted, check);
         await QuizPoolCoAuthorTests.CoreAsync("PostgreSQL", db, topics, repo, pool, QuizPoolCoAuthorTests.Build(repo, pool, comp, db, users), User, check);
         var (pvTopics, pvRepo, pvQuiz, pvPool) = PreviewTests.BuildServices(db, users);
         await PreviewTests.CoreAsync("PostgreSQL", db, pvTopics, pvRepo, pvQuiz, pvPool, User, null, check);

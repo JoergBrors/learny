@@ -25,6 +25,8 @@ public sealed class ModuleVersionOverview
     public int LatestVersion { get; set; }
     /// <summary>Der Entwurf (aktueller Bearbeitungsstand) weicht inhaltlich von der neuesten Version ab oder das Modul wurde nie veröffentlicht.</summary>
     public bool HasUnpublishedChanges { get; set; }
+    /// <summary>Inhaltsfingerabdruck des aktuellen Entwurfs (für die Konfliktprüfung vor dem Veröffentlichen, ADR 0059).</summary>
+    public string DraftHash { get; set; } = "";
     public List<ModuleVersionInfo> Versions { get; set; } = new();
 }
 
@@ -73,7 +75,7 @@ public class ModuleVersionService
         var hash = await _repo.ComputeModuleContentHashAsync(module);
         return new ModuleVersionOverview
         {
-            ModuleId = module.Id, ReferenceId = await _repo.EnsureReferenceIdAsync(module.Id, ownerId), Versions = versions,
+            ModuleId = module.Id, DraftHash = hash, ReferenceId = await _repo.EnsureReferenceIdAsync(module.Id, ownerId), Versions = versions,
             LatestVersion = versions.FirstOrDefault()?.VersionNumber ?? 0,
             HasUnpublishedChanges = versions.Count == 0 || !string.Equals(versions[0].ContentHash, hash, StringComparison.Ordinal),
         };
@@ -96,14 +98,19 @@ public class ModuleVersionService
     /// <summary>
     /// Veröffentlicht den aktuellen Stand als neue, unveränderliche Version. Ohne inhaltliche Änderung gegenüber der neuesten Version: <see cref="InvalidOperationException"/>.
     /// </summary>
-    public async Task<ModuleVersionInfo> PublishAsync(string ownerId, string moduleId, string? note = null)
+    /// <param name="ownerId">Eigentümer des Moduls (Besitzprüfung in SQL).</param>
+    /// <param name="actorId">Tatsächlich Handelnder für <c>published_by</c> und Audit (ADR 0059); <c>null</c> = Eigentümer. Die Berechtigung des Handelnden prüft der Aufrufer (<c>TopicService.PublishModuleVersionAsync</c>) unmittelbar davor.</param>
+    /// <param name="expectedDraftHash">Fingerabdruck des Entwurfs, den der Handelnde gesehen hat; weicht der aktuelle Stand ab, wird nichts veröffentlicht.</param>
+    public async Task<ModuleVersionInfo> PublishAsync(string ownerId, string moduleId, string? note = null, string? actorId = null, string? expectedDraftHash = null)
     {
         var module = await RequireOwnAsync(ownerId, moduleId);
         var gate = Gates.GetOrAdd(module.Id, _ => new SemaphoreSlim(1, 1));
         await gate.WaitAsync();
         try
         {
-            var created = await CreateIfChangedAsync(ownerId, module, note);
+            if (expectedDraftHash is not null && !string.Equals(expectedDraftHash, await _repo.ComputeModuleContentHashAsync(module), StringComparison.Ordinal))
+                throw new InvalidOperationException("Das Modul wurde inzwischen geändert. Lade den Editor neu und prüfe den aktuellen Stand, bevor du eine Version veröffentlichst.");
+            var created = await CreateIfChangedAsync(actorId ?? ownerId, module, note);
             if (created is null) throw new InvalidOperationException($"Keine Änderungen seit Version {(await ListRawAsync(module.Id))[0].VersionNumber}. Ändere das Modul, bevor du eine neue Version veröffentlichst.");
             return created;
         }
@@ -111,16 +118,17 @@ public class ModuleVersionService
     }
 
     /// <summary>Stellt sicher, dass der aktuelle Stand als Version vorliegt (legt bei Bedarf eine an) und liefert die neueste Version. Für das Festlegen im Themenentwurf.</summary>
-    public async Task<ModuleVersionInfo> EnsureCurrentVersionAsync(string ownerId, string moduleId, string? note = null)
+    /// <param name="actorId">Tatsächlich Handelnder für <c>published_by</c>/Audit (ADR 0059); <c>null</c> = Eigentümer.</param>
+    public async Task<ModuleVersionInfo> EnsureCurrentVersionAsync(string ownerId, string moduleId, string? note = null, string? actorId = null)
     {
         var module = await RequireOwnAsync(ownerId, moduleId);
         var gate = Gates.GetOrAdd(module.Id, _ => new SemaphoreSlim(1, 1));
         await gate.WaitAsync();
-        try { return await CreateIfChangedAsync(ownerId, module, note) ?? (await ListRawAsync(module.Id))[0]; }
+        try { return await CreateIfChangedAsync(actorId ?? ownerId, module, note) ?? (await ListRawAsync(module.Id))[0]; }
         finally { gate.Release(); }
     }
 
-    private async Task<ModuleVersionInfo?> CreateIfChangedAsync(string ownerId, ModuleInfo module, string? note)
+    private async Task<ModuleVersionInfo?> CreateIfChangedAsync(string actorId, ModuleInfo module, string? note)
     {
         var versions = await ListRawAsync(module.Id);
         var hash = await _repo.ComputeModuleContentHashAsync(module);
@@ -136,8 +144,8 @@ public class ModuleVersionService
         await _db.ExecuteAsync("""
             INSERT INTO module_versions (id, module_id, version_number, snapshot_module_id, content_hash, note, published_at, published_by)
             VALUES (@id, @m, @n, @s, @h, @note, @at, @u)
-            """, new (string, object?)[] { ("id", v.Id), ("m", v.ModuleId), ("n", v.VersionNumber), ("s", v.SnapshotModuleId), ("h", v.ContentHash), ("note", v.Note), ("at", v.PublishedAt), ("u", ownerId) });
-        await _users.WriteAuditAsync(ownerId, "module.version.publish", module.Id, $"version={next}");
+            """, new (string, object?)[] { ("id", v.Id), ("m", v.ModuleId), ("n", v.VersionNumber), ("s", v.SnapshotModuleId), ("h", v.ContentHash), ("note", v.Note), ("at", v.PublishedAt), ("u", actorId) });
+        await _users.WriteAuditAsync(actorId, "module.version.publish", module.Id, $"version={next}");
         return v;
     }
 

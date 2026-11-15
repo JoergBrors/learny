@@ -1,0 +1,69 @@
+@page "/module/{ModuleId}/version/{VersionNumber:int}"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject TopicService TopicSvc
+@inject AuthenticationStateProvider AuthState
+
+@* Lesende Ansicht einer veröffentlichten Modulversion für Eigentümer und Co-Autoren (ADR 0059): Berechtigung bei jedem Laden neu (GetModuleEditAccessAsync), nichts wird verändert. *@
+<PageTitle>Modulversion @VersionNumber — LearnCards</PageTitle>
+
+<div class="container module-page">
+    @if (_loading)
+    {
+        <div class="spinner-wrap" aria-busy="true"><div class="spinner" role="status"></div></div>
+    }
+    else if (_version is null)
+    {
+        <div class="alert alert-error" role="alert">Die Version wurde nicht gefunden oder du darfst sie nicht ansehen.</div>
+        <a class="btn btn-primary" href="/">Zur Übersicht</a>
+    }
+    else
+    {
+        <section class="card panel">
+            <p class="muted breadcrumb"><a href="/">Module</a> › <a href="/module/@ModuleId/edit">Bearbeiten</a> › Version @_version.VersionNumber</p>
+            <h1>Modulversion @_version.VersionNumber <span class="badge">nur lesbar</span></h1>
+            <p class="muted">Veröffentlicht am @_version.PublishedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")@(_version.Note.Length > 0 ? " · " + _version.Note : "") · @_cards.Count Karten.
+                Veröffentlichte Versionen sind unveränderlich.</p>
+            <h2>Vergleich mit dem aktuellen Entwurf</h2>
+            @if (_diff is null || _diff.IsEmpty) { <p class="muted">Keine Unterschiede bei den Karten.</p> }
+            else
+            {
+                <ul>
+                    @foreach (var t in _diff.Added) { <li>Neu im Entwurf: @t</li> }
+                    @foreach (var t in _diff.Changed) { <li>Geändert im Entwurf: @t</li> }
+                    @foreach (var t in _diff.Removed) { <li>Im Entwurf entfernt: @t</li> }
+                </ul>
+            }
+            <h2>Karten dieser Version</h2>
+            <ol>
+                @foreach (var c in _cards) { <li><strong>@c.Term</strong> <span class="muted">— @c.Question</span></li> }
+            </ol>
+        </section>
+    }
+</div>
+
+@code {
+    [Parameter] public string ModuleId { get; set; } = "";
+    [Parameter] public int VersionNumber { get; set; }
+    private bool _loading = true;
+    private ModuleVersionInfo? _version;
+    private List<Card> _cards = new();
+    private ModuleVersionDiff? _diff;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true; _version = null; _cards = new(); _diff = null;
+        var actor = (await AuthState.GetAuthenticationStateAsync()).User.GetUserId();
+        if (actor is not null)
+        {
+            try
+            {
+                var (v, cards) = await TopicSvc.GetModuleVersionCardsAsync(actor, ModuleId, VersionNumber);
+                _version = v; _cards = cards;
+                _diff = await TopicSvc.CompareDraftWithVersionAsync(actor, ModuleId, VersionNumber);
+            }
+            catch (KeyNotFoundException) { _version = null; }
+        }
+        _loading = false;
+    }
+}

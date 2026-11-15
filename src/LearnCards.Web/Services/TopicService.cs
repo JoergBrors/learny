@@ -179,7 +179,7 @@ public partial class TopicService
     /// Module des Entwurfs mit festgelegter Modulversion. Altbestand ohne Festlegung (<c>module_version</c> NULL) wird beim ersten Zugriff auf den dann aktuellen Modulstand
     /// festgeschrieben (eine Version wird bei Bedarf angelegt) — danach wirken Modulabänderungen nur noch über eine ausdrückliche Übernahme.
     /// </summary>
-    private async Task<List<DraftModuleRow>> ListDraftModuleRowsAsync(string topicId)
+    private async Task<List<DraftModuleRow>> ListDraftModuleRowsAsync(string topicId, string? actorId = null)
     {
         var rows = (await _db.QueryAsync("SELECT module_id, sort_order, module_version FROM topic_modules WHERE topic_id = @t ORDER BY sort_order, added_at", new[] { ("t", (object?)topicId) }))
             .Select(r => new DraftModuleRow(r["module_id"] ?? "", DbValue.ToInt(r.GetValueOrDefault("sort_order")), r.GetValueOrDefault("module_version") is { Length: > 0 } v ? DbValue.ToInt(v) : null)).ToList();
@@ -190,7 +190,7 @@ public partial class TopicService
         {
             if (rows[i].Version is not null) continue;
             if (await CanUseModuleInTopicAsync(owner, rows[i].ModuleId) is not null) continue;   // nicht eigen/privat: bleibt ungebunden (Veröffentlichung verlangt eine eigene Kopie)
-            var v = await _moduleVersions.EnsureCurrentVersionAsync(owner, rows[i].ModuleId, "Automatisch beim Festlegen im Thema");
+            var v = await _moduleVersions.EnsureCurrentVersionAsync(owner, rows[i].ModuleId, "Automatisch beim Festlegen im Thema", actorId);
             await _db.ExecuteAsync("UPDATE topic_modules SET module_version = @v WHERE topic_id = @t AND module_id = @m AND module_version IS NULL", new (string, object?)[] { ("v", v.VersionNumber), ("t", topicId), ("m", rows[i].ModuleId) });
             rows[i] = rows[i] with { Version = v.VersionNumber };
         }
@@ -198,13 +198,13 @@ public partial class TopicService
     }
 
     /// <summary>Legt die Modulversion eines zugeordneten Moduls fest (<c>null</c> = aktueller Stand: bei Bedarf wird eine neue Modulversion angelegt).</summary>
-    private async Task<int> PinModuleAsync(string ownerId, string topicId, string moduleId, int? version)
+    private async Task<int> PinModuleAsync(string ownerId, string topicId, string moduleId, int? version, string? actorId = null)
     {
         ModuleVersionInfo v;
         if (version is int n)
             v = await _moduleVersions.GetVersionRawAsync(moduleId, n) ?? throw new ArgumentException($"Version {n} des Moduls existiert nicht.");
         else
-            v = await _moduleVersions.EnsureCurrentVersionAsync(ownerId, moduleId, "Automatisch beim Festlegen im Thema");
+            v = await _moduleVersions.EnsureCurrentVersionAsync(ownerId, moduleId, "Automatisch beim Festlegen im Thema", actorId);
         await _db.ExecuteAsync("UPDATE topic_modules SET module_version = @v WHERE topic_id = @t AND module_id = @m", new (string, object?)[] { ("v", v.VersionNumber), ("t", topicId), ("m", moduleId) });
         return v.VersionNumber;
     }
@@ -217,9 +217,9 @@ public partial class TopicService
     {
         var topic = await RequireEditableTopicAsync(ownerId, topicId);
         var actor = ownerId; ownerId = topic.OwnerUserId;   // Co-Autor (ADR 0052): Daten gehören dem Themeneigentümer, protokolliert wird der Handelnde
-        var row = (await ListDraftModuleRowsAsync(topic.Id)).FirstOrDefault(r => string.Equals(r.ModuleId, moduleId, StringComparison.OrdinalIgnoreCase)) ?? throw new KeyNotFoundException("Das Modul ist dem Thema nicht zugeordnet.");
+        var row = (await ListDraftModuleRowsAsync(topic.Id, actor)).FirstOrDefault(r => string.Equals(r.ModuleId, moduleId, StringComparison.OrdinalIgnoreCase)) ?? throw new KeyNotFoundException("Das Modul ist dem Thema nicht zugeordnet.");
         if (await CanUseModuleInTopicAsync(ownerId, row.ModuleId) is { } error) throw new ArgumentException(error);
-        var chosen = await PinModuleAsync(ownerId, topic.Id, row.ModuleId, version);
+        var chosen = await PinModuleAsync(ownerId, topic.Id, row.ModuleId, version, actor);
         if (chosen != row.Version)
         {
             await TouchDraftAsync(topic.Id);

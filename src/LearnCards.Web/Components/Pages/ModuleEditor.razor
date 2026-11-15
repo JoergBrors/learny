@@ -43,25 +43,31 @@
             {
                 <div class="module-versions" role="group" aria-label="Modulversionen">
                     <span class="badge @(_mv.HasUnpublishedChanges ? "badge-draft" : "")">@(_mv.LatestVersion == 0 ? "Noch nicht veröffentlicht" : $"Version {_mv.LatestVersion}")@(_mv.HasUnpublishedChanges && _mv.LatestVersion > 0 ? " + Entwurf mit Änderungen" : "")</span>
-                    @if (_coContext)
-                    {
-                        <span class="muted" title="Modulversionen veröffentlicht der Eigentümer des Moduls.">Mitarbeit als Co-Author — Modulversionen veröffentlicht der Eigentümer.</span>
-                    }
-                    else
-                    {
-                        <button class="btn btn-ghost btn-sm" @onclick="PublishModuleVersionAsync" disabled="@(!_mv.HasUnpublishedChanges || _versionBusy)"
-                                title="Friert den aktuellen Stand (Karten, Bilder, Quiz, Konfiguration, Fragenpool) als unveränderliche Modulversion ein.">⬆ Version veröffentlichen</button>
-                    }
+                    <button class="btn btn-ghost btn-sm" @onclick="AskPublish" disabled="@(!_mv.HasUnpublishedChanges || _versionBusy || dirty)"
+                            title="Friert den gespeicherten Stand (Karten, Bilder, Quiz, Konfiguration, Fragenpool) als unveränderliche Modulversion ein.">⬆ Version veröffentlichen</button>
+                    @if (dirty) { <span class="muted">Speichere zuerst die geöffnete Karte.</span> }
                     @if (_mv.Versions.Count > 0)
                     {
                         <span class="muted">Frühere Stände (nur lesbar):</span>
                         @foreach (var v in _mv.Versions)
                         {
-                            <a class="badge" href="/module/@v.SnapshotModuleId" title="@VersionTitle(v)">V@(v.VersionNumber)</a>
+                            <a class="badge" href="/module/@ModuleId/version/@v.VersionNumber" title="@VersionTitle(v)">V@(v.VersionNumber)</a>
                         }
+                    }
+                    @if (_confirmPublish)
+                    {
+                        <div class="alert alert-info" role="alertdialog" aria-label="Version veröffentlichen">
+                            <p>Eine neue unveränderliche Modulversion wird erstellt. Bestehende Themen und Lernfreigaben werden dadurch nicht automatisch geändert.</p>
+                            <button class="btn btn-primary btn-sm" @onclick="PublishModuleVersionAsync" disabled="@_versionBusy">Version veröffentlichen</button>
+                            <button class="btn btn-ghost btn-sm" @onclick="() => _confirmPublish = false">Abbrechen</button>
+                        </div>
                     }
                     @if (_versionMessage is not null) { <span class="muted" role="status">@_versionMessage</span> }
                 </div>
+            }
+            else if (_versionMessage is not null)
+            {
+                <div class="alert alert-error" role="alert">@_versionMessage</div>
             }
             <div class="module-competencies">
                 <button class="btn btn-ghost btn-sm" @onclick="() => _compOpen = !_compOpen" aria-expanded="@_compOpen">🎯 Lernziele &amp; Kompetenzen (@_model.Competencies.Count)</button>
@@ -599,21 +605,26 @@
     private static string VersionTitle(ModuleVersionInfo v) =>
         v.PublishedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm") + (v.Note.Length > 0 ? " · " + v.Note : "") + " · " + v.Cards + " Karten";
 
+    private bool _confirmPublish;
+    private string? _seenDraftHash;
+
     private async Task LoadVersionsAsync()
     {
-        try { _mv = _module is null ? null : await ModuleVersions.GetOverviewAsync(_userSub, _module.Id); }
+        try { _mv = _module is null ? null : await TopicSvc.GetModuleVersionOverviewAsync(_actorSub, _module.Id); _seenDraftHash = _mv?.DraftHash; }
         catch (KeyNotFoundException) { _mv = null; }
     }
 
+    private void AskPublish() { _versionMessage = null; _confirmPublish = true; }
+
     private async Task PublishModuleVersionAsync()
     {
-        _versionBusy = true; _versionMessage = null;
+        _versionBusy = true; _versionMessage = null; _confirmPublish = false;
         try
         {
-            var v = await ModuleVersions.PublishAsync(_actorSub, ModuleId);   // nie im Co-Author-Kontext (ADR 0052)
+            var v = await TopicSvc.PublishModuleVersionAsync(_actorSub, ModuleId, null, _seenDraftHash);   // Berechtigung und Entwurfsstand werden im Dienst unmittelbar vor dem Veröffentlichen geprüft (ADR 0059)
             _versionMessage = $"Version {v.VersionNumber} veröffentlicht.";
         }
-        catch (Exception e) when (e is InvalidOperationException or KeyNotFoundException) { _versionMessage = e.Message; }
+        catch (Exception e) when (e is InvalidOperationException or KeyNotFoundException) { _versionMessage = e.Message; }   // bei Entzug entfällt der Versionsbereich, die Meldung bleibt unten sichtbar
         await LoadVersionsAsync();
         _versionBusy = false;
     }

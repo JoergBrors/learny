@@ -34,7 +34,7 @@ try {
   // 3. abgeleiteter Zugriff im Editor getrennt erkennbar, ohne Verwaltung
   await b.go(`${B}/module/${mTopic}/edit`);
   ok(await b.waitText('über ein gemeinsam bearbeitetes Thema') && !(await b.has('Co-Author hinzufügen')), 'Abgeleiteter Zugriff: Hinweis mit Thema, keine Verwaltung direkter Co-Autoren');
-  ok(!(await b.text()).includes('Version veröffentlichen'), 'Abgeleiteter Zugriff: keine Modulveröffentlichung');
+  ok((await b.text()).includes('Version veröffentlichen') && !(await b.has('Global einreichen')), 'Abgeleiteter Zugriff: Modulversion veröffentlichen möglich (ADR 0059), aber keine globale Einreichung');
   await b.go(`${B}/module/${mDirect}/edit`);
   ok(await b.waitText('Direkte Co-Autoren') && await b.has('Co-Author hinzufügen') && await b.has('Zusammenarbeit beenden'), 'Direkter Zugriff: Verwaltung direkter Co-Autoren und Beenden vorhanden');
 
