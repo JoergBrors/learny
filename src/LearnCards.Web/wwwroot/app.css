@@ -1251,3 +1251,13 @@ body { background-image: var(--bg-grad); }
 .diff-field { margin: .3rem 0 0 .2rem; font-size: .9rem; }
 .diff-old { text-decoration: line-through; color: var(--ink-faint); white-space: pre-wrap; }
 .diff-new { font-weight: 500; white-space: pre-wrap; }
+
+/* PWA: Navigationsbalken und „Herunterziehen zum Aktualisieren“ (pwa.js) */
+html { overscroll-behavior-y: contain; }
+.nav-progress { position: fixed; top: 0; left: 0; height: 3px; width: 0; z-index: 2000; background: var(--brand-600, #7C3AED); opacity: 0; pointer-events: none; }
+.nav-progress.on { opacity: 1; width: 85%; transition: width 4s cubic-bezier(.1, .6, .2, 1); }
+.ptr { position: fixed; top: env(safe-area-inset-top); left: 50%; z-index: 2000; width: 2.4rem; height: 2.4rem; border-radius: 50%; display: none; align-items: center; justify-content: center; background: var(--surface); color: var(--ink); border: 1px solid var(--border); box-shadow: var(--shadow-lg); pointer-events: none; font-size: 1.2rem; }
+.ptr.show { display: flex; }
+.ptr.ready { color: var(--brand-600, #7C3AED); }
+.ptr.busy { animation: ptr-spin .8s linear infinite; }
+@keyframes ptr-spin { to { transform: translate(-50%, 40px) rotate(360deg); } }

@@ -55,7 +55,7 @@ public partial class TopicService
     }
 
     /// <summary>
-    /// Eigene Module mit <b>unveröffentlichten Änderungen</b> gegenüber ihrer neuesten Version (Entwurf ≠ Version). Eine günstige SQL-Vorauswahl (Karten/Modul nach der letzten Veröffentlichung geändert oder Kartenanzahl
+    /// Eigene Module mit <b>unveröffentlichten Änderungen</b> gegenüber ihrer neuesten Version (Entwurf ≠ Version). Eine günstige SQL-Vorauswahl (Karten/Modul zeitgleich mit oder nach der letzten Veröffentlichung geändert oder Kartenanzahl
     /// abweichend) wird mit dem Inhaltsfingerabdruck bestätigt (<see cref="ModuleVersionService.GetStateAsync"/>). Änderungen allein an Fragenpool/Quizkonfiguration/Kompetenzen können in der Vorauswahl fehlen
     /// (sie zeigt dann erst der Editor an). Nie veröffentlichte Module (Entwurf ohne Version) zählen nicht.
     /// </summary>
@@ -66,8 +66,8 @@ public partial class TopicService
             SELECT m.id FROM modules m
             WHERE m.owner_user_id = @u AND m.scope = 'private'
               AND EXISTS (SELECT 1 FROM module_versions v WHERE v.module_id = m.id)
-              AND ( m.updated_at > (SELECT MAX(v2.published_at) FROM module_versions v2 WHERE v2.module_id = m.id)
-                 OR EXISTS (SELECT 1 FROM cards c WHERE c.module_id = m.id AND c.updated_at > (SELECT MAX(v3.published_at) FROM module_versions v3 WHERE v3.module_id = m.id))
+              AND ( m.updated_at >= (SELECT MAX(v2.published_at) FROM module_versions v2 WHERE v2.module_id = m.id)
+                 OR EXISTS (SELECT 1 FROM cards c WHERE c.module_id = m.id AND c.updated_at >= (SELECT MAX(v3.published_at) FROM module_versions v3 WHERE v3.module_id = m.id))
                  OR (SELECT COUNT(*) FROM cards c2 WHERE c2.module_id = m.id AND c2.archived = 0)
                     <> (SELECT COUNT(*) FROM cards c3 WHERE c3.archived = 0 AND c3.module_id =
                           (SELECT v4.snapshot_module_id FROM module_versions v4 WHERE v4.module_id = m.id ORDER BY v4.version_number DESC LIMIT 1)) )
