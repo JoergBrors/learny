@@ -61,6 +61,16 @@ public sealed class BadgeSigner : IDisposable
     /// <summary>Marker „Installation initialisiert“ neben der Schlüsseldatei: enthält nur Schlüssel-ID und Zeitpunkt (kein Geheimnis).</summary>
     public static string MarkerPath(string keyFile) => keyFile + ".initialized";
 
+    /// <summary>Liest die Schlüssel-ID aus dem Marker; ein paralleler Start schreibt ihn möglicherweise gerade (leer/teilweise) — dann kurz wiederholen.</summary>
+    private static string? ReadMarkerKeyId(string marker)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try { return JsonNode.Parse(File.ReadAllText(marker))?["key_id"]?.GetValue<string>(); }
+            catch (System.Text.Json.JsonException) when (attempt < 10) { Thread.Sleep(20); }
+        }
+    }
+
     private static void CheckOrWriteMarker(string keyFile, string keyId)
     {
         var marker = MarkerPath(keyFile);
@@ -68,7 +78,7 @@ public sealed class BadgeSigner : IDisposable
         {
             if (File.Exists(marker))
             {
-                var recorded = JsonNode.Parse(File.ReadAllText(marker))?["key_id"]?.GetValue<string>();
+                var recorded = ReadMarkerKeyId(marker);
                 if (!string.IsNullOrEmpty(recorded) && recorded != keyId)
                     throw new InvalidOperationException($"Der Badge-Signaturschlüssel ({keyId}) passt nicht zur Initialisierung dieser Installation ({recorded}). Ein anderer Schlüssel würde ausgestellte Badges ungültig machen. " +
                         "Richtigen Schlüssel wiederherstellen; nur bei bewusster Rotation den Marker entfernen (docs/iis-deployment.md).");
@@ -92,19 +102,43 @@ public sealed class BadgeSigner : IDisposable
         var full = Path.GetFullPath(path);
         var dir = Path.GetDirectoryName(full)!;
         Directory.CreateDirectory(dir);
-        var tmp = Path.Combine(dir, ".badge-key-" + Guid.NewGuid().ToString("N") + ".tmp");
-        try
+        // Unter Linux ist File.Move(…, overwrite: false) NICHT exklusiv (parallele Starts „gewinnen“ alle, der letzte überschreibt die Datei → verschiedene Schlüssel-IDs, Marker passt nicht).
+        // Deshalb serialisiert eine kurzlebige Sperrdatei (exklusiv per CreateNew, wird beim Schließen gelöscht) die Erzeugung; im Sperrbereich entscheidet allein File.Exists.
+        using (AcquireCreationLock(full + ".lock"))
         {
-            using (var gen = ECDsa.Create(ECCurve.NamedCurves.nistP256))
-            using (var fs = new FileStream(tmp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-                fs.Write(Encoding.ASCII.GetBytes(gen.ExportPkcs8PrivateKeyPem()));
-            if (OperatingSystem.IsWindows()) RestrictAcl(tmp);
-            else File.SetUnixFileMode(tmp, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-            try { File.Move(tmp, full, overwrite: false); created = true; }
-            catch (IOException) when (File.Exists(full)) { /* anderer Start war schneller */ }
+            if (!File.Exists(full))
+            {
+                var tmp = Path.Combine(dir, ".badge-key-" + Guid.NewGuid().ToString("N") + ".tmp");
+                try
+                {
+                    using (var gen = ECDsa.Create(ECCurve.NamedCurves.nistP256))
+                    using (var fs = new FileStream(tmp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                        fs.Write(Encoding.ASCII.GetBytes(gen.ExportPkcs8PrivateKeyPem()));
+                    if (OperatingSystem.IsWindows()) RestrictAcl(tmp);
+                    else File.SetUnixFileMode(tmp, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                    File.Move(tmp, full, overwrite: false);
+                    created = true;
+                }
+                finally { try { if (File.Exists(tmp)) File.Delete(tmp); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
+            }
         }
-        finally { try { if (File.Exists(tmp)) File.Delete(tmp); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
         return ImportKey(File.ReadAllText(full));
+    }
+
+    /// <summary>Exklusive Sperrdatei (CreateNew + DeleteOnClose) mit Wiederholung; eine verwaiste Sperre (Prozess abgebrochen) wird nach 30 s entfernt.</summary>
+    private static FileStream AcquireCreationLock(string lockPath)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(20);
+        while (true)
+        {
+            try { return new FileStream(lockPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1, FileOptions.DeleteOnClose); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException && DateTime.UtcNow < deadline)   // Windows meldet „Zugriff verweigert“, solange die Sperrdatei eines anderen Starts gerade gelöscht wird
+            {
+                try { if (File.Exists(lockPath) && DateTime.UtcNow - File.GetCreationTimeUtc(lockPath) > TimeSpan.FromSeconds(30)) File.Delete(lockPath); }
+                catch (IOException) { } catch (UnauthorizedAccessException) { }
+                Thread.Sleep(15);
+            }
+        }
     }
 
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]

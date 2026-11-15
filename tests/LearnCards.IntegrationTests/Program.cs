@@ -315,6 +315,12 @@ try
         Console.WriteLine($"{checks - failures}/{checks} Prüfungen bestanden" + (failures == 0 ? "" : $", {failures} FEHLGESCHLAGEN"));
         return failures == 0 ? 0 : 1;
     }
+    if (Environment.GetEnvironmentVariable("TEST_ONLY") == "badgekey")   // Entwicklungsabkürzung: nur Badge-Schlüsselverwaltung (B24), z. B. unter Linux
+    {
+        await BlockchainUnitTests.BadgeKeyAsync(Check, tmp);
+        Console.WriteLine($"{checks - failures}/{checks} Prüfungen bestanden" + (failures == 0 ? "" : $", {failures} FEHLGESCHLAGEN"));
+        return failures == 0 ? 0 : 1;
+    }
     if (Environment.GetEnvironmentVariable("TEST_ONLY") == "pki")   // Entwicklungsabkürzung: nur Learny-PKI
     {
     await PkiTests.RunAsync(LoginAsync, () => NewClient(false), admin, baseUrl, pkiKeyDir, PkiKeyPassword, PkiRootPassphrase, StartWebAsync, StopProcess, () => { lock (log) return log.ToString(); }, Check);   // Learny-PKI (ADR 0035)
