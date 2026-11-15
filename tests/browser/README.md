@@ -40,6 +40,7 @@ PowerShell: `$env:LEARNY_BROWSER_TEST = '1'; node tests/browser/co-author-topic.
 | `perf-baseline.mjs` | Performance-Baseline (Navigationsdauer, lange Tasks, CLS, DOM, Transport); siehe docs/reviews/2026-11-15-performance-browser-pwa.md. |
 | `perf-server.mjs` | Server-Phasen (nur Development): `Server-Timing` je SSR-Seite (total, Datenbankdauer, Anzahl Abfragen), mindestens 5 Läufe, Median/Min–Max. Zeigt N+1-Muster; siehe docs/reviews/2026-11-15-performance-browser-pwa.md. |
 | `lighthouse.mjs` | Lighthouse (mobil + Desktop, mehrere Läufe, Median) gegen die angemeldete Dev-Instanz; Lighthouse-CLI separat installieren (`LIGHTHOUSE_CLI`, `LH_OUT`, `LH_PATH`). Anmeldung im selben Chrome (Cookie-Header erreichen den WebSocket nicht). |
+| `perf-cache.mjs` | Ressourcen/Cache öffentlicher Seiten (ohne Anmeldung, Standard Produktion): Erstbesuch gegen Wiederholung/Reload, Requests, übertragene Bytes, Protokoll, mehrere Zyklen (Median). Nicht gegen Development (kein langes Caching). |
 | `lighthouse-attach.mjs` | Lighthouse gegen einen bereits **von Hand angemeldeten** eigenen Chrome (z. B. Produktion mit OIDC), 5 Läufe mobil/Desktop, Median/Streuung; Anleitung im Abschnitt „Authentifizierte Seiten messen“. |
 | `a11y-seo.mjs` | Meta-Beschreibung, sichtbarer Text im zugänglichen Namen (Sidebar, Darstellung, Kartenbuttons) und Kontrast (>= 4,5:1) in Hell/Dunkel. |
 | `pwa-nav.mjs` | PWA-Navigation (`pwa.js`): Ladebalken beim Menüklick, Notausgang bei blockierter Blazor-Navigation. Herunterziehen (nur Touch/Standalone) ist hier nicht prüfbar. |
@@ -85,3 +86,31 @@ node tests/browser/lighthouse-attach.mjs
 - Der Chrome-Debug-Port gibt volle Kontrolle über den Browser samt Anmeldung: nur an `127.0.0.1` binden (`--remote-debugging-address=127.0.0.1`), nie auf `0.0.0.0` oder im Netzwerk freigeben, nur für die Dauer der Messung offen lassen und das Messprofil danach schließen und löschen.
 - Das Skript beendet keine Chrome-Prozesse (auch nicht den gestarteten); das Chrome-Fenster schließen Sie selbst. Es verwendet ausschließlich den angegebenen Port.
 - Einschränkung: Gemessen wird von Ihrem Rechner aus über Ihr Netzwerk; die Anmeldung bei OIDC/Produktion ist nur so lange gültig, wie die Sitzung des Profils lebt. Installierte PWA und Suspend/Resume sind damit **nicht** messbar (dafür ist ein echtes Gerät nötig).
+
+## Ressourcen und Cache öffentlicher Seiten messen (`perf-cache.mjs`)
+
+Misst, wie viel ein **Erstbesuch** (leerer Browser-Cache) und ein **Wiederholungsbesuch** übertragen. Standardziel ist die Produktion, aber nur **öffentliche Seiten** (`/login`, `/verify`): Es wird nichts angemeldet, nichts geschrieben, es sind keine Zugangsdaten nötig.
+
+**Voraussetzungen:** Node.js >= 22 und ein installierter Chrome (`CHROME_PATH`, falls er nicht an einem Standardort liegt). Es wird ein eigener, frischer Chrome ohne Erweiterungen gestartet und am Ende wieder beendet (nur dieser eigene Prozess); die Variable `LEARNY_BROWSER_TEST=1` ist wie bei allen Skripten hier Pflicht.
+
+```powershell
+$env:LEARNY_BROWSER_TEST = '1'
+node tests/browser/perf-cache.mjs
+# optional:
+$env:PERF_BASE  = 'https://learny.brors.date'   # Basisadresse (Standard: Produktion)
+$env:PERF_PATHS = '/login,/verify'              # kommagetrennte öffentliche Pfade
+$env:PERF_RUNS  = '5'                           # Zyklen je Seite
+```
+
+**Ablauf je Zyklus:** Browser-Cache leeren → (1) **Erstbesuch** → (2) **Wiederholung** durch erneute Navigation → (3) **Reload**. Je Seite werden die Zyklen wiederholt; ausgegeben wird der Median mit Minimum–Maximum.
+
+**Ausgabeformat:** eine Zeile je Seite und Besuchsart: `Requests`, `übertragen` (KB, inkl. HTML), `aus Cache x/y`, `TTFB`, Protokoll (z. B. `h3`); darunter die größten Ressourcen des Erstbesuchs.
+
+**Interpretation**
+- `Requests` = das Dokument **plus alle Resource-Timing-Einträge, einschließlich der aus dem Cache bedienten**. Ein Cache-Treffer zählt also als Request, überträgt aber 0 Bytes. Wie viele davon aus dem Cache kamen, steht in `aus Cache x/y` (y = Ressourceneinträge ohne das Dokument; x = Einträge mit 0 übertragenen Bytes und vorhandenem Inhalt).
+- `übertragen` ist die Summe der `transferSize` (Header + Body über das Netz) des Dokuments und aller Ressourcen. Fingerprintete Dateien (`immutable`) erscheinen bei der Wiederholung mit 0 Bytes; was weiterhin übertragen wird, ist im Wesentlichen das HTML.
+- Ein Reload kann Ressourcen revalidieren (bedingte Anfragen, `304`) und kostet daher wenige Bytes mehr als eine Navigation.
+
+**Datenschutz:** Das Skript liest nur Resource-Timing-Kennzahlen (Adresse, Bytes, Protokoll) öffentlicher Seiten; es setzt und protokolliert keine Cookies oder Tokens, schreibt keine Dateien (außer dem temporären Chrome-Profil, das am Ende gelöscht wird) und führt keine Aktionen auf der Seite aus.
+
+**Grenzen:** Nur öffentliche Seiten (angemeldete Seiten: siehe `lighthouse-attach.mjs`); Messung von einem Entwicklungsrechner aus (Netzwerk nicht kontrolliert, Cloudflare/h3 sitzt dazwischen); gegen eine Development-Instanz **nicht aussagekräftig** (kein langes Caching, unkomprimiert). Misst weder Renderzeiten (dafür Lighthouse) noch die WebSocket-Verbindung. Exit-Codes: 0 = Messung vollständig, 1 = Seite nicht geladen oder keine Messdaten.

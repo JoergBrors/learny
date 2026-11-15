@@ -208,3 +208,52 @@ Alle 20 Durchläufe erreichten in allen vier Kategorien 100 Punkte; es gab keine
 - Installierte iPhone-PWA.
 - Suspend/Resume der PWA.
 - WebSocket-Reconnect nach längerer Inaktivität.
+
+## Ressourcenoptimierung (Bilder, Caching, Priorisierung) — Prüfung, keine Codeänderung
+
+Stand: 15.11.2026, Produktion v0.1.35 (IIS, Cloudflare). Ergebnis: **keine Änderung am Anwendungscode**; es wurde kein Engpass belegt, den eine Optimierung nachweislich verbessern würde. Neu ist nur das Messskript `tests/browser/perf-cache.mjs`.
+
+### Messung Produktion (öffentliche Seiten, frischer Chrome ohne Erweiterungen, 5 Zyklen je Seite, Median; `perf-cache.mjs`)
+| Seite | Besuch | Requests | übertragen | aus Cache | TTFB | Protokoll |
+|---|---|---|---|---|---|---|
+| `/login` | Erstbesuch (leerer Cache) | 12 | 81,0 KB (81,0–81,0) | 2/11 | 45 ms | h3 |
+| `/login` | Wiederholung (neue Navigation) | 10 | 3,9 KB (3,9–3,9) | 8/9 | 42 ms | h3 |
+| `/login` | Reload | 11 | 3,9 KB | 9/10 | 39 ms | h3 |
+| `/verify` | Erstbesuch | 14 | 82,5 KB (82,5–82,5) | 2/13 | 38 ms | h3 |
+| `/verify` | Wiederholung | 12 | 5,4 KB (5,4–5,5) | 8/11 | 42 ms | h3 |
+| `/verify` | Reload | 13 | 5,4 KB | 9/12 | 40 ms | h3 |
+
+Größte Ressourcen beim Erstbesuch: `_framework/blazor.web.js` 46,7 KB (Brotli, rund 57 %), `app.*.css` 14,1 KB, `ReconnectModal.razor.js` 4,1 KB, `rte.js` 3,7 KB; eigene Skripte zusammen ≈ 15 KB.
+
+### Bestandsaufnahme (bereits vorhanden — nicht doppelt umgesetzt)
+- **Komprimierung (Produktion gemessen):** `app.*.css` 85,1 KB unkomprimiert → 16,5 KB gzip → 14,1 KB Brotli; HTML `Content-Encoding: br`. Funktioniert, nichts zu aktivieren.
+- **Protokoll:** HTTP/3 (`alt-svc: h3`) zum Browser über Cloudflare (gemessen: `h3`); das Protokoll zwischen Cloudflare und dem IIS-Ursprung ist nicht gemessen.
+- **Statische Dateien mit Fingerabdruck** (`app.*.css`, `app.*.js`, `pwa.*.js`, …): `Cache-Control: max-age=31536000, immutable` — Wiederholungsbesuche kosten nur das HTML (3,9–5,4 KB); nach einem Deployment ändert sich der Dateiname, alte Dateien werden nicht fälschlich wiederverwendet.
+- **Nicht fingerprintet:** `_framework/blazor.web.js` (`max-age=14400`, ETag), Markenbilder (`max-age=14400, must-revalidate`), Manifest (`no-cache`): kurze Lebensdauer ist hier richtig (Update-Sicherheit), Revalidierung per ETag ist billig.
+- **HTML authentifizierter Seiten:** `no-cache, no-store`; **`/api/images/{id}`** (Kartenbilder): Berechtigungsprüfung, ETag = Prüfsumme, `private, max-age=3600`, `304` ohne Providerzugriff; Avatar `/api/me/avatar-image`: `private, no-cache` + ETag; Galerie-Bild je Kennung: `private, max-age=31536000, immutable`; `X-Content-Type-Options: nosniff`.
+- **Bilder im Code:** Kartenbilder in `FlashCardView` mit `loading="lazy" decoding="async"`; Avatare mit `width`/`height` (kein Layout Shift) und `decoding="async"` (bewusst nicht lazy: im sichtbaren Kopfbereich); Markenbild ein SVG mit 0,6 KB; PNG-Markenbilder (5–52 KB) liegen nur für Manifest/Apple-Touch/Teilen vor und werden von den Seiten nicht geladen.
+- **Skripte:** am Ende des `<body>` (nicht renderblockierend); das einzige renderblockierende Element ist `app.css` (14,1 KB Brotli, muss blockieren); `ResourcePreloader` des Frameworks vorhanden.
+
+### Bewertete, bewusst nicht umgesetzte Vorschläge
+| Vorschlag | Bewertung |
+|---|---|
+| Responsive Bildvarianten / neue Bildpipeline | Kein Befund: Markenbilder auf den Seiten sind SVG (0,6 KB); Kartenbilder lazy, per ETag revalidiert, Größen durch `CardImageLimits` begrenzt. Eine Pipeline bräuchte eine neue Abhängigkeit (ADR 0002) — nicht ohne Nachweis. |
+| Längere/„immutable“-Caches für Framework-Skript und Markenbilder | Dateien ohne Fingerabdruck: ein Jahr Cache würde Updates verzögern. Kein Gewinn für Wiederholungsbesuche, die nach 4 h nur per ETag revalidieren. |
+| `blazor.web.js` mit Fingerabdruck ausliefern | Blazor lädt weitere Framework-Ressourcen relativ zu `_framework/`; eine Änderung der URL berührt die Blazor-Initialisierung (laut Auftrag nur mit Nachweis und vollständigem Kompatibilitätstest). Nutzen gering (revalidiert per ETag). |
+| Verzögerter/manueller Blazor-Start (`Blazor.start()`) | Kein Engpass belegt (TBT 0, CLS 0 auf den gemessenen Seiten); würde Interaktivität verzögern. |
+| `cards.js`/`rte.js` nur auf Seiten laden, die sie brauchen | Zusammen ≈ 6,6 KB Brotli, nur beim Erstbesuch; Aufwand und Risiko (Initialisierung nach Blazor-Navigation) größer als der Nutzen. |
+| CSS minifizieren | Brotli bringt 85 → 14 KB; Minifizierung brächte nur wenige hundert Bytes zusätzlich (Lighthouse-Hinweis „unminified-css“ bleibt niedrig priorisiert). |
+| Preconnect zum OIDC-Anbieter | Die Anmeldung ist eine Navigation (Weiterleitung), die Seite lädt nichts vom Anbieter; der Aussteller ist konfigurierbar (`OIDC_ISSUER`). Ein Preconnect brächte nichts und würde eine Domain festschreiben. |
+| Zusätzliche Komprimierung | Brotli/gzip funktionieren bereits (doppelte Komprimierung ausgeschlossen). |
+
+### Offene Punkte / nicht gemessen
+- **Authentifizierte Produktionsseiten** (Dashboard, Themen, Module, Kartenbilder, Avatare): Bild- und Avatar-Transfers dort nicht gemessen (Anmeldung nötig; siehe Anleitung `lighthouse-attach.mjs`). Aussagen zu Bildern beruhen auf Codeprüfung und Headern, nicht auf Produktionsmessung.
+- Installierte iPhone-PWA, Suspend/Resume und Reconnect nach längerer Inaktivität.
+- Die Development-Instanz ist für Cache-Messungen ungeeignet (kein langes Caching, unkomprimiert); Dev-Messungen dienen nur dem Vergleich der Struktur (6 Skripte ≈ 243 KB unkomprimiert, CSS ≈ 82 KB, Dashboard-HTML ≈ 15 KB).
+- Mögliche spätere Maßnahme bei Bedarf: Wiederholungsbesuche sind bereits fast kostenlos; der Erstbesuch ist vom Framework-Skript (47 KB) dominiert und nicht weiter verkleinerbar.
+
+### Einordnung der Aussagen (Ressourcenprüfung)
+- **Gemessen in Produktion** (`perf-cache.mjs`, 5 Zyklen, Median; `Requests` = Dokument + alle Resource-Timing-Einträge **einschließlich** aus dem Cache bedienter, „aus Cache“ = Einträge mit 0 übertragenen Bytes): Erst-/Wiederholungs-/Reload-Übertragung und Protokoll `h3` für `/login` und `/verify` (Tabelle oben); Komprimierungsgrößen der Fingerprint-CSS (85,1 KB → 16,5 KB gzip → 14,1 KB Brotli) und `Content-Encoding: br` am HTML; Cache-Header von Fingerprint-Dateien, `blazor.web.js` und Markenbildern per HTTP-Anfrage; Größe des Markenbilds (SVG 0,6 KB).
+- **Ergebnis der Codeprüfung (nicht in Produktion gemessen):** Cache-Header und Berechtigungslogik von `/api/images/{id}` (ETag, `private, max-age=3600`, 304), Avatar-Endpunkte, `loading="lazy"`/`decoding="async"`/`width`/`height` an Bildern, Skriptplatzierung, `ResourcePreloader`, konfigurierbarer OIDC-Aussteller (`OIDC_ISSUER`), `CardImageLimits`.
+- **Unbestätigte Annahmen / offen:** Bild- und Avatar-Transfers auf angemeldeten Produktionsseiten; Cache-Verhalten angemeldeter Seiten; Protokoll zwischen Cloudflare und IIS-Ursprung; installierte iPhone-PWA, Suspend/Resume und WebSocket-Reconnect nach längerer Inaktivität; Auswirkung der Wiederholung nach mehr als 4 Stunden (Revalidierung von `blazor.web.js` und Markenbildern, nicht gemessen).
+- **Tests:** Anwendungscode unverändert; Build ohne Fehler und Integrationstests 2248/2248 (SQLite) liegen aus dem vorherigen Lauf vor (kein Quellcode seitdem geändert).
