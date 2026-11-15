@@ -38,8 +38,7 @@ try {
   await b.click('Speichern'); ok(await b.waitText('Karte gespeichert'), 'Karte gespeichert');
   await b.ev(`window.confirm = () => true`);
   await sleep(500);
-  // Editor-Übersicht lädt Versionsstatus erst beim Neuladen der Seite zuverlässig
-  await b.go(`${B}/module/${dm.id}/edit`); await b.waitText('Direktkarte (Co)');
+  await sleep(800);   // ohne Neuladen der Seite (Regression: Veröffentlichen muss direkt nach dem Speichern möglich sein)
   ok(await b.waitText('Entwurf mit Änderungen') && await btnState() === 'enabled', 'Nach Speichern: „Entwurf mit Änderungen“, Veröffentlichen möglich');
 
   await b.click('⬆ Version veröffentlichen');
@@ -65,6 +64,19 @@ try {
   ok(ctrls === 0, `Versionsseite ist schreibgeschützt (keine Eingabe-/Schaltflächen, gefunden: ${ctrls})`);
   await b.go(`${B}/module/${dm.id}/version/2`);
   ok(await b.waitText('Modulversion 2') && await b.waitText('Direktkarte (Co)') && await b.waitText('Keine Unterschiede'), 'Version 2 zeigt den neuen Stand; Vergleich mit dem Entwurf: keine Unterschiede');
+
+  // ─── Automatische Aktualisierung (Änderung durch den Eigentümer) ───
+  await b.go(`${B}/module/${dm.id}/edit`); await b.waitText('Direktkarte (Co)');
+  await api(a, `/api/cards/${dm.card}`, 'PUT', { module: dm.name, category: 'Kat', term: 'Direktkarte (Auto)', question: 'Frage?', definition: 'Def' });
+  ok(await b.waitText('Direktkarte (Auto)', 20000), 'Ohne ungespeicherte Eingaben: Änderung des Eigentümers erscheint automatisch in der Kartenliste');
+  await b.click('Direktkarte (Auto)', 'button.editor-card-main'); await sleep(900);
+  await b.type('input[maxlength="300"]', 'Lokal getippt'); await sleep(400);
+  await api(a, `/api/cards/${dm.card}`, 'PUT', { module: dm.name, category: 'Kat', term: 'Direktkarte (Auto2)', question: 'Frage?', definition: 'Def' });
+  ok(await b.waitText('inzwischen von jemand anderem geändert', 20000), 'Mit ungespeicherten Eingaben: Hinweis statt stillem Überschreiben');
+  ok(await b.ev(`document.querySelector('input[maxlength="300"]').value`) === 'Lokal getippt', 'Ungespeicherte Eingabe bleibt erhalten');
+  await b.click('Aktualisieren');
+  await sleep(1500);
+  ok(await b.ev(`document.querySelector('input[maxlength="300"]')?.value`) === 'Direktkarte (Auto2)' && !(await b.text()).includes('inzwischen von jemand anderem geändert'), 'Aktualisieren übernimmt den neuen Stand und schließt den Hinweis');
 
   // ─── Konflikt: veralteter Editor ───
   await api(a, `/api/cards/${dm.card}`, 'PUT', { module: dm.name, category: 'Kat', term: 'Direktkarte (Owner1)', question: 'Frage?', definition: 'Def' });

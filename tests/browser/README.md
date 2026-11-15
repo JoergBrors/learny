@@ -37,6 +37,7 @@ PowerShell: `$env:LEARNY_BROWSER_TEST = '1'; node tests/browser/co-author-topic.
 | `avatar-moods.mjs` | Fünf Stimmungsbilder je KI-Figur (ADR 0058) gegen den Bild-Stub: Bestätigungsdialog (Kosten/Anzahl), Erzeugen nur nach Bestätigung, Figur mit fünf Kacheln, Stimmungswechsel im Profil ohne KI-Aufruf, Hinweis bei fehlender Stimmung, gezieltes Ergänzen, Export (AES-256, 7-Zip) und Reimport, Mobil/Dark Mode. Prüft nicht die Qualität eines echten Modells. |
 | `avatar-variants.mjs` | Vorschlags-Galerie des Generators (Auswahl, Übernehmen, Verwerfen) im KI-Bild- und im SVG-Modus. |
 | `co-author-versions.mjs` | Modulversionen durch Co-Autoren (ADR 0059): Veröffentlichen als direkter/Themen-Co-Autor mit Bestätigung, Sperre bei ungespeicherter Karte, schreibgeschützte Versionsseite, Konflikt, Entzug, Themen bleiben auf ihrer Version. |
+| `module-list-updates.mjs` | Modulliste: Gruppen ein-/ausklappen, Markierung „neuere Version“, Overlay mit Kartenvergleich und bestätigte Übernahme in den Themenentwurf; „Entwurf mit Änderungen“ vergleichen und als Version veröffentlichen. |
 | `module-collaboration.mjs` | Direkte Modulfreigabe, „Zugriff über Themen“, Reiter „Gemeinsam bearbeitet“ (Module), nachträglich zugeordnetes Modul, Mehrfachzuordnung, Themenentzug, Mitarbeit beenden |
 
 `lib.mjs` enthält die gemeinsamen Hilfen (Chrome-Start, DevTools-Verbindung, Klicken/Tippen, API-Aufrufe mit der Cookie-Sitzung). Chrome-Profil und Prozess werden am Ende entfernt.

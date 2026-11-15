@@ -41,6 +41,20 @@ public partial class TopicService
         return await _moduleVersions.PublishAsync(access.OwnerUserId, moduleId, note, actorId, expectedDraftHash);
     }
 
+    /// <summary>
+    /// Leichte Änderungsmarke eines Moduls für die automatische Aktualisierung des Editors (Anzahl/jüngste Änderung der Karten inkl. Archiv, neueste Modulversion, Kompetenzmodell).
+    /// Berechtigung wie überall <see cref="GetModuleEditAccessAsync"/> bei jedem Aufruf; <c>null</c> = kein (oder entzogener) Zugriff. Enthält keine Inhalte. Änderungen am Fragenpool/an der Quizkonfiguration allein ändern sie nicht.
+    /// </summary>
+    public async Task<string?> GetModuleChangeStampAsync(string actorId, string moduleId)
+    {
+        if (!(await GetModuleEditAccessAsync(actorId, moduleId)).CanEdit) return null;
+        var p = new[] { ("m", (object?)moduleId) };
+        var c = (await _db.QueryAsync("SELECT COUNT(*) AS n, MAX(updated_at) AS u FROM cards WHERE module_id = @m", p))[0];
+        var v = (await _db.QueryAsync("SELECT COALESCE(MAX(version_number), 0) AS n FROM module_versions WHERE module_id = @m", p))[0];
+        var k = (await _db.QueryAsync("SELECT updated_at FROM module_competencies WHERE module_id = @m", p)).FirstOrDefault();
+        return string.Join("|", c["n"], c["u"], v["n"], k?["updated_at"]);
+    }
+
     /// <summary>Karten einer veröffentlichten Version (nur lesen).</summary>
     public async Task<(ModuleVersionInfo Version, List<Card> Cards)> GetModuleVersionCardsAsync(string actorId, string moduleId, int versionNumber)
     {

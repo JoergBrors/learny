@@ -1237,3 +1237,17 @@ body { background-image: var(--bg-grad); }
 /* Co-Author-Modus (ADR 0052): Kennzeichnung und Liste der Zusammenarbeit (Farbvariablen, Dark Mode über die Tokens) */
 .badge-coauthor, .badge-owner { background: color-mix(in srgb, var(--primary) 14%, var(--surface)); color: var(--primary); border: 1px solid color-mix(in srgb, var(--primary) 50%, var(--border)); border-radius: 999px; padding: .15rem .6rem; font-size: .8rem; font-weight: 700; display: inline-block; }
 .coauthor-list li { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; justify-content: space-between; }
+
+/* Modulliste: einklappbare Gruppen, Markierung „neuere Version“, Änderungsvergleich im Overlay */
+.group-toggle { background: none; border: 0; padding: 0; font: inherit; color: inherit; font-weight: 600; cursor: pointer; text-align: left; }
+.group-toggle:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.group-row .badge, .group-head .badge { margin-left: .6rem; }
+.group-tools { display: flex; gap: .4rem; margin: .3rem 0 .6rem; }
+.update-badge { cursor: pointer; border: 1px solid currentColor; }
+.diff-card { border-left: 4px solid var(--ink-faint); padding: .4rem .7rem; margin: .5rem 0; background: var(--surface-2); border-radius: 6px; }
+.diff-card.diff-added { border-left-color: var(--ok, #3b8f5f); }
+.diff-card.diff-removed { border-left-color: var(--danger, #c62828); }
+.diff-card.diff-changed { border-left-color: var(--warn, #b26a00); }
+.diff-field { margin: .3rem 0 0 .2rem; font-size: .9rem; }
+.diff-old { text-decoration: line-through; color: var(--ink-faint); white-space: pre-wrap; }
+.diff-new { font-weight: 500; white-space: pre-wrap; }

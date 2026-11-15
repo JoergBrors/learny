@@ -215,6 +215,49 @@ public static class ModuleCoAuthorTests
         check((await db.QueryAsync("SELECT COUNT(*) AS n FROM module_coauthors WHERE module_id=@m", new (string, object?)[] { ("m", delModule) }))[0]["n"] == "0", p + "M35 Beim Löschen des Moduls entfallen seine direkten Berechtigungen (ON DELETE CASCADE)");
         check((await db.QueryAsync("SELECT COUNT(*) AS n FROM modules WHERE owner_user_id=@o AND id IN (@a,@b,@c,@d)", new (string, object?)[] { ("o", owner), ("a", m1), ("b", m2), ("c", m3), ("d", m4) }))[0]["n"] == "4", p + "M36 Alle Module gehören weiterhin dem ursprünglichen Eigentümer");
         await VersionsCoreAsync(p, db, topics, repo, comp, newUser, restricted, check);
+        await UpdatesCoreAsync(p, topics, repo, newUser, check);
+    }
+
+    /// <summary>Modulliste: neuere Modulversion als im Themenentwurf festgelegt (Markierung, Vergleich, ausdrückliche Übernahme).</summary>
+    private static async Task UpdatesCoreAsync(string p, TopicService topics, CardRepository repo, Func<string, Task<string>> newUser, Action<bool, string> check)
+    {
+        var owner = await newUser("Uwe Update"); var other = await newUser("Olga Other");
+        var sfx = Guid.NewGuid().ToString("N")[..6];
+        var mod = (await repo.CreateModuleAsync(new ModuleCreateRequest { Name = "UM-" + sfx }, owner)).Id;
+        var card = await repo.CreateCardAsync(Json("UM-" + sfx, "Karte A", "alt"), owner);
+        await repo.CreateCardAsync(Json("UM-" + sfx, "Karte B"), owner);
+        var t = await topics.CreateAsync(owner, "UT " + sfx, "");
+        await topics.AddModuleAsync(owner, t.Id, mod);   // Version 1 festgelegt
+        check((await topics.ListModuleUpdatesAsync(owner)).All(u => u.ModuleId != mod), p + "U1 Gleicher Stand wie im Thema: keine Markierung");
+        await repo.UpdateCardAsync(card.Id, Json("UM-" + sfx, "Karte A", "neu"), owner, (await repo.GetCardAsync(card.Id, owner))!.UpdatedAt);
+        await repo.CreateCardAsync(Json("UM-" + sfx, "Karte C"), owner);
+        var v2 = await topics.PublishModuleVersionAsync(owner, mod, "Zwei", null);
+        var ups = (await topics.ListModuleUpdatesAsync(owner)).Where(u => u.ModuleId == mod).ToList();
+        check(ups.Count == 1 && ups[0].PinnedVersion == 1 && ups[0].LatestVersion == v2.VersionNumber && ups[0].TopicId == t.Id, p + "U2 Neuere Version als im Thema festgelegt wird mit Thema, festgelegter und neuester Version gemeldet");
+        var diff = await topics.CompareModuleVersionsAsync(owner, mod, 1, v2.VersionNumber);
+        check(diff.Any(c => c.Kind == "added" && c.Term == "Karte C") && diff.Any(c => c.Kind == "changed" && c.Term == "Karte A" && c.Fields.Any(f => f.Label.StartsWith("Antwort") && f.Old == "alt" && f.New == "neu")) && !diff.Any(c => c.Term == "Karte B"), p + "U3 Vergleich markiert neue und geänderte Karten mit altem/neuem Wert, unveränderte nicht");
+        check((await topics.ListModuleUpdatesAsync(other)).Count == 0 && await Denied(() => topics.CompareModuleVersionsAsync(other, mod, 1, 2)), p + "U4 Andere Benutzer sehen weder Markierung noch Vergleich");
+        check((await topics.GetModuleVersionOverviewAsync(owner, mod)).Versions.Count == 2 && (await topics.ListModuleUpdatesAsync(owner)).Any(u => u.ModuleId == mod), p + "U5 Anzeigen und Vergleichen übernehmen nichts (Markierung bleibt)");
+        var chosen = await topics.AdoptModuleVersionAsync(owner, t.Id, mod, v2.VersionNumber);
+        check(chosen == v2.VersionNumber && (await topics.ListModuleUpdatesAsync(owner)).All(u => u.ModuleId != mod), p + "U6 Ausdrückliche Übernahme setzt die Version im Entwurf, Markierung verschwindet");
+        await topics.SetArchivedAsync(owner, t.Id, true);
+        await repo.UpdateCardAsync(card.Id, Json("UM-" + sfx, "Karte A", "neuer"), owner, (await repo.GetCardAsync(card.Id, owner))!.UpdatedAt);
+        await topics.PublishModuleVersionAsync(owner, mod, null, null);
+        check((await topics.ListModuleUpdatesAsync(owner)).All(u => u.ModuleId != mod), p + "U7 Archivierte Themen werden nicht markiert");
+        // Entwurf mit unveröffentlichten Änderungen
+        var mod2 = (await repo.CreateModuleAsync(new ModuleCreateRequest { Name = "UD-" + sfx }, owner)).Id;
+        var dc = await repo.CreateCardAsync(Json("UD-" + sfx, "Entwurfskarte", "eins"), owner);
+        check(!(await topics.ListModulesWithUnpublishedChangesAsync(owner)).Contains(mod2), p + "U8 Nie veröffentlichtes Modul zählt nicht als „Entwurf mit Änderungen“");
+        await topics.PublishModuleVersionAsync(owner, mod2, null, null);
+        check(!(await topics.ListModulesWithUnpublishedChangesAsync(owner)).Contains(mod2), p + "U9 Frisch veröffentlicht: keine unveröffentlichten Änderungen");
+        await repo.UpdateCardAsync(dc.Id, Json("UD-" + sfx, "Entwurfskarte", "zwei"), owner, (await repo.GetCardAsync(dc.Id, owner))!.UpdatedAt);
+        var drafts = await topics.ListModulesWithUnpublishedChangesAsync(owner);
+        var dchanges = await topics.CompareDraftChangesAsync(owner, mod2, 1);
+        check(drafts.Contains(mod2), p + "U10 Kartenänderung nach der Veröffentlichung wird als unveröffentlichte Änderung erkannt");
+        check(dchanges.Single().Kind == "changed" && dchanges[0].Fields.Any(f => f.Old == "eins" && f.New == "zwei"), p + "U11 Vergleich Version ↔ Entwurf zeigt alten und neuen Wert");
+        check((await topics.ListModulesWithUnpublishedChangesAsync(other)).Count == 0 && await Denied(() => topics.CompareDraftChangesAsync(other, mod2, 1)), p + "U12 Andere Benutzer sehen weder Markierung noch Vergleich");
+        await topics.PublishModuleVersionAsync(owner, mod2, null, null);
+        check(!(await topics.ListModulesWithUnpublishedChangesAsync(owner)).Contains(mod2), p + "U13 Nach dem Veröffentlichen verschwindet die Markierung");
     }
 
     /// <summary>ADR 0059: Co-Autoren verwalten und veröffentlichen Modulversionen (Eigentümer, direkt, abgeleitet); getrennt von Lernfreigabe, globaler Freigabe und Themenveröffentlichung.</summary>
@@ -314,6 +357,13 @@ public static class ModuleCoAuthorTests
         await repo.UpdateCardAsync(card1.Id, Json("VM1-" + sfx, "Karte 1", "x2"), owner, (await repo.GetCardAsync(card1.Id, owner))!.UpdatedAt);
         check(await Denied(() => topics.PublishModuleVersionAsync(owner, mod1, null, vc.ContentHash)), p + "V28 Veralteter Fingerabdruck der Vorversion wird nicht als aktueller Stand akzeptiert");
         check((await comp.GetModelRawAsync(mod1)).Objectives.Count == 1 && (await db.QueryAsync("SELECT 1 FROM module_versions WHERE module_id=@m AND version_number=1", new (string, object?)[] { ("m", mod1) })).Count == 1, p + "V29 Frühere Versionen bleiben unverändert vorhanden");
+
+        // Änderungsmarke für die automatische Aktualisierung des Editors (nur mit Bearbeitungsrecht, ohne Inhalte)
+        var st0 = await topics.GetModuleChangeStampAsync(owner, mod1);
+        check(st0 is not null && st0 == await topics.GetModuleChangeStampAsync(direct, mod1) && st0 == await topics.GetModuleChangeStampAsync(owner, mod1), p + "V30 Änderungsmarke ist ohne Änderung stabil und für berechtigte Autoren gleich");
+        await Edit(card1, "VM1-" + sfx, "stamp", owner);
+        check(await topics.GetModuleChangeStampAsync(owner, mod1) != st0, p + "V31 Kartenänderung ändert die Änderungsmarke");
+        check(await topics.GetModuleChangeStampAsync(stranger, mod1) is null && await topics.GetModuleChangeStampAsync(via, mod2) is null, p + "V32 Fremde und Mehrfachzuordnung ohne Recht erhalten keine Marke (kein Zugriff)");
 
         // F Fremder, E Entzug, L eingeschränktes Profil
         check(await Denied(() => topics.PublishModuleVersionAsync(stranger, mod1, null, null)) && await Denied(() => topics.GetModuleVersionOverviewAsync(stranger, mod1)) && await Denied(() => topics.GetModuleVersionCardsAsync(stranger, mod1, 1)) && await Denied(() => topics.CompareDraftWithVersionAsync(stranger, mod1, 1)), p + "V18 (F) Fremder Benutzer kann weder lesen noch veröffentlichen");

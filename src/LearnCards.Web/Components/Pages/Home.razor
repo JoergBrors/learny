@@ -211,6 +211,10 @@
                 </select>
             </Filters>
         </ListToolbar>
+        @if (_group.Length > 0 && shown.Count > 0)
+        {
+            <div class="group-tools"><button type="button" class="btn btn-ghost btn-sm" @onclick="() => SetAllGroups(groups, true)">Alle aufklappen</button> <button type="button" class="btn btn-ghost btn-sm" @onclick="() => SetAllGroups(groups, false)">Alle zuklappen</button></div>
+        }
         @if (shown.Count == 0)
         {
             <div class="empty-state"><p class="empty-title">Keine Treffer.</p><p class="muted">Suche oder Filter anpassen@(_favOnly ? " bzw. „Favoriten“ ausschalten" : "").</p></div>
@@ -224,8 +228,8 @@
                     <tbody>
                         @foreach (var g in groups)
                         {
-                        @if (g.Title.Length > 0) { <tr class="group-row"><th colspan="6" scope="colgroup">@g.Title (@g.Items.Count)</th></tr> }
-                        @foreach (var mod in g.Items)
+                        @if (g.Title.Length > 0) { <tr class="group-row"><th colspan="6" scope="colgroup"><button type="button" class="group-toggle" aria-expanded="@(IsOpen(g.Title) ? "true" : "false")" @onclick="() => ToggleGroup(g.Title)"><span aria-hidden="true">@(IsOpen(g.Title) ? "▾" : "▸")</span> @g.Title (@g.Items.Count)</button>@if (UpdateCount(g.Items) > 0) { <span class="badge badge-warn">@UpdateCount(g.Items) mit neuerer Version</span> }@if (DraftCount(g.Items) > 0) { <span class="badge badge-warn">@DraftCount(g.Items) mit unveröffentlichten Änderungen</span> }</th></tr> }
+                        @foreach (var mod in (IsOpen(g.Title) ? g.Items : Array.Empty<ModuleInfo>()))
                         {
                             <tr class="clickable" tabindex="0" @onclick="() => Open(mod.Id)" @onkeydown='e => { if (e.Key == "Enter") Open(mod.Id); }'>
                                 <td><FavoriteButton Active="_favs.Contains(mod.Id)" Label="@mod.Name" OnToggle="() => ToggleFav(mod.Id)" /></td>
@@ -235,6 +239,8 @@
                                 <td>
                                     @if (_certs.TryGetValue(mod.Id, out var cert)) { <span class="badge badge-pass">✔ Note @cert.Grade</span> }
                                     @if (_tab == "private" && _latestVersions.TryGetValue(mod.Id, out var lv)) { <span class="pill">V@(lv)</span> } else if (_tab == "private") { <span class="pill">Entwurf</span> } else if (_tab == "global") { <span class="pill">V@(mod.GlobalVersion)</span> }
+                                    @if (_tab == "private" && _updates.TryGetValue(mod.Id, out var upd)) { <button type="button" class="badge badge-warn update-badge" @onclick:stopPropagation="true" @onclick="() => OpenUpdateAsync(mod)" title="Neuere Modulversion als im Thema festgelegt — prüfen und übernehmen">↑ V@(upd.Max(x => x.LatestVersion)) neu</button> }
+                                    @if (_tab == "private" && _drafts.Contains(mod.Id)) { <button type="button" class="badge badge-warn update-badge" @onclick:stopPropagation="true" @onclick="() => OpenUpdateAsync(mod)" title="Unveröffentlichte Änderungen gegenüber der letzten Version — prüfen und veröffentlichen">✎ Entwurf mit Änderungen</button> }
                                 </td>
                                 <td class="actions">
                                     @if (_tab == "global") { <button class="btn btn-ghost btn-sm" @onclick:stopPropagation="true" @onclick="() => CloneAsync(mod)" disabled="@_cloning" title="Erzeugt eine eigene private Kopie">⧉ Klonen</button> }
@@ -260,9 +266,9 @@
         {
         @foreach (var g in groups)
         {
-        @if (g.Title.Length > 0) { <h3 class="group-head">@g.Title <span class="count">(@g.Items.Count)</span></h3> }
+        @if (g.Title.Length > 0) { <h3 class="group-head"><button type="button" class="group-toggle" aria-expanded="@(IsOpen(g.Title) ? "true" : "false")" @onclick="() => ToggleGroup(g.Title)"><span aria-hidden="true">@(IsOpen(g.Title) ? "▾" : "▸")</span> @g.Title <span class="count">(@g.Items.Count)</span></button>@if (UpdateCount(g.Items) > 0) { <span class="badge badge-warn">@UpdateCount(g.Items) mit neuerer Version</span> }@if (DraftCount(g.Items) > 0) { <span class="badge badge-warn">@DraftCount(g.Items) mit unveröffentlichten Änderungen</span> }</h3> }
         <div class="module-grid">
-            @foreach (var mod in g.Items)
+            @foreach (var mod in (IsOpen(g.Title) ? g.Items : Array.Empty<ModuleInfo>()))
             {
                 <article class="module-card" tabindex="0" role="link"
                          aria-label="@($"Modul {mod.Name}: {mod.ActiveCount} aktive Karten")"
@@ -304,6 +310,8 @@
                             <span class="pill">@mod.ActiveCount Karten</span>
                             @if (_tab == "private" && _latestVersions.TryGetValue(mod.Id, out var lv)) { <span class="pill" title="Neueste veröffentlichte Modulversion">V@(lv)</span> }
                             else if (_tab == "private") { <span class="pill" title="Noch keine Modulversion veröffentlicht">Entwurf</span> }
+                            @if (_tab == "private" && _updates.TryGetValue(mod.Id, out var upd)) { <button type="button" class="badge badge-warn update-badge" @onclick:stopPropagation="true" @onclick="() => OpenUpdateAsync(mod)" title="Neuere Modulversion als im Thema festgelegt — prüfen und übernehmen">↑ V@(upd.Max(x => x.LatestVersion)) neu</button> }
+                                    @if (_tab == "private" && _drafts.Contains(mod.Id)) { <button type="button" class="badge badge-warn update-badge" @onclick:stopPropagation="true" @onclick="() => OpenUpdateAsync(mod)" title="Unveröffentlichte Änderungen gegenüber der letzten Version — prüfen und veröffentlichen">✎ Entwurf mit Änderungen</button> }
                         </div>
                         <h2>@mod.Name</h2>
                         @if (_tab == "private" && _usage.TryGetValue(mod.Id, out var uses) && uses.Count > 0)
@@ -351,8 +359,150 @@
     }
 </div>
 
+@if (_updateModule is not null)
+{
+    <DetailDrawer Title="@($"Änderungen: {_updateModule.Name}")" Wide="true" OnClose="CloseUpdate">
+        @if (_updateMessage is not null) { <div class="alert @(_updateOk ? "alert-ok" : "alert-error")" role="status">@_updateMessage</div> }
+        @if (_draftChanges is not null)
+        {
+            <section class="card panel">
+                <h3>Entwurf mit Änderungen gegenüber V@(_draftVersion)</h3>
+                @if (_draftChanges.Count == 0) { <p class="muted">Keine Unterschiede bei den Karten (geändert wurden z. B. Quiz-Pool, Quizkonfiguration oder Kompetenzen — im Editor sichtbar).</p> }
+                @foreach (var c in _draftChanges)
+                {
+                    <div class="diff-card diff-@c.Kind">
+                        <strong>@(c.Kind == "added" ? "＋ Neu" : c.Kind == "removed" ? "－ Entfernt" : "✎ Geändert"): @c.Term</strong>
+                        @foreach (var f in c.Fields)
+                        {
+                            <div class="diff-field"><span class="muted">@f.Label</span>
+                                <div class="diff-old">@f.Old</div><div class="diff-new">@f.New</div></div>
+                        }
+                    </div>
+                }
+                <p class="muted">Der aktuelle Entwurf wird als <strong>neue unveränderliche Modulversion</strong> veröffentlicht. Bestehende Themen und Lernfreigaben werden dadurch nicht automatisch geändert; die Übernahme in ein Thema erfolgt danach ausdrücklich.</p>
+                @if (_publishConfirm)
+                {
+                    <button class="btn btn-primary btn-sm" @onclick="PublishDraftAsync" disabled="@_updateBusy">Ja, Version veröffentlichen</button>
+                    <button class="btn btn-ghost btn-sm" @onclick="() => _publishConfirm = false">Abbrechen</button>
+                }
+                else { <button class="btn btn-primary btn-sm" @onclick="() => _publishConfirm = true" disabled="@_updateBusy">⬆ Version veröffentlichen</button> }
+                <a class="btn btn-ghost btn-sm" href="/module/@_updateModule.Id/edit">Im Editor öffnen</a>
+            </section>
+        }
+        @foreach (var u in _updateItems)
+        {
+            <section class="card panel">
+                <h3>Thema „@u.Update.TopicName“: festgelegt V@(u.Update.PinnedVersion) → neu V@(u.Update.LatestVersion)</h3>
+                @if (u.Changes.Count == 0) { <p class="muted">Keine Unterschiede bei den Karten (z. B. nur Quiz-, Pool- oder Kompetenzänderungen).</p> }
+                @foreach (var c in u.Changes)
+                {
+                    <div class="diff-card diff-@c.Kind">
+                        <strong>@(c.Kind == "added" ? "＋ Neu" : c.Kind == "removed" ? "－ Entfernt" : "✎ Geändert"): @c.Term</strong>
+                        @foreach (var f in c.Fields)
+                        {
+                            <div class="diff-field"><span class="muted">@f.Label</span>
+                                <div class="diff-old">@f.Old</div><div class="diff-new">@f.New</div></div>
+                        }
+                    </div>
+                }
+                <p class="muted">Die neue Version wird im <strong>Entwurf</strong> des Themas übernommen. Veröffentlichte Themenversionen und Lernfreigaben bleiben unverändert; die Themenveröffentlichung erfolgt weiterhin ausdrücklich.</p>
+                @if (_updateConfirm == u.Update.TopicId)
+                {
+                    <button class="btn btn-primary btn-sm" @onclick="() => AdoptUpdateAsync(u.Update)" disabled="@_updateBusy">Ja, V@(u.Update.LatestVersion) in „@u.Update.TopicName“ übernehmen</button>
+                    <button class="btn btn-ghost btn-sm" @onclick="() => _updateConfirm = null">Abbrechen</button>
+                }
+                else { <button class="btn btn-primary btn-sm" @onclick="() => _updateConfirm = u.Update.TopicId" disabled="@_updateBusy">In Thema übernehmen</button> }
+                <a class="btn btn-ghost btn-sm" href="/module/@u.Update.ModuleId/version/@u.Update.LatestVersion">Neue Version ansehen</a>
+            </section>
+        }
+        @if (_updateItems.Count == 0 && _draftChanges is null) { <p class="muted">Es gibt keine neuere Version und keine unveröffentlichten Änderungen mehr.</p> }
+    </DetailDrawer>
+}
+
 @code {
     private List<ModuleInfo> _modules = new();
+    private Dictionary<string, List<ModuleUpdate>> _updates = new(StringComparer.OrdinalIgnoreCase);
+    private HashSet<string> _collapsed = new(StringComparer.CurrentCultureIgnoreCase);
+    private HashSet<string> _drafts = new(StringComparer.OrdinalIgnoreCase);
+    private List<ModuleCardChange>? _draftChanges;
+    private int _draftVersion;
+    private string? _draftHash;
+    private bool _publishConfirm;
+    private ModuleInfo? _updateModule;
+    private List<(ModuleUpdate Update, List<ModuleCardChange> Changes)> _updateItems = new();
+    private string? _updateMessage, _updateConfirm;
+    private bool _updateOk, _updateBusy;
+
+    private bool IsOpen(string title) => !_collapsed.Contains(_tab + "|" + _group + "|" + title);
+    private void ToggleGroup(string title) { var k = _tab + "|" + _group + "|" + title; if (!_collapsed.Remove(k)) _collapsed.Add(k); }
+    private void SetAllGroups(List<ListGroup<ModuleInfo>> groups, bool open)
+    {
+        foreach (var g in groups.Where(x => x.Title.Length > 0)) { var k = _tab + "|" + _group + "|" + g.Title; if (open) _collapsed.Remove(k); else _collapsed.Add(k); }
+    }
+    private int UpdateCount(IReadOnlyList<ModuleInfo> items) => _tab == "private" ? items.Count(m => _updates.ContainsKey(m.Id)) : 0;
+    private int DraftCount(IReadOnlyList<ModuleInfo> items) => _tab == "private" ? items.Count(m => _drafts.Contains(m.Id)) : 0;
+
+    private async Task OpenUpdateAsync(ModuleInfo mod)
+    {
+        _updateModule = mod; _updateMessage = null; _updateConfirm = null; _publishConfirm = false; _updateItems = new(); _draftChanges = null;
+        foreach (var u in _updates.GetValueOrDefault(mod.Id) ?? new())
+        {
+            try { _updateItems.Add((u, await TopicSvc.CompareModuleVersionsAsync(_userId, mod.Id, u.PinnedVersion, u.LatestVersion))); }
+            catch (Exception e) when (e is KeyNotFoundException or ArgumentException) { _updateItems.Add((u, new())); }
+        }
+        if (_drafts.Contains(mod.Id))
+        {
+            try
+            {
+                var ov = await TopicSvc.GetModuleVersionOverviewAsync(_userId, mod.Id);
+                _draftVersion = ov.LatestVersion; _draftHash = ov.DraftHash;
+                _draftChanges = ov.HasUnpublishedChanges && ov.LatestVersion > 0 ? await TopicSvc.CompareDraftChangesAsync(_userId, mod.Id, ov.LatestVersion) : null;
+            }
+            catch (Exception e) when (e is KeyNotFoundException or ArgumentException) { _draftChanges = null; }
+        }
+    }
+
+    private async Task PublishDraftAsync()
+    {
+        if (_updateModule is null) return;
+        _updateBusy = true; _updateMessage = null; _publishConfirm = false;
+        try
+        {
+            var v = await TopicSvc.PublishModuleVersionAsync(_userId, _updateModule.Id, null, _draftHash);   // Berechtigung und Entwurfsstand im Dienst unmittelbar vor dem Veröffentlichen geprüft (ADR 0059)
+            _latestVersions = await ModuleVersions.ListLatestVersionNumbersAsync(_userId);
+            await LoadUpdatesAsync();
+            await OpenUpdateAsync(_updateModule);   // setzt die Meldung zurück, daher danach
+            _updateMessage = $"Version {v.VersionNumber} veröffentlicht. Themen behalten ihre festgelegte Version; übernimm die neue Version unten ausdrücklich, falls gewünscht."; _updateOk = true;
+        }
+        catch (Exception e) when (e is KeyNotFoundException or ArgumentException or InvalidOperationException) { _updateMessage = e.Message; _updateOk = false; }
+        _updateBusy = false;
+    }
+
+    private void CloseUpdate() { _updateModule = null; _updateItems = new(); _updateConfirm = null; _draftChanges = null; _publishConfirm = false; }
+
+    private async Task AdoptUpdateAsync(ModuleUpdate u)
+    {
+        _updateBusy = true; _updateMessage = null;
+        try
+        {
+            var chosen = await TopicSvc.AdoptModuleVersionAsync(_userId, u.TopicId, u.ModuleId, u.LatestVersion);   // ausdrücklich, nur Entwurf; Berechtigung im Dienst
+            _updateMessage = $"Version {chosen} wurde im Entwurf des Themas „{u.TopicName}“ übernommen (noch nicht veröffentlicht)."; _updateOk = true;
+            await LoadUpdatesAsync();
+            _updateItems.RemoveAll(x => x.Update.TopicId == u.TopicId);
+            _updateConfirm = null;
+        }
+        catch (Exception e) when (e is KeyNotFoundException or ArgumentException or InvalidOperationException) { _updateMessage = e.Message; _updateOk = false; }
+        _updateBusy = false;
+    }
+
+    private async Task LoadUpdatesAsync()
+    {
+        try { _drafts = (await TopicSvc.ListModulesWithUnpublishedChangesAsync(_userId)).ToHashSet(StringComparer.OrdinalIgnoreCase); }
+        catch (Exception) { _drafts = new(StringComparer.OrdinalIgnoreCase); }
+        try { _updates = (await TopicSvc.ListModuleUpdatesAsync(_userId)).GroupBy(x => x.ModuleId, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase); }
+        catch (Exception) { _updates = new(StringComparer.OrdinalIgnoreCase); }   // ein Fehler blockiert die Startseite nie
+    }
+
     private Dictionary<string, int> _latestVersions = new();
     private List<ModuleInfo> _shared = new();
     private List<ModuleInfo> _global = new();
@@ -452,6 +602,7 @@
         _loading = true;
         _modules = await Repo.ListModulesAsync(_userId);
         _latestVersions = await ModuleVersions.ListLatestVersionNumbersAsync(_userId);
+        await LoadUpdatesAsync();
         _shared = await Repo.ListSharedWithMeAsync(_userId);
         _global = await Repo.ListGlobalModulesAsync(_userId);
         try { _coEdited = await TopicSvc.ListCoEditedModulesAsync(_userId); } catch (Exception) { _coEdited = new(); }   // ein Fehler blockiert die Startseite nie

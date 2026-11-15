@@ -124,7 +124,7 @@
         {
             <section class="card panel" id="zusammenarbeit" aria-label="Zusammenarbeit am Modul">
                 <h2 class="panel-title">Zusammenarbeit</h2>
-                <p class="muted">Co-Autoren bearbeiten Karten, Quiz, Kompetenzen und Fragenpool dieses Moduls. Sie veröffentlichen keine Versionen, geben nichts frei und weisen nichts zu; das Modul bleibt Eigentum von <strong>@_mcollab.OwnerName</strong>.</p>
+                <p class="muted">Co-Autoren bearbeiten Karten, Quiz, Kompetenzen und Fragenpool dieses Moduls. Sie können neue Modulversionen veröffentlichen; Freigaben für Lernende, Themenveröffentlichung und Zuweisungen bleiben davon getrennt; das Modul bleibt Eigentum von <strong>@_mcollab.OwnerName</strong>.</p>
                 @if (_mcollab.ViewerKind == ModuleAccessKind.ViaTopic)
                 {
                     <p>Du bearbeitest dieses Modul <strong>über ein gemeinsam bearbeitetes Thema</strong>:
@@ -265,6 +265,12 @@
                         </div>
                     </div>
 
+                    @if (_remoteChanged)
+                    {
+                        <div class="alert alert-info" role="status">Dieses Modul wurde inzwischen von jemand anderem geändert. Deine ungespeicherten Änderungen bleiben erhalten.
+                            <button class="btn btn-ghost btn-sm" @onclick="RefreshRemoteAsync">Aktualisieren (ungespeicherte Änderungen verwerfen)</button>
+                        </div>
+                    }
                     @if (_error is not null)
                     {
                         <div class="alert alert-error" role="alert">@_error
@@ -665,12 +671,66 @@
         _loading = false;
     }
 
+    // ─── Automatische Aktualisierung bei Änderungen durch andere (Eigentümer/Co-Autoren) ───
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(10);
+    private CancellationTokenSource? _pollCts;
+    private string? _stamp;
+    private bool _remoteChanged;
+
+    private async Task PollLoopAsync(CancellationToken ct)
+    {
+        using var timer = new PeriodicTimer(PollInterval);
+        try
+        {
+            while (await timer.WaitForNextTickAsync(ct)) await InvokeAsync(CheckRemoteChangesAsync);
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    /// <summary>Vergleicht die leichte Änderungsmarke; ohne ungespeicherte Eingaben wird der Stand still nachgeladen, sonst erscheint ein Hinweis (nichts wird überschrieben).</summary>
+    private async Task CheckRemoteChangesAsync()
+    {
+        if (_loading || _saving || _module is null || _versionBusy) return;
+        try
+        {
+            var stamp = await TopicSvc.GetModuleChangeStampAsync(_actorSub, ModuleId);
+            if (stamp is null)
+            {
+                if (_coContext) { await StillAllowedAsync(); _cards = new(); _draft = null; _mv = null; _poolQs = new(); _pollCts?.Cancel(); StateHasChanged(); }   // Entzug: keine weiteren Inhalte anzeigen (ADR 0053)
+                return;
+            }
+            if (stamp == _stamp) { if (_remoteChanged && !IsDirty) { _remoteChanged = false; StateHasChanged(); } return; }
+            if (IsDirty) { _remoteChanged = true; StateHasChanged(); return; }
+            await RefreshRemoteAsync();
+            _status = "Das Modul wurde zwischenzeitlich von jemand anderem geändert — der Stand wurde aktualisiert.";
+            StateHasChanged();
+        }
+        catch (Exception e) when (e is KeyNotFoundException or InvalidOperationException) { }   // nächster Takt versucht es erneut
+    }
+
+    private async Task RefreshRemoteAsync()
+    {
+        _remoteChanged = false;
+        await LoadCardsAsync();
+        if (_draft?.Id is { } id) { if (_cards.Any(c => c.Id == id)) await LoadDraftAsync(id); else NewDraft(); } else ResetBaseline();
+        _model = await CompetencySvc.GetModelRawAsync(ModuleId);
+        _status = null;
+        StateHasChanged();
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender && _pollCts is null) { _pollCts = new CancellationTokenSource(); _ = PollLoopAsync(_pollCts.Token); }
+    }
+
     private async Task LoadCardsAsync()
     {
+        _stamp = await TopicSvc.GetModuleChangeStampAsync(_actorSub, ModuleId);   // vor dem Laden: eine Änderung dazwischen wird beim nächsten Takt erkannt
         var active = await Repo.ListCardsAsync(_userSub, ModuleId, null, archived: false);
         var all = new List<Card>(active);
         if (_showArchived) all.AddRange(await Repo.ListCardsAsync(_userSub, ModuleId, null, archived: true));
         _cards = all;
+        await LoadVersionsAsync();   // jede eigene Änderung (Speichern, Archivieren, Duplizieren, …) wirkt sofort auf „Entwurf mit Änderungen“ und den Veröffentlichen-Knopf
     }
 
     private async Task LoadDraftAsync(string cardId)
@@ -888,7 +948,7 @@
         try { await JS.InvokeVoidAsync("lcRte.dragReset", "preview-overlay"); } catch (JSDisconnectedException) { }
     }
     private void ToggleConfig() => _configOpen = !_configOpen;
-    private Task CloseConfig() { _configOpen = false; return Task.CompletedTask; }
+    private async Task CloseConfig() { _configOpen = false; await LoadVersionsAsync(); }   // Quizkonfiguration kann den Entwurfsstand geändert haben
     private void OpenQuizPreview() => _quizPreviewOpen = true;
     private Task CloseQuizPreview() { _quizPreviewOpen = false; return Task.CompletedTask; }
 
@@ -962,6 +1022,7 @@
             if (_poolEditId is null) await Quiz.CreateQuestionAsync(ModuleId, _poolEdit, _userSub);
             else await Quiz.UpdateQuestionAsync(ModuleId, _poolEditId, _poolEdit, _userSub);
             await LoadPoolAsync();
+            await LoadVersionsAsync();
             _status = "Frage im Fragenpool gespeichert.";
         }
         catch (Exception e) when (e is ArgumentException or InvalidOperationException or KeyNotFoundException or UnauthorizedAccessException) { _poolError = e.Message; }
@@ -970,7 +1031,7 @@
     private async Task TogglePoolActiveAsync(QuizPoolQuestion q)
     {
         if (!await StillAllowedAsync()) return;
-        try { await Quiz.SetQuestionActiveAsync(ModuleId, q.Id, !q.Active, _userSub); await LoadPoolAsync(); }
+        try { await Quiz.SetQuestionActiveAsync(ModuleId, q.Id, !q.Active, _userSub); await LoadPoolAsync(); await LoadVersionsAsync(); }
         catch (Exception e) when (e is KeyNotFoundException or UnauthorizedAccessException) { _poolError = e.Message; }
     }
 
@@ -993,6 +1054,7 @@
 
     public async ValueTask DisposeAsync()
     {
+        _pollCts?.Cancel(); _pollCts?.Dispose();
         try { await JS.InvokeVoidAsync("lcRte.setBeforeUnload", false); } catch (Exception e) when (e is JSDisconnectedException or InvalidOperationException) { }
     }
 }
