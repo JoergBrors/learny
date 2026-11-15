@@ -40,9 +40,48 @@ PowerShell: `$env:LEARNY_BROWSER_TEST = '1'; node tests/browser/co-author-topic.
 | `perf-baseline.mjs` | Performance-Baseline (Navigationsdauer, lange Tasks, CLS, DOM, Transport); siehe docs/reviews/2026-11-15-performance-browser-pwa.md. |
 | `perf-server.mjs` | Server-Phasen (nur Development): `Server-Timing` je SSR-Seite (total, Datenbankdauer, Anzahl Abfragen), mindestens 5 Läufe, Median/Min–Max. Zeigt N+1-Muster; siehe docs/reviews/2026-11-15-performance-browser-pwa.md. |
 | `lighthouse.mjs` | Lighthouse (mobil + Desktop, mehrere Läufe, Median) gegen die angemeldete Dev-Instanz; Lighthouse-CLI separat installieren (`LIGHTHOUSE_CLI`, `LH_OUT`, `LH_PATH`). Anmeldung im selben Chrome (Cookie-Header erreichen den WebSocket nicht). |
+| `lighthouse-attach.mjs` | Lighthouse gegen einen bereits **von Hand angemeldeten** eigenen Chrome (z. B. Produktion mit OIDC), 5 Läufe mobil/Desktop, Median/Streuung; Anleitung im Abschnitt „Authentifizierte Seiten messen“. |
 | `a11y-seo.mjs` | Meta-Beschreibung, sichtbarer Text im zugänglichen Namen (Sidebar, Darstellung, Kartenbuttons) und Kontrast (>= 4,5:1) in Hell/Dunkel. |
 | `pwa-nav.mjs` | PWA-Navigation (`pwa.js`): Ladebalken beim Menüklick, Notausgang bei blockierter Blazor-Navigation. Herunterziehen (nur Touch/Standalone) ist hier nicht prüfbar. |
 | `module-list-updates.mjs` | Modulliste: Gruppen ein-/ausklappen, Markierung „neuere Version“, Overlay mit Kartenvergleich und bestätigte Übernahme in den Themenentwurf; „Entwurf mit Änderungen“ vergleichen und als Version veröffentlichen. |
 | `module-collaboration.mjs` | Direkte Modulfreigabe, „Zugriff über Themen“, Reiter „Gemeinsam bearbeitet“ (Module), nachträglich zugeordnetes Modul, Mehrfachzuordnung, Themenentzug, Mitarbeit beenden |
 
 `lib.mjs` enthält die gemeinsamen Hilfen (Chrome-Start, DevTools-Verbindung, Klicken/Tippen, API-Aufrufe mit der Cookie-Sitzung). Chrome-Profil und Prozess werden am Ende entfernt.
+
+## Authentifizierte Seiten messen (Lighthouse am eigenen, angemeldeten Chrome)
+
+`lighthouse-attach.mjs` misst Seiten hinter einer Anmeldung (z. B. Produktion mit OIDC, wo es keinen Dev-Login gibt). Das Skript meldet **nichts selbst an** und kennt weder Zugangsdaten noch Cookies: Sie melden sich **von Hand** in einem separaten Chrome-Profil an, Lighthouse hängt sich per lokalem DevTools-Port an diesen Chrome und nutzt dessen Sitzung (damit ist auch der Blazor-WebSocket authentifiziert; ein Cookie per `--extra-headers` erreicht den WebSocket nicht und erzeugt einen künstlichen Circuit-Fehler).
+
+**Voraussetzungen:** Node.js >= 22, Chrome, Lighthouse-CLI **außerhalb des Repositories** (keine Projektabhängigkeit, ADR 0002).
+
+```powershell
+# 1. Lighthouse einmalig in einem Ordner AUSSERHALB des Repositories installieren
+mkdir $env:USERPROFILE\lh; cd $env:USERPROFILE\lh; npm init -y; npm install lighthouse
+
+# 2. Chrome mit separatem, frischem Profil ohne Erweiterungen starten; der Debug-Port ist nur über 127.0.0.1 erreichbar
+& "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-address=127.0.0.1 --remote-debugging-port=9333 --user-data-dir="$env:TEMP\lh-profil" --disable-extensions --no-first-run https://learny.brors.date
+#    In DIESEM Fenster von Hand anmelden und es offen lassen.
+
+# 3. Im Repository-Ordner messen
+$env:LIGHTHOUSE_CLI = "$env:USERPROFILE\lh\node_modules\lighthouse\cli\index.js"
+$env:LH_OUT   = "$env:TEMP\lh-ergebnis"
+$env:LH_PATHS = "/topics,/dashboard,/,/topics/<Themen-ID>"
+node tests/browser/lighthouse-attach.mjs
+```
+
+| Variable | Bedeutung |
+|---|---|
+| `LIGHTHOUSE_CLI` (Pflicht) | Pfad zu `lighthouse\cli\index.js` der Installation |
+| `LH_OUT` (Pflicht) | Ordner für die Roh-JSON; **muss außerhalb des Repositories liegen** (sonst Abbruch) |
+| `LH_PATHS` (Pflicht) | kommagetrennte Pfade, z. B. `/topics,/dashboard,/` |
+| `LH_BASE` | Basisadresse (Standard `https://learny.brors.date`) |
+| `LH_PORT` | DevTools-Port (Standard 9333, nur lokal) |
+| `LH_RUNS` | Läufe je Seite und Profil (Standard 5) |
+
+**Auswertung:** je Seite und Profil (mobil, Desktop) werden alle Läufe ausgeführt und **Median mit Minimum–Maximum** ausgegeben (Performance, Accessibility, Best Practices, SEO, FCP, LCP, TBT, CLS, Lighthouse-Version), dazu die auffälligen Audits mit gekürzten Elementbeschreibungen. Meldet Lighthouse Browser-Erweiterungen („Chrome extensions negatively affected …“), steht `>>> ACHTUNG` und der Exit-Code ist 1: die Performance-Werte sind dann nicht verwertbar (Chrome zeigt auch mit `--disable-extensions` einige eigene Komponenten-Ziele; maßgeblich ist die Warnung von Lighthouse). Exit-Codes: 0 = alle Läufe gültig, 1 = fehlgeschlagene Läufe/keine Ergebnisse/Erweiterungen erkannt, 2 = falscher Aufruf oder Chrome nicht erreichbar.
+
+**Datenschutz und Sicherheit**
+- Die Roh-JSON-Dateien enthalten Ausschnitte der gemessenen (angemeldeten) Seiten und gehören **nie** ins Repository und nicht in Tickets oder Chats; Screenshots werden nicht erzeugt (`--skip-audits`). Weitergeben: nur die Konsolenzusammenfassung — und auch sie vorher auf Themen-/Modulnamen in den gekürzten Tags prüfen.
+- Der Chrome-Debug-Port gibt volle Kontrolle über den Browser samt Anmeldung: nur an `127.0.0.1` binden (`--remote-debugging-address=127.0.0.1`), nie auf `0.0.0.0` oder im Netzwerk freigeben, nur für die Dauer der Messung offen lassen und das Messprofil danach schließen und löschen.
+- Das Skript beendet keine Chrome-Prozesse (auch nicht den gestarteten); das Chrome-Fenster schließen Sie selbst. Es verwendet ausschließlich den angegebenen Port.
+- Einschränkung: Gemessen wird von Ihrem Rechner aus über Ihr Netzwerk; die Anmeldung bei OIDC/Produktion ist nur so lange gültig, wie die Sitzung des Profils lebt. Installierte PWA und Suspend/Resume sind damit **nicht** messbar (dafür ist ein echtes Gerät nötig).
