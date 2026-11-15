@@ -208,7 +208,7 @@ jobs:
           }
 
           Write-Host "=== Windows features ==="
-          $features = Get-WindowsFeature Web-Server, Web-Mgmt-Tools, Web-Scripting-Tools |
+          $features = Get-WindowsFeature Web-Server, Web-Mgmt-Tools, Web-Scripting-Tools, Web-WebSockets |
             Select-Object Name, InstallState
           $features | Format-Table -AutoSize | Out-String | Write-Host
           foreach ($feature in $features) {
@@ -468,6 +468,23 @@ jobs:
               throw "IIS konnte nicht installiert werden."
             }
           }
+
+          # WebSocket-Protokoll (ADR 0009, Betrieb): ohne dieses IIS-Feature bietet Blazor Server nur ServerSentEvents/LongPolling an (viele /_blazor-Requests, träge Navigation).
+          # Idempotent: nur installieren, wenn nicht vorhanden; nie ein automatischer Neustart des Servers; ein erforderlicher Neustart wird gemeldet, nicht ausgeführt.
+          if (Get-Command Get-WindowsFeature -ErrorAction SilentlyContinue) {
+            $ws = Get-WindowsFeature -Name Web-WebSockets
+            if ($ws.InstallState -eq "Installed") {
+              Write-Host "Web-WebSockets: bereits installiert."
+            }
+            elseif (Get-Command Install-WindowsFeature -ErrorAction SilentlyContinue) {
+              $wsResult = Install-WindowsFeature -Name Web-WebSockets
+              Write-Host "Web-WebSockets: Installation Success=$($wsResult.Success) RestartNeeded=$($wsResult.RestartNeeded)"
+              if (-not $wsResult.Success) { Write-Host "::warning::Web-WebSockets konnte nicht installiert werden; Blazor nutzt weiter LongPolling." }
+              elseif ("$($wsResult.RestartNeeded)" -eq "Yes") { Write-Host "::warning::Web-WebSockets installiert, ein Serverneustart ist erforderlich (wird nicht automatisch ausgeführt)." }
+            }
+            else { Write-Host "::warning::Web-WebSockets fehlt und 'Install-WindowsFeature' ist nicht verfügbar; Feature manuell installieren." }
+          }
+          else { Write-Host "::warning::Get-WindowsFeature nicht verfügbar (kein Windows-Server-Runner): Web-WebSockets bitte manuell prüfen." }
 
           Import-Module WebAdministration
           if (-not (Get-PSDrive -Name IIS -ErrorAction SilentlyContinue)) {
@@ -1174,6 +1191,69 @@ jobs:
           if ($response.StatusCode -lt 200 -or $response.StatusCode -ge 300) {
             throw "Health-Check fehlgeschlagen: $($response.StatusCode)"
           }
+
+      - name: Verify WebSocket Transport
+        if: ${{ env.IIS_BINDING_URL != '' }}
+        shell: pwsh
+        env:
+          IIS_PUBLIC_URL: ${{ vars.IIS_PUBLIC_URL }}
+          IIS_REQUIRE_WEBSOCKETS: ${{ vars.IIS_REQUIRE_WEBSOCKETS }}
+        run: |
+          # Blazor soll über WebSockets laufen. Geprüft wird (A) Feature, (B/C) Negotiate bietet WebSockets an, (D) echter WebSocket-Handshake mit Negotiate-Token am Hub.
+          # Die Transportliste allein genügt nicht. Ausgaben enthalten nie Tokens (nur gekürzt/nicht). Standard: Warnung; mit Repository-Variable IIS_REQUIRE_WEBSOCKETS=true schlägt der Schritt fehl.
+          # Keine Änderung an Cloudflare/Konfiguration; reine Prüfung. Der Long-Polling-Fallback der Anwendung bleibt unverändert.
+          $ErrorActionPreference = "Stop"
+          $problems = New-Object System.Collections.Generic.List[string]
+
+          function Test-BlazorWebSocket([string]$root, [string]$hostHeader, [string]$label) {
+            $headers = @{}
+            if (-not [string]::IsNullOrWhiteSpace($hostHeader)) { $headers["Host"] = $hostHeader }
+            try {
+              $r = Invoke-WebRequest -Uri "$root/_blazor/negotiate?negotiateVersion=1" -Method Post -Headers $headers -UseBasicParsing -TimeoutSec 30
+              $n = $r.Content | ConvertFrom-Json
+            } catch { return "$label`: Negotiate fehlgeschlagen ($($_.Exception.Message))" }
+            $transports = @($n.availableTransports | ForEach-Object { $_.transport })
+            Write-Host "$label`: availableTransports = $($transports -join ', ')"
+            if ($transports -notcontains "WebSockets") { return "$label`: Negotiate bietet WebSockets nicht an (nur $($transports -join ', '))" }
+            $wsUri = [Uri]($root -replace '^http', 'ws')
+            $ub = [System.UriBuilder]::new($wsUri); $ub.Path = "/_blazor"; $ub.Query = "id=" + [Uri]::EscapeDataString([string]$n.connectionToken)
+            $ws = [System.Net.WebSockets.ClientWebSocket]::new()
+            if (-not [string]::IsNullOrWhiteSpace($hostHeader)) { try { $ws.Options.SetRequestHeader("Host", $hostHeader) } catch { } }
+            $cts = [System.Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds(20))
+            try {
+              $null = $ws.ConnectAsync($ub.Uri, $cts.Token).GetAwaiter().GetResult()
+              Write-Host "$label`: WebSocket-Handshake erfolgreich (State=$($ws.State))"
+              try { $null = $ws.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure, "check", [Threading.CancellationToken]::None).GetAwaiter().GetResult() } catch { }
+              return $null
+            } catch { return "$label`: WebSocket-Handshake fehlgeschlagen ($($_.Exception.Message))" }
+            finally { $ws.Dispose(); $cts.Dispose() }
+          }
+
+          # A: Feature
+          if (Get-Command Get-WindowsFeature -ErrorAction SilentlyContinue) {
+            $f = Get-WindowsFeature -Name Web-WebSockets
+            Write-Host "A Web-WebSockets: $($f.InstallState)"
+            if ($f.InstallState -ne "Installed") { $problems.Add("Feature Web-WebSockets ist nicht installiert ($($f.InstallState))") }
+          } else { Write-Host "A Web-WebSockets: nicht prüfbar (kein Get-WindowsFeature)" }
+
+          # B-D: lokale Bindung (Origin)
+          $baseUri = [Uri]$env:IIS_BINDING_URL
+          $port = if ([string]::IsNullOrWhiteSpace($env:IIS_PORT)) { $baseUri.Port } else { [int]$env:IIS_PORT }
+          $b = [System.UriBuilder]::new($baseUri); $b.Port = $port; $b.Query = ""; $b.Path = ""
+          $origin = Test-BlazorWebSocket $b.Uri.AbsoluteUri.TrimEnd('/') $env:IIS_HOST_HEADER "Origin"
+          if ($origin) { $problems.Add($origin) }
+
+          # Öffentlicher Pfad (z. B. Cloudflare), nur wenn konfiguriert: trennt Origin- und Proxy-Pfad
+          if (-not [string]::IsNullOrWhiteSpace($env:IIS_PUBLIC_URL)) {
+            $pub = Test-BlazorWebSocket $env:IIS_PUBLIC_URL.TrimEnd('/') "" "Öffentlich"
+            if ($pub) { $problems.Add($pub) }
+          } else { Write-Host "Öffentlicher Pfad: nicht geprüft (Repository-Variable IIS_PUBLIC_URL nicht gesetzt)" }
+
+          if ($problems.Count -gt 0) {
+            foreach ($p in $problems) { Write-Host "::warning::$p" }
+            if ($env:IIS_REQUIRE_WEBSOCKETS -eq "true") { throw "WebSocket-Prüfung fehlgeschlagen: $($problems -join ' | ')" }
+            Write-Host "Hinweis: Blazor funktioniert über den Long-Polling-Fallback weiter, ist aber langsamer. Mit IIS_REQUIRE_WEBSOCKETS=true wird dies zum Fehler."
+          } else { Write-Host "WebSocket-Prüfung bestanden." }
 
       - name: Verify Secure Configuration
         if: ${{ env.IIS_BINDING_URL != '' }}

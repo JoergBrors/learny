@@ -67,6 +67,8 @@ Unter GitHub → `Settings` → `Secrets and variables` → `Actions` → `Varia
 - `IIS_APP_POOL`
 - `IIS_PHYSICAL_PATH`
 - `IIS_BINDING_URL`
+- `IIS_PUBLIC_URL` (optional): öffentliche Adresse (z. B. `https://learny.brors.date`) für die WebSocket-Prüfung über Cloudflare/Proxy
+- `IIS_REQUIRE_WEBSOCKETS` (optional): `true` = fehlende WebSockets lassen das Deployment fehlschlagen (Standard: nur Warnung)
 - `IIS_PORT`
 - `IIS_HOST_HEADER`
 - `ASPNETCORE_HOSTING_BUNDLE_URL`
@@ -185,6 +187,17 @@ Der MCP-HTTP-Server ist ein **eigener Prozess** (nicht der IIS-App-Pool). Bei je
 6. **Wiederholbar:** Der Ablauf ist idempotent; ein erneuter Lauf (Tag/`workflow_dispatch`) stoppt, aktualisiert und startet wieder.
 
 **Wiederanlauf/Rollback:** Das vorherige MCP-Verzeichnis liegt im Runner-Temp (`backup-mcp\<Zeitstempel>`); bei Fehlstart den Dienst/die Aufgabe stoppen, Inhalt zurückkopieren (`robocopy <Backup> <MCP_PHYSICAL_PATH> /MIR`), `mcpsettings.json` prüfen und Dienst bzw. Aufgabe (`schtasks /Run /TN <Name>`) starten. Externe stdio-Clients werden nicht neu gestartet.
+
+## WebSockets für Blazor (IIS-Feature „Web-WebSockets“)
+
+Blazor Server braucht eine dauerhafte Verbindung. Ohne das IIS-Feature **WebSocket-Protokoll** (`Web-WebSockets`) bietet `POST /_blazor/negotiate` nur `ServerSentEvents` und `LongPolling` an; jede Interaktion und Navigation kostet dann mehrere HTTP-Roundtrips (Befund 15.11.2026: 112 Requests an `/_blazor` in 36 s, bis 4,3 s je Anfrage; siehe [docs/reviews/2026-11-15-performance-browser-pwa.md](reviews/2026-11-15-performance-browser-pwa.md)). Die Anwendung erzwingt WebSockets bewusst nicht; Long Polling bleibt als Fallback.
+
+- **Workflow:** „Ensure IIS And Deployment Prerequisites“ installiert `Web-WebSockets` nur, wenn es fehlt (idempotent, kein `-Restart`). Verlangt Windows einen Neustart, erscheint eine Warnung; der Neustart wird **nie** automatisch ausgeführt. Der Diagnoseschritt listet den Installationsstand.
+- **Prüfung nach dem Deployment** („Verify WebSocket Transport“): (A) Feature installiert, (B/C) Negotiate bietet `WebSockets` an, (D) echter WebSocket-Handshake am Hub mit dem Negotiate-Token (die Transportliste allein genügt nicht). Optionale Repository-Variable `IIS_PUBLIC_URL` (z. B. `https://learny.brors.date`) prüft zusätzlich den öffentlichen Pfad (Cloudflare); so lassen sich Origin- und Proxy-Pfad trennen. Standard: Warnung, mit `IIS_REQUIRE_WEBSOCKETS=true` schlägt der Schritt fehl. Das Token wird nicht ausgegeben.
+- **Cloudflare:** WebSockets müssen für die Zone erlaubt sein (Netzwerk → WebSockets); der Workflow ändert Cloudflare nicht.
+- **Manuell:** `Install-WindowsFeature Web-WebSockets`, danach Anwendungspool recyceln; Kontrolle: `curl -s -X POST "https://<host>/_blazor/negotiate?negotiateVersion=1" -H "Content-Length: 0"` → `availableTransports` enthält `WebSockets`.
+- **Rollback:** `Uninstall-WindowsFeature Web-WebSockets` (Anwendungspool recyceln); Blazor fällt automatisch auf Long Polling zurück, nichts an der Anwendung ist zu ändern.
+- **Auswirkung:** Navigation und PWA-Wiederaufnahme laufen über eine Verbindung statt vieler Requests; die Wiederverbindungslogik (`ReconnectModal.razor.js`) bleibt unverändert.
 
 ## Tag-basiertes Auslösen
 

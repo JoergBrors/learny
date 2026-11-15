@@ -25,6 +25,15 @@ public static class WorkflowStructureTests
         check(verify.Contains("-le 12") && verify.Contains("Start-Sleep -Seconds 5") && verify.Contains("throw \"MCP-Health-Check fehlgeschlagen (12 Versuche)"), "W7 Healthcheck mit Wiederholungen; dauerhafter Fehler lässt das Deployment fehlschlagen (kein stiller Erfolg)");
         check(!install.Contains("MCP_API_KEY") && !configure.Contains("TOKEN_KEY") && !verify.Contains("Write-Host $env:DEPLOY_"), "W8 keine Geheimnisse in den MCP-Schritten des Workflows");
         check(install.IndexOf("Expand-Archive", StringComparison.Ordinal) < install.IndexOf("Stop-Service", StringComparison.Ordinal) && install.Contains("mcpsettings.json"), "W9 Konfiguration (mcpsettings.json) wird weiterhin gesichert und wiederhergestellt");
+        // WebSocket-Protokoll (Betrieb): Feature idempotent installieren, nie Neustart, Verifikation mit echtem Handshake
+        var ensure = Step(text, "Ensure IIS And Deployment Prerequisites");
+        var ws = Step(text, "Verify WebSocket Transport");
+        check(ensure.Contains("Get-WindowsFeature -Name Web-WebSockets") && ensure.Contains("InstallState -eq \"Installed\"") && ensure.Contains("Install-WindowsFeature -Name Web-WebSockets") && !ensure.Contains("-Restart"),
+            "W10 Web-WebSockets wird nur bei fehlender Installation installiert (idempotent), nie mit automatischem Neustart; erforderlicher Neustart wird gemeldet");
+        check(ws.Contains("/_blazor/negotiate") && ws.Contains("ClientWebSocket") && ws.Contains("ConnectAsync") && ws.Contains("connectionToken") && ws.Contains("IIS_REQUIRE_WEBSOCKETS"),
+            "W11 Verifikation prüft Negotiate und einen echten WebSocket-Handshake (nicht nur die Transportliste); Schärfe über IIS_REQUIRE_WEBSOCKETS");
+        check(ws.IndexOf("Verify WebSocket Transport", StringComparison.Ordinal) > 0 && text.IndexOf("- name: Verify Deployment", StringComparison.Ordinal) < text.IndexOf("- name: Verify WebSocket Transport", StringComparison.Ordinal) && !ws.Contains("connectionToken)\"") && !ws.Contains("Write-Host $n.connectionToken"),
+            "W12 WebSocket-Prüfung läuft nach dem Health-Check und gibt das Negotiate-Token nie aus");
     }
 
     private static string Step(string text, string name)

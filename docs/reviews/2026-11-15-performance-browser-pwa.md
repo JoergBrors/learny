@@ -1,0 +1,70 @@
+# Performancebericht Browser/PWA (15.11.2026)
+
+Stand: Zwischenbericht. Untersucht wurde der Auftrag „Browser- und PWA-Performance“. Die Ursache der langsamen Navigation ist belegt (Transport), die Maßnahme dafür ist Infrastruktur und noch nicht umgesetzt. Die Optimierung von Rendering/Layout ist **nicht** begonnen, weil die Messung dort keinen Engpass zeigt (siehe unten).
+
+## Ausgangswerte (Trace vom 15.11.2026, Angabe des Auftrags)
+
+120 Requests, davon 112 an `/_blazor` (47 GET, 65 POST); längster `/_blazor`-GET 4.335 ms; `GET /dashboard` 2.057 ms; längster Main-Thread-Task 133,6 ms; 7 Tasks > 50 ms; Layout bis 47,3 ms; langsamste Interaktion 333 ms; keine Service-Worker-Requests.
+
+## Bestätigte Ursache: Produktion bietet kein WebSocket an
+
+Nachweis am 15.11.2026 gegen `https://learny.brors.date`:
+
+```
+POST /_blazor/negotiate?negotiateVersion=1
+→ availableTransports: ServerSentEvents, LongPolling      (kein WebSockets)
+```
+
+Die lokale Entwicklungsinstanz (Kestrel) bietet `WebSockets, ServerSentEvents, LongPolling` an. Die Antwort kommt von der Anwendung selbst; der Server lässt WebSockets also nicht zu. Das erklärt das Muster des Traces (viele `/_blazor`-GET/POST statt einer dauerhaften Verbindung): Jede Interaktion und jede Navigation kostet mehrere HTTP-Roundtrips über Cloudflare, dazu Wartezeiten der Long-Poll-Anfragen (bis 4,3 s).
+
+Wahrscheinliche Ursache (im Repository belegt, am Server **nicht** geprüft): `.github/workflows/deploy-iis-on-tag.yml` installiert nur `Web-Server, Web-Mgmt-Tools, Web-Scripting-Tools` (und `Web-Filtering`), nicht das IIS-Feature **`Web-WebSockets`** („WebSocket-Protokoll“); `web.config` enthält keine WebSocket-Angabe. Ob das Feature auf dem Server tatsächlich fehlt und ob Cloudflare WebSockets für die Domain zulässt (Standard: ja), ist offen.
+
+Ein erzwungener WebSocket-Transport im Code ist **keine** Lösung (ohne Serverfeature bricht die Verbindung ab) und wurde nicht eingebaut.
+
+### Maßnahme (Workflow vorbereitet, nicht committet/deployt)
+
+1. Auf dem IIS-Server `Install-WindowsFeature Web-WebSockets` (kein Neustart nötig, Anwendungspool recyceln).
+2. Im Deploy-Workflow `Web-WebSockets` zu den installierten Features ergänzen und im Schritt „Verify“ den Transport prüfen (`negotiate` muss `WebSockets` enthalten).
+3. In Cloudflare prüfen: Netzwerk → WebSockets = an.
+4. Danach erneut messen (Reproduktion unten) und `availableTransports` kontrollieren.
+
+## Lokale Messung (Entwicklungsinstanz, Desktop 1300×1000, Median aus 3 Läufen)
+
+Skript: `tests/browser/perf-baseline.mjs` (25 Module à 12 Karten, 4 Themen; kalt = harte Navigation, warm = Menüklick in laufender Sitzung).
+
+| Seite | kalt ms | warm ms | Tasks > 50 ms | max. Task ms | CLS | DOM-Knoten |
+|---|---|---|---|---|---|---|
+| Dashboard | 1331 | 66 | 1 | 88 | 0 | 202 |
+| Home (Module) | 1338 | 62 | 0 | 0 | 0 | 550 |
+| Themen | 1327 | 61 | 0 | 0 | 0,001 | 156 |
+| Abschlüsse | 1329 | 62 | 0 | 0 | 0,001 | 141 |
+
+(„kalt“ enthält ca. 1,2 s feste Wartezeit des Skripts.) Lokal ist die Oberfläche schnell: Warmnavigation ≈ 60 ms, praktisch keine langen Tasks, kein relevanter Layout Shift, kleine DOM-Bäume. **Rendering, Layout und Komponentenbäume sind nach dieser Messung nicht der Engpass**; die im Trace gesehenen 133 ms/47 ms/4.825 dirty objects wurden lokal nicht reproduziert. Daher wurden dort bewusst keine Änderungen (ShouldRender, Virtualisierung, `@key`) vorgenommen — Messung vor Optimierung.
+
+## Nicht gemessen / offen
+
+- **Browser vs. installierte PWA, Suspend/Resume:** nicht durchführbar in dieser Umgebung (kein iOS/Android-Gerät, headless Chrome). Vorhandene Wiederverbindungslogik (`ReconnectModal.razor.js`) unverändert.
+- **Produktionsmessung:** ohne Anmeldung (OIDC) nicht möglich; Trace-Werte stammen aus dem Auftrag. Ob Server, Datenbank oder Netzwerk die 2 s von `GET /dashboard` verursachen, ist offen. Verdacht (ungeprüft): Vorrendern führt `OnInitializedAsync` je Seite doppelt aus (Prerender + Sitzung); Änderung betrifft alle Seiten und braucht eine eigene Entscheidung.
+- **Service Worker/Cache:** Es existiert keiner (nur `manifest.webmanifest`, siehe `docs/architecture.md`). Statische Dateien sind über `MapStaticAssets`/`@Assets` fingerprinted; eine neue Cache-Schicht wurde nicht eingeführt (Auftrag verbietet unkontrolliertes Cachen von HTML/API; Nutzen ohne Messung unbelegt).
+- **Bilder/Avatare:** nicht untersucht.
+- **Development-Diagnostik (Punkt 8):** nicht umgesetzt.
+
+## Bereits umgesetzt (vor diesem Auftrag, v0.1.32)
+
+`wwwroot/pwa.js`: Ladebalken beim Menüklick, Notausgang (harte Navigation nach 4 s ohne Adresswechsel), Herunterziehen zum Aktualisieren in der installierten App. Gegen langsame Long-Polling-Navigation ist der Notausgang nur ein Pflaster.
+
+## Reproduktion
+
+```bash
+AUTH_MODE=dev SQLITE_PATH=/tmp/perf.db ASPNETCORE_ENVIRONMENT=Development ASPNETCORE_URLS=http://localhost:5199 dotnet run --project src/LearnCards.Web --no-launch-profile
+LEARNY_BROWSER_TEST=1 [PERF_RUNS=3] [PERF_MOBILE=1] node tests/browser/perf-baseline.mjs
+# Produktion: Transport prüfen (ohne Anmeldung möglich)
+curl -s -X POST "https://<host>/_blazor/negotiate?negotiateVersion=1" -H "Content-Length: 0"   # availableTransports muss WebSockets enthalten
+```
+
+## Nachtrag: Workflow für Web-WebSockets (vorbereitet)
+
+- `.github/workflows/deploy-iis-on-tag.yml`: Diagnose listet `Web-WebSockets`; „Ensure IIS…“ installiert es idempotent ohne Neustart (Neustartbedarf wird als Warnung gemeldet); neuer Schritt „Verify WebSocket Transport“ (Feature, Negotiate, echter WebSocket-Handshake; optional öffentlicher Pfad über `IIS_PUBLIC_URL`; strikt mit `IIS_REQUIRE_WEBSOCKETS=true`). Details: [iis-deployment.md](../iis-deployment.md).
+- **Lokal geprüft** (Prüfskript des Schritts mit `pwsh` gegen die Dev-Instanz): Origin: Transporte `WebSockets, ServerSentEvents, LongPolling`, Handshake erfolgreich (State=Open), Ergebnis „bestanden“. Gegen `https://learny.brors.date` als öffentlicher Pfad: Negotiate bietet WebSockets nicht an → Warnung (mit `IIS_REQUIRE_WEBSOCKETS=true` Fehler) — der Schritt erkennt den Produktionsbefund also.
+- **Nicht lokal prüfbar:** der Installationsteil (`Install-WindowsFeature`, Windows-Server-Runner), der Origin-Handshake gegen IIS, Cloudflare-Pfad, Browser-Nachmessung (Transport, `/_blazor`-Anzahl, Navigation) und PWA/Suspend-Resume. Diese Punkte bleiben nach freigegebenem Deployment zu prüfen: `perf-baseline.mjs` gegen die Produktion ist ohne Anmeldung nicht möglich; stattdessen Chrome-Trace wie im Ausgangsbefund wiederholen und `availableTransports` sowie die Anzahl der `/_blazor`-Requests vergleichen.
+- **Risiken:** Ein WebSocket-Handshake am Origin beweist nicht, dass der öffentliche Pfad (Cloudflare) ihn durchlässt — daher `IIS_PUBLIC_URL`. `Install-WindowsFeature` braucht Administratorrechte des Runners; auf einem Client-Betriebssystem ist es nicht verfügbar (Warnung statt Abbruch).
