@@ -66,6 +66,7 @@ Referenz dafür, *wie das System funktioniert und warum* — für Menschen und f
 | [0056](0056-ki-generierte-avatarbilder.md) | KI-generierte Avatarbilder (echte Bilddateien) statt nur parametrischer SVG-Figuren | Akzeptiert und umgesetzt |
 | [0057](0057-persoenliche-avatar-galerie-und-austauschformat.md) | Persönliche Avatar-Galerie, Austauschformat und passwortgeschützter ZIP-Export | Akzeptiert und umgesetzt |
 | [0058](0058-echte-stimmungsbilder-fuer-ki-avatare.md) | Echte Stimmungsbilder für KI-Comic-Avatare (Figuren mit fünf Varianten) | Akzeptiert und umgesetzt |
+| [0059](0059-co-autoren-duerfen-modulversionen-veroeffentlichen.md) | Co-Autoren dürfen Modulversionen veröffentlichen | Akzeptiert und umgesetzt (ändert 0053) |
 | [0025](0025-sichere-speicherung-von-mcp-tokens.md) | Sichere Speicherung von MCP-Tokens, Codes und OAuth-Clients (Schutz bei Datenbankzugriff) | Akzeptiert und umgesetzt |
 
 Prüfberichte, die Anlass für ADRs sind, liegen unter [docs/reviews/](../reviews/) (aktuell: [Mehrbenutzer-Prüfbericht](../reviews/2026-10-24-mehrbenutzer-pruefbericht.md)).

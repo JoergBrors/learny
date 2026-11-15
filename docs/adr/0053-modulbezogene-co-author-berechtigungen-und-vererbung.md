@@ -1,6 +1,7 @@
 # 0053 — Modulbezogene Co-Author-Berechtigungen und Vererbung aus Themen
 
 - **Status:** Angenommen und umgesetzt (2026-11-14)
+- **Teilweise geändert durch:** [0059](0059-co-autoren-duerfen-modulversionen-veroeffentlichen.md) (Co-Autoren dürfen Modulversionen veröffentlichen; Themenveröffentlichung, Freigabe, Zuweisung bleiben gesperrt).
 - **Ergänzt durch:** [0054](0054-lern-und-pruefungsvorschau-fuer-content-co-autoren.md) (Modulvorschau folgt `GetModuleEditAccessAsync`, inkl. Mehrfachzuordnungs-Schutz und Entzug; direkte Modulrechte gewähren keine Themenvorschau).
 - **Datum:** 2026-11-14
 - **Ergänzt:** [0052](0052-themenbezogene-co-author-berechtigungen.md) (Themen-Co-Autoren); verallgemeinert dessen Regel „Bearbeitungskontext für Module“.
@@ -65,7 +66,7 @@ Veröffentlichung sind eine andere Berechtigungsklasse (ADR 0015, 0029, 0030).
 - Schreibrechte an fremden Modulen **nur** über `GetModuleEditAccessAsync` (bzw. `ResolveModuleEditOwnerAsync`); nie aus UI-Zustand, Claims oder gemerkten Rollen. Neue Schreibpfade im Modul-Editor
   rufen vorher `StillAllowedAsync`.
 - Abgeleitete Rechte nie in `module_coauthors` speichern; Themenfreigabe erzeugt keine Modulfreigabe.
-- Co-Author gewährt nie Lernfreigabe, Zuweisung, Veröffentlichung, Löschen/Umbenennen, Eigentumsübertragung oder Zugriff auf andere Module/Themen des Eigentümers.
+- Co-Author gewährt nie Lernfreigabe, Zuweisung, Veröffentlichung von Themen oder globalen Modulen (Modulversionen seit ADR 0059 erlaubt), Löschen/Umbenennen, Eigentumsübertragung oder Zugriff auf andere Module/Themen des Eigentümers.
 - MCP-Tokens verwalten keine Co-Autoren; Karten-REST/MCP bleiben eigentümergebunden.
 - Mitziehen: `Schema.cs`, `docs/database-schema.md`, `docs/architecture.md`, `AGENTS.md`, Hilfeseite, README, `ModuleCoAuthorTests.cs`.
 
