@@ -102,3 +102,72 @@ Plausibilitätsprüfung (Annahme, nicht gemessen): Bei einem Datenbankserver mit
 **Reproduktion:** `LEARNY_BROWSER_TEST=1 PERF_RUNS=5 node tests/browser/perf-server.mjs` gegen eine Dev-Instanz (Development liefert `Server-Timing`).
 
 **Release:** v0.1.34 (nur IIS, per Tag; kein GitHub-Release, daher kein Docker-Build). Tests vor dem Release: Build ohne Fehler, Integrationstests 2474/2474 (SQLite im Prozess + PostgreSQL 16). Ausstehend: PostgreSQL-Laufzeitmessung, Produktionsmessung und PWA-Messung (mobil); `/topics` braucht weiter 384 Abfragen (12 Themen).
+
+## Nachtrag 3: Lighthouse (Browser/PWA), Stand nach v0.1.34
+
+**Ausgangsbericht (Auftrag, 15.11.2026, mobile Simulation, Produktion, `/topics/{id}`):** Performance 89, Accessibility 96, Best Practices 100, SEO 92; FCP 1,3 s, LCP 2,0 s, TBT 410 ms, CLS 0, Serverantwort 150 ms; Hinweise: Kontrast, 3 Namensabweichungen, fehlende Meta-Beschreibung, CSS/JS-Minifizierung, Cache-Lebensdauern, renderblockierendes CSS, bfcache. Lighthouse warnt selbst, dass Browser-Erweiterungen die Messung verfälscht haben; die 561 KiB „ungenutztes JavaScript“ und die TBT von 410 ms sind deshalb nicht Learny zuzurechnen (ohne den Originalbericht nicht aufschlüsselbar).
+
+### Messmethode (reproduzierbar)
+Lighthouse 13.6.0 (CLI, außerhalb des Repositories installiert), Chrome ohne Erweiterungen, Dev-Instanz (Wegwerf-DB), Anmeldung per Dev-Login **im selben Chrome** (`tests/browser/lighthouse.mjs`, 5 Läufe je Profil, Median). **Wichtig:** Ein Cookie per `--extra-headers` erreicht den WebSocket nicht; der Circuit endet dann mit `UnauthorizedAccessException` (Konsolenfehler, Best Practices 96) — ein reines Messartefakt, kein Produktfehler. Einschränkung: Development liefert die Dateien **unkomprimiert** (CSS 83 KB, `blazor.web.js` 200 KB; Produktion: 13,8 KB bzw. 47 KB Brotli) — absolute LCP-Werte sind lokal höher als in Produktion; verglichen werden Vorher/Nachher unter gleichen Bedingungen.
+
+### Bereinigte Baseline (vor den Änderungen, `/topics/{id}`, 5 Läufe, Median)
+| | Mobile | Desktop |
+|---|---|---|
+| Performance | 92 (88–92) | 100 |
+| Accessibility | 100 (diese Seite; Seitenscan siehe unten) | 100 |
+| Best Practices | 100 | 100 |
+| SEO | 91 | 91 |
+| FCP / LCP | 1,80 s / 3,16 s | 0,32 s / 0,65 s |
+| TBT / CLS | 0 ms / 0 | 0 / 0 |
+| lange Tasks | 2–3 (88–174 ms, Dokumentparsen/„unattributable“) | 0 |
+
+**Seitenscan Barrierefreiheit** (8 Seiten, Hell und Dunkel, vor den Änderungen): Dunkelmodus 92–97 (weiße Schrift auf `#8B5CF6` = 4,23:1 bei Primärbuttons, aktiven Chips, Pills); Hellmodus: `#2E9E6B`/`#C97B2D` auf Weiß 3,3:1 (Check/Wiederholen, Statistik), Badges 2,9–3:1; `aria-prohibited-attr` (Fortschrittsbalken ohne Rolle), `aria-required-children` (Archiv-Checkbox in der Tablist), `select-name` (Profil), `target-size` (13-px-Checkbox, kleine Link-Badges), Namensabweichungen.
+
+### Bestätigte Ursachen und Maßnahmen
+| Befund | Ursache | Änderung |
+|---|---|---|
+| SEO 91 | keine Meta-Beschreibung | statische, allgemeine Beschreibung in `App.razor` (keine Seiteninhalte, nichts Privates) |
+| 3 Namensabweichungen (Sidebar) | `aria-label` ohne sichtbaren Text („Start“, „Lernen“, „Mehr“) | `MainLayout.razor`: Label beginnt mit dem sichtbaren Text („Start – Mein Dashboard“ …) |
+| Darstellungs-Button (Desktop) | `aria-label` ohne „Auto/Hell/Dunkel“ | `app.js`: sichtbarer Kurztext im Namen |
+| Kartenbuttons (Zurück, Weiter, Quiz, Chat, Check, Wiederholen) | Namen ohne sichtbaren Text | `FlashCardView.razor`: Namen enthalten den sichtbaren Text |
+| Kontrast dunkel | `--brand-500` (#8B5CF6) als Fläche mit weißem Text | Primärbutton/Chip/Pill im Dunkelmodus `#7C3AED` (5,7:1), Hover `#6D28D9` |
+| Kontrast hell | `--ok`/`--warn` als Textfarbe | neue Variablen `--ok-strong` `#267D56`, `--warn-strong` `#94550E` (>= 4,5:1 auch auf getöntem Grund) für Check/Wiederholen, Statistik, Badges |
+| `aria-prohibited-attr` | `aria-label` an `<span>` ohne Rolle | `role="img"` am Fortschrittsbalken (Dashboard) |
+| `aria-required-children` | Checkbox „Archivierte anzeigen“ in der Tablist | außerhalb der Tablist (`Topics.razor`) |
+| `select-name` | Select ohne Name | `aria-label` (Profil, Token-Gültigkeit) |
+| `target-size` | 13-px-Checkbox, kleine Link-Badges | Checkbox 24 px, `a.badge` Mindesthöhe 24 px |
+
+### Ergebnis nach den Änderungen (`/topics/{id}`, 5 Läufe, Median)
+| | Mobile | Desktop |
+|---|---|---|
+| Performance | 92 | 100 |
+| Accessibility | 100 | 100 |
+| Best Practices | 100 | 100 |
+| SEO | **100** (vorher 91) | **100** (vorher 91) |
+| FCP / LCP | 1,80 s / 3,16 s | 0,32 s / 0,65 s |
+| TBT / CLS | 0 / 0 | 0 / 0 |
+| lange Tasks | 3 | 0 |
+
+**Vollständiger Seitenscan nach allen Änderungen** (Dashboard, Themenliste, Modulliste, Abschlüsse, Hilfe, Profil, Themendetail, Modul; je Hell und Dunkel; Desktop-Preset, 1 Lauf je Seite): Accessibility **100** und SEO **100** auf allen 16 Messungen. Übrig bleibt je 1 Treffer „label-content-name-mismatch“ auf Themenliste, Modulliste und Modulseite (die unten genannten Sammelelemente).
+Bewusste Abweichung: Listenkarten (`role="link"`, Themenkarte) und `flip-scene` behalten ihr beschreibendes `aria-label`; der sichtbare Text ist der gesamte Karteninhalt, ein Name aus dem Inhalt wäre für Screenreader schlechter (WCAG 2.5.3 bei diesen Sammelelementen nicht erfüllt, dokumentiert).
+Tests: `tests/browser/a11y-seo.mjs` (9 Prüfungen: Meta-Beschreibung, Sidebar-/Darstellungs-/Kartenbutton-Namen, Kontrast Hell/Dunkel); bestehende Browsertests `pwa-nav`, `co-author-topic`, `module-list-updates`, `module-collaboration` bestehen; Integrationstests 2248/2248 (SQLite).
+
+### Nicht verändert / Begründung
+- **Lange Tasks / TBT:** lokal TBT 0 ms, 2–3 Tasks (Dokumentparsen, „unattributable“); die 410 ms des Ausgangsberichts sind lokal nicht reproduzierbar und plausibel von Erweiterungen/Gerätedrosselung beeinflusst (nicht belegbar). Framework-Code (`blazor.web.js`) nicht angefasst.
+- **JavaScript „ungenutzt“:** lokal nur `blazor.web.js` (Framework, ≈ 112 KiB Schätzung); eigene Skripte < 7 KB je Datei. Keine Änderung.
+- **CSS-Minifizierung / ungenutztes CSS:** Produktion liefert `app.*.css` als Brotli mit 13,8 KB (`max-age=31536000, immutable`); die Lighthouse-Schätzung (14 KiB) gilt für die unkomprimierte Entwicklungsauslieferung. Eine Minifizierung ohne zusätzliche Pakete bräuchte einen eigenen Build-Schritt — Nutzen minimal, nicht umgesetzt. Kein CSS entfernt (Dark Mode, Breakpoints, dynamische Komponenten nicht automatisch belegbar).
+- **Cache-Lebensdauern (Produktion geprüft):** fingerprintete Dateien `max-age=31536000, immutable` + Brotli (optimal); `_framework/blazor.web.js` `max-age=14400`, Markenbilder `max-age=14400, must-revalidate`, Manifest `no-cache` — nicht fingerprinted, längere Lebensdauer würde Updates verzögern, daher unverändert; HTML `no-cache, no-store` (authentifiziert, richtig).
+- **Bilder/Avatare:** nicht verändert; größte Markenbilder 17–52 KB, Avatare laufen über den Image-Proxy (ADR 0018); keine Cache-Änderung an privaten Bildern.
+- **PWA:** weiterhin nur Manifest + Wiederverbindungslogik, **kein Service Worker, keine Cache-Strategie** (HTTP-Cache + fingerprintete Assets sorgen dafür, dass nach Deployments neue CSS/JS-Dateien geladen werden); echte installierte PWA/Suspend-Resume nicht geprüft (kein Gerät).
+- **Back/Forward-Cache:** zwei Ursachen, beide nicht beseitigbar: `Cache-Control: no-store` am (authentifizierten) HTML-Dokument und die aktive WebSocket-Verbindung (Blazor Server). Nicht erzwungen.
+- **Navigation:** Menüwechsel unverändert schnell (warm ≈ 61 ms, `perf-baseline.mjs`, 5 Läufe); v0.1.34-Optimierungen erhalten; weitere N+1-Abfragen (`/topics` 384, `/` 398) nur dokumentiert.
+- **LCP mobil 3,2 s:** LCP-Element ist ein Text, der vom renderblockierenden CSS (unkomprimiert 83 KB, simuliertes langsames 4G) abhängt; Server-TTFB 10 ms. Produktion liefert das CSS mit 13,8 KB; Ziel < 2,5 s lokal nicht erreichbar, in Produktion laut Ausgangsbericht (2,0 s) bereits erfüllt. Performance mobil 92 (Ziel >= 90 erreicht, aber nicht durch diese Änderungen verbessert); TBT-Ziel (< 200 ms) lokal erfüllt (0).
+- **Folgeaufträge (Empfehlung):** Produktions-Lighthouse ohne Erweiterungen (Navigationsmodus mit Anmeldung), kritisches CSS/Preload prüfen, `/topics` und Modulliste (N+1), Echtgerät-PWA-Test.
+
+### Abschlussprüfung (Releasebereitschaft, ohne Version)
+- **Zusätzlich gefunden und behoben:** Die gedrückten Zustände „Check“/„Wiederholen“ (`btn-known-active`, `btn-review-active`) hatten im Dunkelmodus weiße Schrift auf hellem Grün/Orange (2,3:1) — Lighthouse prüft diese Zustände nicht. Dunkelmodus jetzt dunkle Schrift (7,3:1), Hellmodus 5,1/5,9:1; abgedeckt durch `a11y-seo.mjs` (11 Prüfungen).
+- **Lighthouse final** (Dev-Instanz, Chrome ohne Erweiterungen, angemeldet, `/topics/{id}`, 5 Läufe, Median): Mobile Performance 92 (74–99), Accessibility 100, Best Practices 100, SEO 100, FCP 1,81 s, LCP 3,16 s, TBT 0 ms, CLS 0, lange Tasks 3; Desktop 100/100/100/100, FCP 0,32 s, LCP 0,65 s, TBT 0, CLS 0. **Ausreißer:** In 1 von 5 mobilen Läufen TBT 734 ms (Performance 74), Ursache nicht geklärt (Lauf 4, kein Kaltstart; vermutlich Last auf dem Messrechner, nicht belegt); die übrigen Läufe 90–99. Das bereinigte Ausgangsniveau (Median 92) ist erreicht, keine Regression im Median.
+- **Meta-Beschreibung** korrekt im HTML ausgegeben (`<meta name="description">`, allgemeiner Text, keine Seiteninhalte).
+- **Tests:** Build ohne Fehler; Integrationstests 2248/2248 (SQLite); Browsertests `a11y-seo` 11/11, `pwa-nav` 5/5, `co-author-topic` 26/26, `module-list-updates` 28/28, `module-collaboration` 20/20.
+- **Semantik:** Beschreibende Labels der Listenkarten und der Flip-Karte bleiben bewusst erhalten (siehe oben).
+- **Offen / nicht geprüft:** installierte Produktions-PWA und Suspend/Resume auf einem Gerät; kein Service Worker (HTTP-Cache und fingerprintete Assets, keine eigene Cache-Strategie); Produktions-Lighthouse ohne Erweiterungen; N+1-Abfragen auf `/topics` und Modulliste; mobiler LCP lokal über 2,5 s (Dev unkomprimiert).

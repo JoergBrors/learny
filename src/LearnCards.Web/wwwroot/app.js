@@ -48,11 +48,12 @@ window.lcDash = { hour: function () { return new Date().getHours(); } };
 (function () {
     var LABEL = { system: ['🖥️', 'Auto', 'System (automatisch, folgt dem Gerät)'], light: ['☀️', 'Hell', 'Hell'], dark: ['🌙', 'Dunkel', 'Dunkel'] };
     var ORDER = ['system', 'light', 'dark'];
+    // Zugänglicher Name der Darstellungs-Schaltfläche enthält den sichtbaren Kurztext (Auto/Hell/Dunkel), WCAG 2.5.3
     function syncTheme() {
         var m = window.lcTheme.mode(), l = LABEL[m] || LABEL.system, next = LABEL[ORDER[(ORDER.indexOf(m) + 1) % 3]][2];
         document.querySelectorAll('[data-theme-icon]').forEach(function (e) { e.textContent = l[0]; });
         document.querySelectorAll('[data-theme-short]').forEach(function (e) { e.textContent = l[1]; });
-        document.querySelectorAll('button[data-shell="theme"]').forEach(function (b) { var t = 'Darstellung: ' + l[2] + '. Klicken für: ' + next; b.title = t; b.setAttribute('aria-label', t); });
+        document.querySelectorAll('button[data-shell="theme"]').forEach(function (b) { var t = 'Darstellung ' + l[1] + ': ' + l[2] + '. Klicken für: ' + next; b.title = t; b.setAttribute('aria-label', t); });
         return l[2];
     }
     function closeAll(except) {

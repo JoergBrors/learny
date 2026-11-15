@@ -131,25 +131,25 @@
     @* Aktionsleiste *@
     <div class="card-actions">
         <div class="nav-group">
-            <button class="btn btn-ghost btn-touch" @onclick="OnPrevClick" disabled="@(Index == 0)" aria-label="Vorherige Karte">← Zurück</button>
+            <button class="btn btn-ghost btn-touch" @onclick="OnPrevClick" disabled="@(Index == 0)" aria-label="Zurück zur vorherigen Karte">← Zurück</button>
             <button class="btn btn-primary btn-touch" @onclick="Flip" aria-pressed="@(_flipped ? "true" : "false")" aria-label="@(_flipped ? "Frage wieder anzeigen" : "Antwort anzeigen")">@(_flipped ? "Frage zeigen" : "Antwort anzeigen")</button>
-            <button class="btn btn-ghost btn-touch" @onclick="OnNextClick" disabled="@(Index >= Total - 1)" aria-label="Nächste Karte">Weiter →</button>
+            <button class="btn btn-ghost btn-touch" @onclick="OnNextClick" disabled="@(Index >= Total - 1)" aria-label="Weiter zur nächsten Karte">Weiter →</button>
         </div>
         <div class="action-group">
-            <button class="btn btn-ghost btn-sm" @onclick="() => OnPageQuizCard.InvokeAsync(Card.Id)" aria-label="Quiz zu dieser Seite starten">📝 Quiz für diese Seite</button>
-            <button class="btn btn-ghost btn-sm" @onclick="() => OnQuizCard.InvokeAsync(Card.Id)" aria-label="Quiz nur zu dieser Karte starten">🎯 Karten-Quiz</button>
+            <button class="btn btn-ghost btn-sm" @onclick="() => OnPageQuizCard.InvokeAsync(Card.Id)" aria-label="Quiz für diese Seite starten">📝 Quiz für diese Seite</button>
+            <button class="btn btn-ghost btn-sm" @onclick="() => OnQuizCard.InvokeAsync(Card.Id)" aria-label="Karten-Quiz nur zu dieser Karte starten">🎯 Karten-Quiz</button>
             @if (CanEdit)
             {
                 <a class="btn btn-ghost btn-sm" href="/module/@Card.ModuleId/edit?card=@Card.Id" aria-label="Diese Karte bearbeiten">✏ Bearbeiten</a>
             }
             @if (!PreviewMode)
             {
-                <button class="btn btn-primary btn-sm" @onclick="() => _chatOpen = !_chatOpen" aria-label="KI-Chatbot zu dieser Karte öffnen">💬 Chat</button>
+                <button class="btn btn-primary btn-sm" @onclick="() => _chatOpen = !_chatOpen" aria-label="Chat: KI-Chatbot zu dieser Karte öffnen">💬 Chat</button>
             }
             <button class="btn btn-sm @(MarkedKnown ? "btn-known-active" : "btn-known")" @onclick="() => OnMarkKnown.InvokeAsync(Card.Id)"
-                    aria-pressed="@MarkedKnown" aria-label="Als geprüft markieren">✔ Check</button>
+                    aria-pressed="@MarkedKnown" aria-label="Check: Als geprüft markieren">✔ Check</button>
             <button class="btn btn-sm @(MarkedReview ? "btn-review-active" : "btn-review")" @onclick="() => OnMarkReview.InvokeAsync(Card.Id)"
-                    aria-pressed="@MarkedReview" aria-label="Zur Wiederholung markieren">↻ Wiederholen</button>
+                    aria-pressed="@MarkedReview" aria-label="Wiederholen: Zur Wiederholung markieren">↻ Wiederholen</button>
             @if (CanEdit)
             {
                 <button class="btn btn-ghost btn-sm" @onclick="() => OnArchive.InvokeAsync(Card.Id)" aria-label="Karte archivieren">🗂 Archivieren</button>

@@ -87,7 +87,7 @@
                                 <div class="dlist-main">
                                     <strong>@n.Title</strong>
                                     <small>@(n.Kind == "topic" ? "Thema" : "Modul") · @n.Meta</small>
-                                    @if (n.Percent is int p) { <span class="bar" aria-label="@($"{p} Prozent")"><span style="width:@(p)%"></span></span> }
+                                    @if (n.Percent is int p) { <span class="bar" role="img" aria-label="@($"{p} Prozent")"><span style="width:@(p)%"></span></span> }
                                 </div>
                                 <a class="btn btn-primary btn-sm" href="@n.Url" aria-label="@($"{n.Title} fortsetzen")">Fortsetzen</a>
                             </li>

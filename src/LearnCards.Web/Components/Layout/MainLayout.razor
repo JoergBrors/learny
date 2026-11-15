@@ -17,11 +17,11 @@
                     <svg viewBox="0 0 64 64" width="30" height="30" aria-hidden="true"><rect x="6" y="10" width="52" height="44" rx="12" fill="currentColor" /><path d="M18 24h28M18 33h28M18 42h16" stroke="#fff" stroke-width="5" stroke-linecap="round" fill="none" /></svg>
                 </a>
                 <nav class="nav-list" id="main-nav">
-                    <a class="nav-ico" href="/dashboard" aria-current="@Current("dashboard")" title="Mein Dashboard" aria-label="Mein Dashboard">@Icon("home")<span class="nav-label">Start</span></a>
-                    <a class="nav-ico" href="/" aria-current="@Current("")" title="Module und Lernkarten" aria-label="Module und Lernkarten">@Icon("cube")<span class="nav-label">Lernen</span></a>
+                    <a class="nav-ico" href="/dashboard" aria-current="@Current("dashboard")" title="Mein Dashboard" aria-label="Start – Mein Dashboard">@Icon("home")<span class="nav-label">Start</span></a>
+                    <a class="nav-ico" href="/" aria-current="@Current("")" title="Module und Lernkarten" aria-label="Lernen – Module und Lernkarten">@Icon("cube")<span class="nav-label">Lernen</span></a>
                     <a class="nav-ico" href="/topics" aria-current="@Current("topics")" title="Themen" aria-label="Themen">@Icon("route")<span class="nav-label">Themen</span></a>
                     <a class="nav-ico" href="/achievements" aria-current="@Current("achievements")" title="Meine Abschlüsse und Nachweise" aria-label="Meine Abschlüsse und Nachweise">@Icon("award")<span class="nav-label">Abschlüsse</span></a>
-                    <button type="button" class="nav-ico nav-more" aria-expanded="false" aria-controls="main-nav" title="Weitere Bereiche" aria-label="Weitere Bereiche" data-shell="more">@Icon("more")<span class="nav-label">Mehr</span></button>
+                    <button type="button" class="nav-ico nav-more" aria-expanded="false" aria-controls="main-nav" title="Weitere Bereiche" aria-label="Mehr – Weitere Bereiche" data-shell="more">@Icon("more")<span class="nav-label">Mehr</span></button>
                     <div class="nav-secondary-wrap">
                         @if (context.User.IsInRole(Roles.Admin) || context.User.IsInRole(Roles.TopicAdmin))
                         {

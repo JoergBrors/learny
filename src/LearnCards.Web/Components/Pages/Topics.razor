@@ -52,11 +52,11 @@
         <button class="chip @(_tab == "assigned" ? "chip-active" : "")" role="tab" aria-selected="@(_tab == "assigned")" @onclick='() => _tab = "assigned"'>Mir zugewiesen (@_overview.Assigned.Count)</button>
         <button class="chip @(_tab == "global" ? "chip-active" : "")" role="tab" aria-selected="@(_tab == "global")" @onclick='() => _tab = "global"'>Globale Themen (@_overview.Global.Count)</button>
         <button class="chip @(_tab == "all" ? "chip-active" : "")" role="tab" aria-selected="@(_tab == "all")" @onclick='() => _tab = "all"'>Alle zugänglichen Themen (@AllAccessible.Count)</button>
-        @if (_tab == "own")
-        {
-            <label class="chip-check"><input type="checkbox" checked="@_archived" @onchange="async e => { _archived = (bool)(e.Value ?? false); await LoadAsync(); }" /> Archivierte anzeigen</label>
-        }
     </div>
+    @if (_tab == "own")
+    {
+        <label class="chip-check"><input type="checkbox" checked="@_archived" @onchange="async e => { _archived = (bool)(e.Value ?? false); await LoadAsync(); }" /> Archivierte anzeigen</label>
+    }
 
     @if (_loading)
     {
